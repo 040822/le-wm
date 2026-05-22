@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from pathlib import Path
 from stable_pretraining import data as dt
 from lightning.pytorch.callbacks import Callback
 
@@ -32,13 +33,14 @@ def get_column_normalizer(dataset, source: str, target: str):
     return dt.transforms.WrapTorchTransform(ZScoreNormalizer(mean, std), source=source, target=target)
 
 class SaveCkptCallback(Callback):
-    """Callback to save model checkpoint after each epoch using save_pretrained."""
+    """Callback to save model checkpoints without relying on unstable swm APIs."""
 
-    def __init__(self, run_name, cfg, epoch_interval: int = 1):
+    def __init__(self, run_name, cfg, epoch_interval: int = 1, output_dir=None):
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
         self.epoch_interval = epoch_interval
+        self.output_dir = Path(output_dir) if output_dir is not None else None
 
     def on_train_epoch_end(self, trainer, pl_module):
         super().on_train_epoch_end(trainer, pl_module)
@@ -51,10 +53,12 @@ class SaveCkptCallback(Callback):
                 self._save(pl_module.model, trainer.current_epoch + 1)
 
     def _save(self, model, epoch):
-        from stable_worldmodel.wm.utils import save_pretrained
-        save_pretrained(
-            model,
-            run_name=self.run_name,
-            config=self.cfg,
-            filename=f'weights_epoch_{epoch}.pt',
-        )
+        if self.output_dir is None:
+            import stable_worldmodel as swm
+            output_dir = Path(swm.data.utils.get_cache_dir(), 'checkpoints')
+        else:
+            output_dir = self.output_dir
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(model, output_dir / f'{self.run_name}_object.ckpt')
+        torch.save(model.state_dict(), output_dir / f'{self.run_name}_weights_epoch_{epoch}.pt')
