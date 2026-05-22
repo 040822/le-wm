@@ -5,7 +5,7 @@ defaults:
   - model: lewm
 
 output_model_name: lewm
-subdir: ${hydra:job.id}
+subdir: null
 
 num_workers: 6
 train_split: 0.9
