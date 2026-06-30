@@ -1,7 +1,13 @@
-"""LeWM model components."""
+"""Value-JEPA-on-LeWM model components."""
 
-from source.model.lewm.jepa import JEPA
-from source.model.lewm.modules import (
+from source.model.value_jepa.jepa import JEPA
+from source.model.value_jepa.losses import (
+    ValueLossResult,
+    expectile_loss,
+    squared_latent_distance,
+    value_td_loss,
+)
+from source.model.value_jepa.modules import (
     ARPredictor,
     Attention,
     Block,
@@ -24,4 +30,8 @@ __all__ = [
     "MLP",
     "SIGReg",
     "Transformer",
+    "ValueLossResult",
+    "expectile_loss",
+    "squared_latent_distance",
+    "value_td_loss",
 ]

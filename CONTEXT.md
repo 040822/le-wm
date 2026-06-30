@@ -31,3 +31,15 @@ _Avoid_: Prediction
 **Latent Cost**:
 The score produced by comparing predicted latent embeddings against goal latent embeddings. Lower cost means the candidate action sequence is expected to move closer to the goal.
 _Avoid_: Reward, action loss
+
+**Value-JEPA LeWM**:
+An experimental LeWM training policy that keeps the JEPA model and planner behavior unchanged while adding a ValueJEPA-style value loss during training.
+_Avoid_: ValueJEPA paper reproduction
+
+**Value Loss**:
+An expectile temporal-difference loss over latent distances to a goal embedding, used as a training regularizer for Value-JEPA LeWM.
+_Avoid_: Value head, reward model
+
+**Window Goal**:
+A goal embedding sampled from the same short training window that produced the current batch embeddings.
+_Avoid_: Evaluation goal, future-goal dataset wrapper
