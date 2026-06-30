@@ -1,0 +1,3 @@
+# Use a LeWM Policy Wrapper Around stable-pretraining
+
+LeWM now exposes a repository-owned `LeWMPolicy` under `source/policy`, but it deliberately reuses `stable_pretraining.spt.Module` for the Lightning training lifecycle. This keeps optimizer, scheduler, and logging behavior close to the original implementation while making the training entrypoint explicit for future algorithms. Evaluation loads a full `LeWMPolicy` checkpoint when available and calls `make_world_policy` to build the `stable_worldmodel` environment policy; bare JEPA checkpoints remain supported as a fallback so older experiments can still be evaluated.

@@ -1,4 +1,4 @@
-# bash scripts/download_dataset.sh
+# bash scripts/download_model.sh
 
 export http_proxy=http://10.126.126.3:7889
 export https_proxy=http://10.126.126.3:7889
@@ -11,20 +11,13 @@ export HF_ENDPOINT="https://hf-mirror.com"
 # export HF_ENDPOINT="https://huggingface.co"
 # export HF_DEBUG=1
 
-DATASET_PATH="$STABLEWM_HOME/datasets"
-mkdir -p "$DATASET_PATH" # -p 参数会在parent directory不存在时也创建parent directory
+mkdir -p "$STABLEWM_HOME/checkpoints" # -p 参数会在parent directory不存在时也创建parent directory
 
 echo "$HF_ENDPOINT"
 
 # 下载全部数据集.
-# for repo in lewm-pusht lewm-cube lewm-reacher lewm-tworooms; do
-for repo in lewm-reacher; do
+for repo in lewm-pusht lewm-cube lewm-reacher lewm-tworooms; do
+MODEL_PATH="$STABLEWM_HOME/checkpoints/quentinll/$repo"
   hf download "quentinll/$repo" \
-    --repo-type dataset \
-    --include "*.zst" \
-    --local-dir "$DATASET_PATH"
+    --local-dir "$MODEL_PATH"
 done
-
-cd "$DATASET_PATH"
-tar --zstd -xvf *.tar.zst
-zstd -d *.zst

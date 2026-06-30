@@ -2,7 +2,7 @@ defaults:
   - _self_
   - launcher: local
   - data: pusht
-  - model: lewm
+  - policy: lewm
 
 output_model_name: lewm
 subdir: null
