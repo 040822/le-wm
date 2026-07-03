@@ -57,7 +57,7 @@ flowchart TD
     PL --> SUM["loss = pred_loss + 0.09 * sigreg_loss"]
     SR --> SUM
     SUM --> OPT["AdamW 反向传播更新"]
-    OPT --> CKPT["保存 lewm_policy.ckpt<br/>lewm_object.ckpt<br/>和 weights checkpoint"]
+    OPT --> CKPT["保存到 checkpoints/<br/>lewm_policy.ckpt<br/>lewm_object.ckpt<br/>和 weights checkpoint"]
 ```
 
 训练时 LeWM 学的是 latent dynamics：给定当前若干帧的视觉 embedding 和动作 embedding，预测后续状态 embedding。训练阶段没有 CEM，也不会从模型里直接解码 action。
@@ -86,7 +86,7 @@ flowchart TD
     LOOP --> ACT["policy.get_action(world.infos)"]
     ACT --> STEP["env.step(action)"]
     STEP --> LOOP
-    LOOP --> METRIC["输出 metrics, video, 结果文件"]
+    LOOP --> METRIC["输出 metrics、eval/videos/ 视频<br/>和 eval/ 结果文件"]
 ```
 
 评测时的目标不是模型自己产生的，而是 `eval.py` 从数据集中构造的。以 TwoRoom 为例，目标是起点之后 `goal_offset_steps=25` 的 `goal_proprio`，再通过配置里的 `_set_goal_state` 写入环境。

@@ -1,14 +1,20 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import hydra
 import lightning as pl
 import stable_pretraining as spt
 import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
-from source.common.checkpoint import SaveCkptCallback
+from source.common.checkpoint import (
+    CHECKPOINTS_DIRNAME,
+    SaveCkptCallback,
+    resolve_training_resume_checkpoint,
+)
 from source.common.data import get_column_normalizer, get_img_preprocessor, load_dataset
 from source.common.logging import get_run_dir, tee_output_to_file
 
@@ -106,21 +112,33 @@ def run(cfg):
         run_name=cfg.output_model_name,
         cfg=cfg.policy,
         epoch_interval=1,
-        output_dir=run_dir,
+        output_dir=run_dir / CHECKPOINTS_DIRNAME,
+    )
+    latest_checkpoint_callback = ModelCheckpoint(
+        dirpath=run_dir / CHECKPOINTS_DIRNAME,
+        save_last=True,
+        save_top_k=0,
+        train_time_interval=timedelta(
+            minutes=float(cfg.get("checkpoint_interval_minutes", 30))
+        ),
+        enable_version_counter=False,
     )
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback],
+        callbacks=[object_dump_callback, latest_checkpoint_callback],
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,
     )
 
-    resume_ckpt = cfg.get("resume_ckpt", None)
-    legacy_ckpt_path = run_dir / f"{cfg.output_model_name}_weights.ckpt"
-    if resume_ckpt is None and legacy_ckpt_path.exists():
-        resume_ckpt = str(legacy_ckpt_path)
+    resume_ckpt = resolve_training_resume_checkpoint(
+        cfg.get("resume_ckpt", None),
+        run_dir,
+        cfg.output_model_name,
+    )
+    if resume_ckpt is not None:
+        print(f"Resuming training from checkpoint: {resume_ckpt}")
 
     trainer.fit(
         policy,

@@ -11,7 +11,7 @@ import stable_worldmodel as swm
 from omegaconf import DictConfig, OmegaConf
 
 from source.common.checkpoint import (
-    get_policy_results_path,
+    get_policy_eval_paths,
     load_policy_or_model,
 )
 from source.common.eval import (
@@ -62,11 +62,11 @@ def run(cfg: DictConfig):
     else:
         policy = swm.policy.RandomPolicy()
 
-    results_path = (
-        get_policy_results_path(policy_name, ckpt_path=ckpt_path)
-        if policy_name != "random"
-        else Path(__file__).parent
-    )
+    if policy_name != "random":
+        eval_path, video_path = get_policy_eval_paths(policy_name, ckpt_path=ckpt_path)
+    else:
+        eval_path = Path(__file__).parent / "eval"
+        video_path = eval_path / "videos"
 
     episode_len = get_episodes_length(dataset, ep_indices)
     max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1
@@ -99,7 +99,8 @@ def run(cfg: DictConfig):
 
     world.set_policy(policy)
 
-    results_path.mkdir(parents=True, exist_ok=True)
+    eval_path.mkdir(parents=True, exist_ok=True)
+    video_path.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
     metrics = evaluate_from_dataset_compat(
@@ -108,16 +109,16 @@ def run(cfg: DictConfig):
         eval_start_idx=eval_start_idx,
         eval_episodes=eval_episodes,
         cfg=cfg,
-        video_path=results_path,
+        video_path=video_path,
     )
     end_time = time.time()
 
     print(metrics)
 
-    results_path = results_path / cfg.output.filename
-    results_path.parent.mkdir(parents=True, exist_ok=True)
+    results_file = eval_path / cfg.output.filename
+    results_file.parent.mkdir(parents=True, exist_ok=True)
 
-    with results_path.open("a") as f:
+    with results_file.open("a") as f:
         f.write("\n")
 
         f.write("==== CONFIG ====\n")

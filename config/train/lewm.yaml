@@ -7,16 +7,17 @@ defaults:
 output_model_name: lewm
 subdir: null
 
-num_workers: 6
+num_workers: 2
 train_split: 0.9
 seed: 3072
 img_size: 224
 embed_dim: 192
 history_size: 3
+checkpoint_interval_minutes: 30
 
 trainer:
   max_epochs: 100
-  devices: auto
+  devices: 1
   accelerator: gpu
   precision: bf16
   gradient_clip_val: 1.0
@@ -25,7 +26,7 @@ loader:
   batch_size: 128
   num_workers: ${num_workers}
   persistent_workers: True
-  prefetch_factor: 3
+  prefetch_factor: 1
   pin_memory: True
 
 optimizer:

@@ -1,8 +1,13 @@
 from pathlib import Path
 
-import stable_worldmodel as swm
 import torch
 from lightning.pytorch.callbacks import Callback
+
+
+CHECKPOINTS_DIRNAME = "checkpoints"
+EVAL_DIRNAME = "eval"
+EVAL_VIDEOS_DIRNAME = "videos"
+LAST_CHECKPOINT_FILENAME = "last.ckpt"
 
 
 def torch_load_compat(path, map_location="cpu"):
@@ -14,28 +19,42 @@ def torch_load_compat(path, map_location="cpu"):
         return torch.load(path, map_location=map_location)
 
 
+def _get_swm_cache_dir():
+    import stable_worldmodel as swm
+
+    return swm.data.utils.get_cache_dir()
+
+
 def resolve_policy_path(policy_name, cache_dir=None):
     path = Path(policy_name)
     if not path.is_absolute():
-        path = Path(cache_dir or swm.data.utils.get_cache_dir(), path)
+        path = Path(cache_dir if cache_dir is not None else _get_swm_cache_dir(), path)
     return path
 
 
 def policy_checkpoint_candidates(policy_name, cache_dir=None):
     path = resolve_policy_path(policy_name, cache_dir=cache_dir)
-    candidates = []
+    primary_candidates = []
 
     if path.suffix == ".ckpt":
-        candidates.append(path)
+        primary_candidates.append(path)
         stem = path.with_suffix("")
+        if stem.name.endswith("_policy"):
+            stem = stem.with_name(stem.name[: -len("_policy")])
+        elif stem.name.endswith("_object"):
+            stem = stem.with_name(stem.name[: -len("_object")])
     else:
         stem = path
 
-    if not stem.name.endswith("_policy"):
-        candidates.append(stem.with_name(f"{stem.name}_policy.ckpt"))
-    if not stem.name.endswith("_object"):
-        candidates.append(stem.with_name(f"{stem.name}_object.ckpt"))
-    candidates.append(stem.with_suffix(".ckpt"))
+    primary_candidates.append(stem.with_name(f"{stem.name}_policy.ckpt"))
+    primary_candidates.append(stem.with_name(f"{stem.name}_object.ckpt"))
+    primary_candidates.append(stem.with_suffix(".ckpt"))
+
+    candidates = []
+    for candidate in primary_candidates:
+        candidates.append(candidate)
+        if candidate.parent.name != CHECKPOINTS_DIRNAME:
+            candidates.append(candidate.parent / CHECKPOINTS_DIRNAME / candidate.name)
 
     deduped = []
     for candidate in candidates:
@@ -80,8 +99,45 @@ def load_policy_or_model(policy_name, cache_dir=None):
 
 def get_policy_results_path(policy_name, ckpt_path=None, cache_dir=None):
     if ckpt_path is not None:
-        return Path(ckpt_path).parent
-    return resolve_policy_path(policy_name, cache_dir=cache_dir).parent
+        ckpt_dir = Path(ckpt_path).parent
+        if ckpt_dir.name == CHECKPOINTS_DIRNAME:
+            return ckpt_dir.parent
+        return ckpt_dir
+
+    results_path = resolve_policy_path(policy_name, cache_dir=cache_dir).parent
+    if results_path.name == CHECKPOINTS_DIRNAME:
+        return results_path.parent
+    return results_path
+
+
+def get_policy_eval_paths(policy_name, ckpt_path=None, cache_dir=None):
+    results_path = get_policy_results_path(
+        policy_name,
+        ckpt_path=ckpt_path,
+        cache_dir=cache_dir,
+    )
+    eval_path = results_path / EVAL_DIRNAME
+    return eval_path, eval_path / EVAL_VIDEOS_DIRNAME
+
+
+def training_resume_checkpoint_candidates(run_dir, output_model_name):
+    run_dir = Path(run_dir)
+    return [
+        run_dir / CHECKPOINTS_DIRNAME / LAST_CHECKPOINT_FILENAME,
+        run_dir / CHECKPOINTS_DIRNAME / f"{output_model_name}_weights.ckpt",
+        run_dir / f"{output_model_name}_weights.ckpt",
+    ]
+
+
+def resolve_training_resume_checkpoint(resume_ckpt, run_dir, output_model_name):
+    if resume_ckpt:
+        return str(resume_ckpt)
+
+    for candidate in training_resume_checkpoint_candidates(run_dir, output_model_name):
+        if candidate.exists():
+            return str(candidate)
+
+    return None
 
 
 class SaveCkptCallback(Callback):
@@ -106,7 +162,7 @@ class SaveCkptCallback(Callback):
 
     def _save(self, pl_module, epoch):
         if self.output_dir is None:
-            output_dir = Path(swm.data.utils.get_cache_dir(), "checkpoints")
+            output_dir = Path(_get_swm_cache_dir(), CHECKPOINTS_DIRNAME)
         else:
             output_dir = self.output_dir
 

@@ -10,7 +10,11 @@ python train.py data=pusht
 
 ```bash
 python eval.py --config-name=tworoom.yaml policy=checkpoints/tworoom/lewm
+# 或评测某个训练 run：
+python eval.py --config-name=tworoom.yaml policy=/path/to/run/value_jepa
 ```
+
+训练产物默认保存到 run 目录下：自定义导出的 policy/object/epoch weights 在 `checkpoints/`，评测结果在 `eval/`，视频在 `eval/videos/`。
 
 ## 代码结构
 
