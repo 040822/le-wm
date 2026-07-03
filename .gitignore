@@ -33,7 +33,7 @@ MANIFEST
 
 
 # This project
-data
+data/*
 Temp
 outputs
 lightning_logs
