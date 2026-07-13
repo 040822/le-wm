@@ -68,7 +68,15 @@ def call_supported_kwargs(fn, **kwargs):
     return fn(**supported)
 
 
-def evaluate_from_dataset_compat(world, dataset, eval_start_idx, eval_episodes, cfg, video_path):
+def evaluate_from_dataset_compat(
+    world,
+    dataset,
+    eval_start_idx,
+    eval_episodes,
+    cfg,
+    video_path,
+    save_video=True,
+):
     callables = OmegaConf.to_container(cfg.eval.get("callables"), resolve=True)
     common_kwargs = {
         "dataset": dataset,
@@ -89,9 +97,9 @@ def evaluate_from_dataset_compat(world, dataset, eval_start_idx, eval_episodes, 
             **common_kwargs,
             goal_offset=cfg.eval.goal_offset_steps,
             goal_offset_steps=cfg.eval.goal_offset_steps,
-            video=video_path,
-            video_path=video_path,
-            save_video=True,
+            video=video_path if save_video else None,
+            video_path=video_path if save_video else None,
+            save_video=save_video,
         )
 
     if hasattr(world, "evaluate_from_dataset"):
@@ -100,9 +108,9 @@ def evaluate_from_dataset_compat(world, dataset, eval_start_idx, eval_episodes, 
             **common_kwargs,
             goal_offset=cfg.eval.goal_offset_steps,
             goal_offset_steps=cfg.eval.goal_offset_steps,
-            video=video_path,
-            video_path=video_path,
-            save_video=True,
+            video=video_path if save_video else None,
+            video_path=video_path if save_video else None,
+            save_video=save_video,
         )
 
     raise TypeError(

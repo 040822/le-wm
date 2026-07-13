@@ -40,6 +40,25 @@ class FastLeWAMEvalTests(unittest.TestCase):
         self.assertTrue(np.isfinite(first).all())
         self.assertTrue(np.isfinite(second).all())
 
+    def test_stage_a_factory_forwards_sampling_seed(self):
+        model = make_model().eval()
+        policy = make_fast_lewam_policy(
+            model,
+            solver_cfg=None,
+            plan_config={
+                "horizon": 3,
+                "receding_horizon": 1,
+                "action_block": 2,
+            },
+            process={},
+            transform={},
+            device="cpu",
+            mode="stage_a",
+            seed=123,
+        )
+
+        self.assertEqual(policy.seed, 123)
+
     def test_stage_b_policy_exposes_cost_only_model_to_existing_solver(self):
         model = make_model().eval()
         solver_cfg = OmegaConf.create(

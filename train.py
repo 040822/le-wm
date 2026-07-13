@@ -4,6 +4,7 @@ import os
 from datetime import timedelta
 
 import hydra
+from hydra.core.hydra_config import HydraConfig
 import lightning as pl
 import stable_pretraining as spt
 import torch
@@ -158,9 +159,20 @@ def run(cfg):
         enable_version_counter=False,
     )
 
+    callbacks = [object_dump_callback, latest_checkpoint_callback]
+    epoch_eval_cfg = cfg.get("epoch_eval", {})
+    if epoch_eval_cfg.get("enabled", False):
+        callback_kwargs = OmegaConf.to_container(epoch_eval_cfg, resolve=True)
+        callback_kwargs.pop("enabled")
+        if callback_kwargs.get("config_name") is None:
+            callback_kwargs["config_name"] = HydraConfig.get().runtime.choices["data"]
+        from source.common.epoch_eval import FastLeWAMEpochEvalCallback
+
+        callbacks.append(FastLeWAMEpochEvalCallback(**callback_kwargs))
+
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback, latest_checkpoint_callback],
+        callbacks=callbacks,
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,

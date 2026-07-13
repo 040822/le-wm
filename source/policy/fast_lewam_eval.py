@@ -173,6 +173,7 @@ def make_fast_lewam_policy(
     mode="stage_a",
     direct_receding_horizon=1,
     inference_steps=None,
+    seed=0,
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -205,6 +206,7 @@ def make_fast_lewam_policy(
         action_block=config.action_block,
         receding_horizon_blocks=direct_receding_horizon,
         inference_steps=inference_steps,
+        seed=seed,
     )
 
 
