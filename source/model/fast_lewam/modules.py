@@ -1,4 +1,4 @@
-"""Neural building blocks for the shared Fast-LeWAM DiT predictor."""
+"""Fast-LeWAM 共享 DiT 预测器使用的神经网络基础模块。"""
 
 import math
 
@@ -11,7 +11,7 @@ from source.model.lewm.modules import MLP, SIGReg
 
 
 def causal_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
-    """Return the inclusive causal mask for ``[z0, a1, q1, ..., aH, qH]``."""
+    """为 ``[z0,a1,q1,...,aH,qH]`` 构造含对角线的下三角因果掩码。"""
     if action_horizon < 1:
         raise ValueError("action_horizon must be positive")
     length = 1 + 2 * action_horizon
@@ -19,7 +19,7 @@ def causal_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
 
 
 def timestep_embedding(timestep: torch.Tensor, dim: int) -> torch.Tensor:
-    """Create sinusoidal embeddings for flow timesteps in ``[0, 1]``."""
+    """将形状为 ``[B]``、范围为 ``[0, 1]`` 的流时间步编码为正弦向量。"""
     if timestep.ndim != 1:
         raise ValueError(f"timestep must have shape [B], got {tuple(timestep.shape)}")
     half = dim // 2
@@ -38,11 +38,15 @@ def timestep_embedding(timestep: torch.Tensor, dim: int) -> torch.Tensor:
 
 
 def modulate(x, shift, scale):
+    """用 AdaLN 预测的平移量和缩放量调制已归一化的 token。"""
     return x * (1 + scale) + shift
 
 
 class Attention(nn.Module):
+    """支持可选注意力掩码的多头缩放点积自注意力层。"""
+
     def __init__(self, dim, heads=8, dropout=0.0):
+        """初始化 QKV 投影、输出投影以及训练期注意力 dropout。"""
         super().__init__()
         if dim % heads:
             raise ValueError(f"dim={dim} must be divisible by heads={heads}")
@@ -52,6 +56,7 @@ class Attention(nn.Module):
         self.to_out = nn.Linear(dim, dim)
 
     def forward(self, x, attention_mask=None):
+        """对 ``[B,T,D]`` token 计算自注意力，并保持输入输出形状一致。"""
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = (
             rearrange(value, "b t (h d) -> b h t d", h=self.heads)
@@ -68,7 +73,10 @@ class Attention(nn.Module):
 
 
 class FeedForward(nn.Module):
+    """Transformer block 中使用的两层 GELU 前馈网络。"""
+
     def __init__(self, dim, hidden_dim, dropout=0.0):
+        """按输入维度、隐藏维度和 dropout 比例构造前馈网络。"""
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(dim, hidden_dim),
@@ -79,13 +87,15 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, x):
+        """逐 token 应用前馈网络并返回与输入同形状的结果。"""
         return self.net(x)
 
 
 class DiTBlock(nn.Module):
-    """AdaLN-conditioned Transformer block shared by Stage A, B, and C."""
+    """由 Stage A、B、C 共享、通过 AdaLN 条件化的 Transformer block。"""
 
     def __init__(self, dim, heads, mlp_dim, dropout=0.0):
+        """构造注意力、MLP 和生成六组 AdaLN 参数的条件调制层。"""
         super().__init__()
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
@@ -100,6 +110,7 @@ class DiTBlock(nn.Module):
             final.bias[5 * dim : 6 * dim].fill_(1e-3)
 
     def forward(self, x, condition, attention_mask=None):
+        """用样本级条件调制注意力和 MLP，并通过可学习门控更新 token。"""
         modulation = self.modulation(condition).unsqueeze(1).chunk(6, dim=-1)
         shift_attn, scale_attn, gate_attn, shift_mlp, scale_mlp, gate_mlp = modulation
         x = x + gate_attn * self.attention(
@@ -113,7 +124,10 @@ class DiTBlock(nn.Module):
 
 
 class SharedDiT(nn.Module):
+    """堆叠多个 DiTBlock 的共享主干，可在不同阶段切换注意力掩码。"""
+
     def __init__(self, dim, depth, heads, mlp_dim, dropout=0.0):
+        """按照给定深度构造共享 DiT block 列表和最终 LayerNorm。"""
         super().__init__()
         self.layers = nn.ModuleList(
             [DiTBlock(dim, heads, mlp_dim, dropout) for _ in range(depth)]
@@ -121,6 +135,7 @@ class SharedDiT(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
     def forward(self, tokens, condition, attention_mask=None):
+        """依次执行所有共享 block，并对最终 token 做归一化。"""
         for layer in self.layers:
             tokens = layer(tokens, condition, attention_mask=attention_mask)
         return self.norm(tokens)

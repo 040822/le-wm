@@ -1,4 +1,4 @@
-"""Training and environment policy adapters for Fast-LeWAM."""
+"""Fast-LeWAM 的训练损失入口和 Lightning policy 封装。"""
 
 from functools import partial
 
@@ -10,6 +10,7 @@ from source.policy.lewm import build_lewm_optim
 
 
 def _predicted_action_probability(module, stage, mix_epochs):
+    """计算 Stage B 使用 Stage A 预测动作的课程学习概率。"""
     if stage != "fit" or mix_epochs <= 0:
         return 1.0
     return min(float(module.current_epoch) / float(mix_epochs), 1.0)
@@ -27,7 +28,7 @@ def fast_lewam_forward(
     latent_loss_noise_threshold,
     latent_action_mix_epochs,
 ):
-    """Compute Fast-LeWAM Stage A+B or Stage C flow-matching losses."""
+    """执行 Fast-LeWAM 前向，并组合 flow、causal-prefix latent 与 SIGReg 损失。"""
     if train_mode not in {"stage_ab", "stage_c"}:
         raise ValueError("train_mode must be 'stage_ab' or 'stage_c'")
     if not 0 < latent_loss_noise_threshold <= 1:
@@ -46,6 +47,7 @@ def fast_lewam_forward(
             f"got {tuple(actions.shape)}"
         )
 
+    # 一次共享编码得到当前 z0 和未来监督目标 z1:H，避免重复调用 Encoder。
     embeddings = self.model.encode_pixels(pixels[:, : action_horizon + 1])
     z0 = embeddings[:, 0]
     target_latents = embeddings[:, 1 : action_horizon + 1]
@@ -61,6 +63,7 @@ def fast_lewam_forward(
             f"got {tuple(clean_actions.shape)}"
         )
 
+    # 线性 flow matching：x_t=(1-t)noise+t*action，目标速度为 action-noise。
     timestep = torch.rand(
         pixels.shape[0], device=clean_actions.device, dtype=clean_actions.dtype
     )
@@ -85,6 +88,7 @@ def fast_lewam_forward(
             1.0 - timestep[:, None, None]
         ) * predicted_velocity
 
+        # 训练初期混入真值动作，随后逐步过渡到完全使用 Stage A 预测动作。
         predicted_probability = _predicted_action_probability(
             self, stage, latent_action_mix_epochs
         )
@@ -136,6 +140,7 @@ def fast_lewam_forward(
 
     action_loss = F.mse_loss(predicted_velocity, target_velocity)
     latent_per_sample = (predicted_latents - target_latents).square().mean(dim=(1, 2))
+    # t 越小代表噪声越强；线性权重会降低高噪声样本的 latent 监督强度。
     noise_weight = (timestep / latent_loss_noise_threshold).clamp(max=1.0)
     weighted_latent_loss = (noise_weight * latent_per_sample).mean()
     latent_prefix_loss = latent_per_sample.mean()
@@ -178,7 +183,7 @@ def fast_lewam_forward(
 
 
 class FastLeWAMPolicy(spt.Module):
-    """Lightning training wrapper for the mode-selectable Fast-LeWAM model."""
+    """把 FastLeWAM 模型、SIGReg、损失入口与优化器组装成训练模块。"""
 
     def __init__(
         self,
@@ -195,6 +200,7 @@ class FastLeWAMPolicy(spt.Module):
         scheduler=None,
         optim_interval="epoch",
     ):
+        """绑定训练超参数，并复用 LeWM 的 optimizer/scheduler checkpoint 逻辑。"""
         forward = partial(
             fast_lewam_forward,
             action_horizon=action_horizon,

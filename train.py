@@ -1,3 +1,5 @@
+"""LeWM、Value-JEPA 与 Fast-LeWAM 共用的 Hydra/Lightning 训练入口。"""
+
 import os
 from datetime import timedelta
 
@@ -20,6 +22,7 @@ from source.common.sampling import DistributedChunkLocalSampler
 
 
 def _data_pipeline_options(cfg):
+    """读取可选高速数据管线配置；旧 LeWM 配置缺省时保持原 CPU 预处理行为。"""
     pipeline = cfg.get("data_pipeline", {})
     return (
         bool(pipeline.get("gpu_image_preprocessing", False)),
@@ -28,6 +31,7 @@ def _data_pipeline_options(cfg):
 
 
 def _make_dataloaders(cfg, train_set, val_set, rnd_gen, chunk_size):
+    """创建训练/验证 DataLoader，并在启用时安装 DDP chunk-local sampler。"""
     train_sampler = None
     val_sampler = None
     if chunk_size is not None:
@@ -64,6 +68,7 @@ def _make_dataloaders(cfg, train_set, val_set, rnd_gen, chunk_size):
 
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
 def run(cfg):
+    """解析训练配置，构造数据、policy、日志与 checkpoint，并启动 Lightning fit。"""
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop("name")
     run_dir, run_id = get_run_dir(cfg, dataset_name)
@@ -92,6 +97,7 @@ def run(cfg):
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
 
+        # 一个模型动作 token 包含 frameskip 个环境动作，因此维度需同步写回配置。
         action_block_dim = cfg.data.dataset.frameskip * dataset.get_dim("action")
         if "action_encoder" in cfg.policy.model:
             cfg.policy.model.action_encoder.input_dim = action_block_dim
@@ -110,9 +116,7 @@ def run(cfg):
         lengths=[cfg.train_split, 1 - cfg.train_split],
         generator=rnd_gen,
     )
-    train, val = _make_dataloaders(
-        cfg, train_set, val_set, rnd_gen, chunk_size
-    )
+    train, val = _make_dataloaders(cfg, train_set, val_set, rnd_gen, chunk_size)
 
     policy = hydra.utils.instantiate(cfg.policy)
 

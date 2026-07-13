@@ -1,15 +1,19 @@
-"""Shared Action/World DiT used by the Fast-LeWAM prototype."""
+"""Fast-LeWAM 原型共用的 Action/World DiT 模型。"""
 
 from __future__ import annotations
 
 import torch
 from torch import nn
 
-from source.model.fast_lewam.modules import SharedDiT, causal_attention_mask, timestep_embedding
+from source.model.fast_lewam.modules import (
+    SharedDiT,
+    causal_attention_mask,
+    timestep_embedding,
+)
 
 
 class FastLeWAM(nn.Module):
-    """Mode-selectable DiT predictor built around the LeWM visual encoder."""
+    """复用 LeWM 视觉编码器、并可切换 Stage A/B/AB/C 的共享 DiT 预测器。"""
 
     def __init__(
         self,
@@ -26,9 +30,12 @@ class FastLeWAM(nn.Module):
         task_condition_dim: int | None = None,
         inference_steps: int = 10,
     ):
+        """构造视觉编码器接口、共享 DiT、动作头和 causal-prefix latent 头。"""
         super().__init__()
         if action_horizon < 1 or action_dim < 1 or inference_steps < 1:
-            raise ValueError("action_horizon, action_dim, and inference_steps must be positive")
+            raise ValueError(
+                "action_horizon, action_dim, and inference_steps must be positive"
+            )
 
         self.encoder = encoder
         self.projector = projector
@@ -75,13 +82,14 @@ class FastLeWAM(nn.Module):
         )
 
     def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        """Encode pixels, normalizing raw uint8 images on their current device."""
+        """将任意前导维的 ``[...,C,H,W]`` 图像编码为 ``[...,latent_dim]``。"""
         if pixels.ndim < 4:
             raise ValueError(
                 f"pixels must end in [C,H,W], got shape {tuple(pixels.shape)}"
             )
         leading = pixels.shape[:-3]
         flat = pixels.reshape(-1, *pixels.shape[-3:])
+        # uint8 训练数据保持原格式完成 H2D，随后才在当前设备上归一化。
         if flat.dtype == torch.uint8:
             flat = flat.float().div_(255.0)
             mean = flat.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
@@ -93,18 +101,22 @@ class FastLeWAM(nn.Module):
         latent = self.projector(encoded.last_hidden_state[:, 0])
         if latent.shape[-1] != self.latent_dim:
             raise ValueError(
-                f"encoder/projector produced dim {latent.shape[-1]}, expected {self.latent_dim}"
+                f"encoder/projector produced dim {latent.shape[-1]}, "
+                f"expected {self.latent_dim}"
             )
         return latent.reshape(*leading, self.latent_dim)
 
     def _validate_inputs(self, z0, actions, timestep):
+        """检查当前 latent、动作 chunk 和流时间步形状，并规范时间步设备与 dtype。"""
         if z0.ndim != 2 or z0.shape[-1] != self.latent_dim:
             raise ValueError(
                 f"z0 must have shape [B,{self.latent_dim}], got {tuple(z0.shape)}"
             )
         expected = (z0.shape[0], self.action_horizon, self.action_dim)
         if tuple(actions.shape) != expected:
-            raise ValueError(f"actions must have shape {expected}, got {tuple(actions.shape)}")
+            raise ValueError(
+                f"actions must have shape {expected}, got {tuple(actions.shape)}"
+            )
         if not torch.is_tensor(timestep):
             timestep = torch.as_tensor(timestep, device=z0.device, dtype=z0.dtype)
         timestep = timestep.to(device=z0.device, dtype=z0.dtype)
@@ -112,11 +124,13 @@ class FastLeWAM(nn.Module):
             timestep = timestep.expand(z0.shape[0])
         if tuple(timestep.shape) != (z0.shape[0],):
             raise ValueError(
-                f"timestep must have shape [{z0.shape[0]}], got {tuple(timestep.shape)}"
+                f"timestep must have shape [{z0.shape[0]}], "
+                f"got {tuple(timestep.shape)}"
             )
         return timestep
 
     def _condition(self, z0, timestep, task_condition):
+        """融合当前 latent、流时间步以及可选任务条件，生成 AdaLN 条件向量。"""
         condition = self.z_condition(z0) + self.time_mlp(
             timestep_embedding(timestep, self.model_dim).to(z0.dtype)
         )
@@ -128,7 +142,8 @@ class FastLeWAM(nn.Module):
             expected = (z0.shape[0], self.task_condition_dim)
             if tuple(task_condition.shape) != expected:
                 raise ValueError(
-                    f"task_condition must have shape {expected}, got {tuple(task_condition.shape)}"
+                    f"task_condition must have shape {expected}, "
+                    f"got {tuple(task_condition.shape)}"
                 )
             condition = condition + self.task_condition(task_condition)
         return condition
@@ -143,6 +158,7 @@ class FastLeWAM(nn.Module):
         unexpected_keys,
         error_msgs,
     ):
+        """加载 checkpoint，并兼容旧版在禁用任务条件时仍保存的投影参数。"""
         if self.task_condition is None:
             state_dict.pop(prefix + "task_condition.weight", None)
             state_dict.pop(prefix + "task_condition.bias", None)
@@ -157,12 +173,14 @@ class FastLeWAM(nn.Module):
         )
 
     def _stage_a(self, z0, noisy_actions, timestep, task_condition=None):
+        """以双向动作 self-attention 预测整段 noisy action chunk 的流速度。"""
         condition = self._condition(z0, timestep, task_condition)
         tokens = self.action_input(noisy_actions) + self.action_positions
         hidden = self.predictor(tokens, condition, attention_mask=None)
         return self.action_head(hidden)
 
     def _joint_hidden(self, z0, actions, timestep, task_condition=None):
+        """按 ``[z0,a1,q1,...,aH,qH]`` 排列 token，并计算严格因果隐藏状态。"""
         condition = self._condition(z0, timestep, task_condition)
         batch = z0.shape[0]
         tokens = z0.new_empty(batch, 1 + 2 * self.action_horizon, self.model_dim)
@@ -182,7 +200,7 @@ class FastLeWAM(nn.Module):
         task_condition: torch.Tensor | None = None,
         detach_clean_action: bool = False,
     ) -> dict[str, torch.Tensor]:
-        """Run one of the Stage A/B/AB/C predictor modes."""
+        """按 mode 执行 Stage A、B、A+B 或 C，并返回对应动作/latent 预测。"""
         timestep = self._validate_inputs(z0, actions, timestep)
         if mode == "stage_a":
             velocity = self._stage_a(z0, actions, timestep, task_condition)
@@ -211,6 +229,7 @@ class FastLeWAM(nn.Module):
         )
 
     def _initial_noise(self, z0, noise, generator):
+        """创建或校验 Euler flow 采样的初始高斯动作噪声。"""
         shape = (z0.shape[0], self.action_horizon, self.action_dim)
         if noise is None:
             return torch.randn(
@@ -230,6 +249,7 @@ class FastLeWAM(nn.Module):
         generator=None,
         task_condition=None,
     ):
+        """从噪声出发，用固定步长显式 Euler 积分生成归一化动作 chunk。"""
         steps = self.inference_steps if num_steps is None else num_steps
         if steps < 1:
             raise ValueError("num_steps must be positive")
@@ -253,7 +273,7 @@ class FastLeWAM(nn.Module):
         generator=None,
         task_condition=None,
     ):
-        """Sample a normalized action chunk with Stage A flow integration."""
+        """只运行 Stage A flow，采样一整段归一化动作 chunk。"""
         return self._euler_sample(
             z0,
             mode="stage_a",
@@ -273,7 +293,7 @@ class FastLeWAM(nn.Module):
         generator=None,
         task_condition=None,
     ):
-        """Sample actions and then read Stage C latent queries at the clean endpoint."""
+        """用 Stage C 采样动作，并在 clean endpoint 读取并行 latent query。"""
         actions = self._euler_sample(
             z0,
             mode="stage_c",
@@ -293,12 +313,13 @@ class FastLeWAM(nn.Module):
 
     @staticmethod
     def _last_frame(pixels):
+        """从可带时间维的像素张量中取得最后一帧，并保留 batch 维。"""
         if pixels.ndim < 4:
             raise ValueError(f"pixels must end in [C,H,W], got {tuple(pixels.shape)}")
         return pixels if pixels.ndim == 4 else pixels.select(dim=-4, index=-1)
 
     def get_action(self, info, horizon=1, prefix_actions=None):
-        """Implement stable-worldmodel's Actionable interface for solver warm starts."""
+        """实现 solver warm start 使用的 Actionable 接口，并支持已有动作前缀。"""
         if not 1 <= horizon <= self.action_horizon:
             raise ValueError(
                 f"horizon must be in [1,{self.action_horizon}], got {horizon}"
@@ -322,7 +343,7 @@ class FastLeWAM(nn.Module):
         return self.sample_actions(z0)[:, :horizon]
 
     def get_cost(self, info_dict, action_candidates):
-        """Score solver candidates via one parallel Stage B causal prediction."""
+        """用一次并行 Stage B 因果预测计算候选动作终点到目标 latent 的代价。"""
         if action_candidates.ndim != 4:
             raise ValueError(
                 "action_candidates must have shape [B,S,H,A], got "
@@ -332,7 +353,8 @@ class FastLeWAM(nn.Module):
         if horizon != self.action_horizon or action_dim != self.action_dim:
             raise ValueError(
                 "candidate shape must match configured horizon/action_dim; got "
-                f"{(horizon, action_dim)}, expected {(self.action_horizon, self.action_dim)}"
+                f"{(horizon, action_dim)}, expected "
+                f"{(self.action_horizon, self.action_dim)}"
             )
         current = self._last_frame(info_dict["pixels"])
         goal = self._last_frame(info_dict["goal"])

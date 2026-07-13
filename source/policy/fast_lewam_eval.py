@@ -1,4 +1,4 @@
-"""Environment-facing adapters for Fast-LeWAM Stage A, B, and C modes."""
+"""面向环境的 Fast-LeWAM Stage A、B、C 推理 policy 适配器。"""
 
 from collections import deque
 
@@ -12,18 +12,20 @@ from source.policy.lewm import _to_container
 
 
 class StageBModelView(nn.Module):
-    """Cost-only view that prevents solver actor warm-start in Stage B mode."""
+    """仅暴露 latent cost 的 Stage B 模型视图，阻止 solver 调用 actor warm start。"""
 
     def __init__(self, model):
+        """保存底层 FastLeWAM 模型，但不转发其动作生成接口。"""
         super().__init__()
         self.model = model
 
     def get_cost(self, info_dict, action_candidates):
+        """将 solver 的候选动作代价请求转发给底层 Stage B cost 接口。"""
         return self.model.get_cost(info_dict, action_candidates)
 
 
 class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
-    """Execute a configurable number of generated action blocks before replanning."""
+    """缓存生成的动作块，并按 receding horizon 执行若干步后重新规划。"""
 
     def __init__(
         self,
@@ -36,11 +38,14 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         inference_steps=None,
         seed=0,
     ):
+        """构造直接动作 policy，并冻结模型、记录动作块尺寸和采样参数。"""
         super().__init__()
         if mode not in {"stage_a", "stage_c"}:
             raise ValueError("chunk policy mode must be stage_a or stage_c")
         if action_block < 1 or receding_horizon_blocks < 1:
-            raise ValueError("action_block and receding_horizon_blocks must be positive")
+            raise ValueError(
+                "action_block and receding_horizon_blocks must be positive"
+            )
         self.type = "fast_lewam"
         self.model = model.eval()
         self.model.requires_grad_(False)
@@ -55,16 +60,19 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self._generators = {}
 
     def _generator(self, device):
+        """按设备懒创建可复现的 torch.Generator，并在多次规划间保留随机状态。"""
         key = str(device)
         if key not in self._generators:
             self._generators[key] = torch.Generator(device=device).manual_seed(self.seed)
         return self._generators[key]
 
     def set_seed(self, seed):
+        """更新采样种子，并清空各设备上已推进过状态的随机数生成器。"""
         self.seed = seed
         self._generators.clear()
 
     def set_env(self, env):
+        """绑定向量环境、初始化每个环境的动作队列，并校验动作维度。"""
         self.env = env
         self._action_buffer = [deque() for _ in range(env.num_envs)]
         base_action_dim = int(np.prod(env.single_action_space.shape))
@@ -72,10 +80,12 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         if self.model.action_dim != expected:
             raise ValueError(
                 f"model action_dim={self.model.action_dim} does not match "
-                f"action_block({self.action_block}) * env_action_dim({base_action_dim})={expected}"
+                f"action_block({self.action_block}) * "
+                f"env_action_dim({base_action_dim})={expected}"
             )
 
     def _slice_info(self, info, indices):
+        """只截取需要重新规划的环境信息，同时兼容 tensor、数组和列表。"""
         sliced = {}
         for key, value in info.items():
             if torch.is_tensor(value):
@@ -89,6 +99,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         return sliced
 
     def get_action(self, info_dict, **kwargs):
+        """为动作队列已空的环境批量规划，并从每个存活环境队列弹出一步动作。"""
         if self._action_buffer is None:
             raise RuntimeError("set_env must be called before get_action")
         info = self._prepare_info(info_dict)
@@ -115,9 +126,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             for key, value in selected.items():
                 if torch.is_tensor(value):
                     selected[key] = value.to(device)
-            z0 = self.model.encode_pixels(
-                self.model._last_frame(selected["pixels"])
-            )
+            z0 = self.model.encode_pixels(self.model._last_frame(selected["pixels"]))
             generator = self._generator(device)
             with torch.no_grad():
                 if self.mode == "stage_a":
@@ -165,7 +174,7 @@ def make_fast_lewam_policy(
     direct_receding_horizon=1,
     inference_steps=None,
 ):
-    """Build a direct-action or solver-backed environment policy."""
+    """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
     if device is not None:
         model = model.to(device)
