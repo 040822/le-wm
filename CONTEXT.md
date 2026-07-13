@@ -1,6 +1,6 @@
 # LeWM Context
 
-This context describes the language used by the LeWM repository for training and evaluating learned latent world models.
+This context describes the language used by the LeWM repository for training and evaluating learned latent world models and world-action models.
 
 ## Language
 
@@ -43,3 +43,35 @@ _Avoid_: Value head, reward model
 **Window Goal**:
 A goal embedding sampled from the same short training window that produced the current batch embeddings.
 _Avoid_: Evaluation goal, future-goal dataset wrapper
+
+**Fast-LeWAM**:
+A world-action model that shares LeWM's visual latent space and can generate action chunks, predict their causal latent consequences, or do both jointly.
+_Avoid_: LeWM, Fast LeWM
+
+**Action Block**:
+The group of consecutive environment actions represented by one action token. Its length is the dataset frameskip.
+_Avoid_: Single environment action
+
+**Action Horizon**:
+The number of Action Blocks generated or evaluated together from one current latent.
+_Avoid_: Number of environment steps
+
+**Stage A Mode**:
+The Fast-LeWAM behavior that generates an Action Horizon from the current latent.
+_Avoid_: World-model mode
+
+**Stage B Mode**:
+The Fast-LeWAM behavior that predicts a latent sequence from the current latent and a clean Candidate Action Sequence.
+_Avoid_: Action-generation mode
+
+**Stage C Mode**:
+The Fast-LeWAM ablation that jointly generates actions and predicts latent consequences in one causal world-action pass.
+_Avoid_: Stage A+B
+
+**Clean Action Estimate**:
+The denoised action chunk inferred from a noisy action chunk and its predicted flow velocity.
+_Avoid_: Ground-truth action
+
+**Causal Prefix Latent Prediction**:
+Parallel latent prediction in which each predicted future latent can depend only on the current latent and its corresponding action prefix.
+_Avoid_: Autoregressive latent rollout

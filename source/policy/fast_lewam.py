@@ -1,0 +1,227 @@
+"""Training and environment policy adapters for Fast-LeWAM."""
+
+from functools import partial
+
+import stable_pretraining as spt
+import torch
+import torch.nn.functional as F
+
+from source.policy.lewm import build_lewm_optim
+
+
+def _predicted_action_probability(module, stage, mix_epochs):
+    if stage != "fit" or mix_epochs <= 0:
+        return 1.0
+    return min(float(module.current_epoch) / float(mix_epochs), 1.0)
+
+
+def fast_lewam_forward(
+    self,
+    batch,
+    stage,
+    action_horizon,
+    train_mode,
+    lambda_latent,
+    lambda_sigreg,
+    detach_clean_action,
+    latent_loss_noise_threshold,
+    latent_action_mix_epochs,
+):
+    """Compute Fast-LeWAM Stage A+B or Stage C flow-matching losses."""
+    if train_mode not in {"stage_ab", "stage_c"}:
+        raise ValueError("train_mode must be 'stage_ab' or 'stage_c'")
+    if not 0 < latent_loss_noise_threshold <= 1:
+        raise ValueError("latent_loss_noise_threshold must be in (0, 1]")
+
+    pixels = batch["pixels"]
+    actions = torch.nan_to_num(batch["action"], 0.0)
+    if pixels.ndim != 5 or pixels.shape[1] < action_horizon + 1:
+        raise ValueError(
+            "pixels must have shape [B,T,C,H,W] with T >= action_horizon + 1; "
+            f"got {tuple(pixels.shape)}"
+        )
+    if actions.ndim != 3 or actions.shape[1] < action_horizon:
+        raise ValueError(
+            "action must have shape [B,T,A] with T >= action_horizon; "
+            f"got {tuple(actions.shape)}"
+        )
+
+    embeddings = self.model.encode_pixels(pixels[:, : action_horizon + 1])
+    z0 = embeddings[:, 0]
+    target_latents = embeddings[:, 1 : action_horizon + 1]
+    clean_actions = actions[:, :action_horizon]
+    expected_action_shape = (
+        pixels.shape[0],
+        action_horizon,
+        self.model.action_dim,
+    )
+    if tuple(clean_actions.shape) != expected_action_shape:
+        raise ValueError(
+            f"training actions must have shape {expected_action_shape}, "
+            f"got {tuple(clean_actions.shape)}"
+        )
+
+    timestep = torch.rand(
+        pixels.shape[0], device=clean_actions.device, dtype=clean_actions.dtype
+    )
+    noise = torch.randn_like(clean_actions)
+    noisy_actions = (
+        (1.0 - timestep[:, None, None]) * noise
+        + timestep[:, None, None] * clean_actions
+    )
+    target_velocity = clean_actions - noise
+    task_condition = batch.get("task_condition")
+
+    if train_mode == "stage_ab":
+        stage_a = self.model(
+            z0,
+            noisy_actions,
+            timestep,
+            mode="stage_a",
+            task_condition=task_condition,
+        )
+        predicted_velocity = stage_a["action_velocity"]
+        clean_estimate = noisy_actions + (
+            1.0 - timestep[:, None, None]
+        ) * predicted_velocity
+
+        predicted_probability = _predicted_action_probability(
+            self, stage, latent_action_mix_epochs
+        )
+        if predicted_probability >= 1.0:
+            use_prediction = torch.ones(
+                pixels.shape[0], dtype=torch.bool, device=pixels.device
+            )
+        elif predicted_probability <= 0.0:
+            use_prediction = torch.zeros(
+                pixels.shape[0], dtype=torch.bool, device=pixels.device
+            )
+        else:
+            use_prediction = (
+                torch.rand(pixels.shape[0], device=pixels.device)
+                < predicted_probability
+            )
+        predicted_for_stage_b = (
+            clean_estimate.detach() if detach_clean_action else clean_estimate
+        )
+        stage_b_actions = torch.where(
+            use_prediction[:, None, None], predicted_for_stage_b, clean_actions
+        )
+        stage_b_timestep = torch.where(
+            use_prediction,
+            timestep,
+            torch.ones_like(timestep),
+        )
+        predicted_latents = self.model(
+            z0,
+            stage_b_actions,
+            stage_b_timestep,
+            mode="stage_b",
+            task_condition=task_condition,
+        )["predicted_latents"]
+    else:
+        joint = self.model(
+            z0,
+            noisy_actions,
+            timestep,
+            mode="stage_c",
+            task_condition=task_condition,
+        )
+        predicted_velocity = joint["action_velocity"]
+        predicted_latents = joint["predicted_latents"]
+        clean_estimate = noisy_actions + (
+            1.0 - timestep[:, None, None]
+        ) * predicted_velocity
+        predicted_probability = 1.0
+
+    action_loss = F.mse_loss(predicted_velocity, target_velocity)
+    latent_per_sample = (predicted_latents - target_latents).square().mean(dim=(1, 2))
+    noise_weight = (timestep / latent_loss_noise_threshold).clamp(max=1.0)
+    weighted_latent_loss = (noise_weight * latent_per_sample).mean()
+    latent_prefix_loss = latent_per_sample.mean()
+    sigreg_loss = self.sigreg(embeddings.transpose(0, 1))
+    loss = (
+        action_loss
+        + lambda_latent * weighted_latent_loss
+        + lambda_sigreg * sigreg_loss
+    )
+
+    output = {
+        "loss": loss,
+        "action_loss": action_loss,
+        "latent_prefix_loss": latent_prefix_loss,
+        "weighted_latent_prefix_loss": weighted_latent_loss,
+        "sigreg_loss": sigreg_loss,
+        "noise_weight": noise_weight.mean(),
+        "predicted_action_probability": loss.new_tensor(predicted_probability),
+        "action_velocity": predicted_velocity,
+        "clean_action": clean_estimate,
+        "predicted_latents": predicted_latents,
+        "emb": embeddings,
+    }
+    metric_names = {
+        "loss",
+        "action_loss",
+        "latent_prefix_loss",
+        "weighted_latent_prefix_loss",
+        "sigreg_loss",
+        "noise_weight",
+        "predicted_action_probability",
+    }
+    metrics = {
+        f"{stage}/{name}": value.detach()
+        for name, value in output.items()
+        if name in metric_names
+    }
+    self.log_dict(metrics, on_step=True, sync_dist=True)
+    return output
+
+
+class FastLeWAMPolicy(spt.Module):
+    """Lightning training wrapper for the mode-selectable Fast-LeWAM model."""
+
+    def __init__(
+        self,
+        model,
+        sigreg,
+        action_horizon,
+        optimizer,
+        train_mode="stage_ab",
+        lambda_latent=1.0,
+        lambda_sigreg=0.09,
+        detach_clean_action=False,
+        latent_loss_noise_threshold=0.2,
+        latent_action_mix_epochs=20,
+        scheduler=None,
+        optim_interval="epoch",
+    ):
+        forward = partial(
+            fast_lewam_forward,
+            action_horizon=action_horizon,
+            train_mode=train_mode,
+            lambda_latent=lambda_latent,
+            lambda_sigreg=lambda_sigreg,
+            detach_clean_action=detach_clean_action,
+            latent_loss_noise_threshold=latent_loss_noise_threshold,
+            latent_action_mix_epochs=latent_action_mix_epochs,
+        )
+        super().__init__(
+            model=model,
+            sigreg=sigreg,
+            forward=forward,
+            optim=build_lewm_optim(
+                optimizer=optimizer,
+                scheduler=scheduler,
+                interval=optim_interval,
+            ),
+        )
+        self.action_horizon = action_horizon
+        self.train_mode = train_mode
+        self.lambda_latent = lambda_latent
+        self.lambda_sigreg = lambda_sigreg
+        self.detach_clean_action = detach_clean_action
+        self.latent_loss_noise_threshold = latent_loss_noise_threshold
+        self.latent_action_mix_epochs = latent_action_mix_epochs
+
+
+__all__ = ["FastLeWAMPolicy", "fast_lewam_forward"]

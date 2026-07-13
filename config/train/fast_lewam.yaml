@@ -1,0 +1,54 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: pusht
+  - policy: fast_lewam
+
+output_model_name: fast_lewam
+subdir: null
+
+num_workers: 2
+train_split: 0.9
+seed: 3072
+img_size: 224
+embed_dim: 192
+action_horizon: 5
+history_size: 1
+num_preds: ${action_horizon}
+checkpoint_interval_minutes: 30
+
+train_mode: stage_ab
+latent_head_layers: 6
+latent_head_dim: 192
+latent_action_mix_epochs: 20
+detach_clean_action: false
+latent_loss_noise_threshold: 0.2
+inference_steps: 10
+
+trainer:
+  max_epochs: 100
+  devices: 1
+  accelerator: gpu
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 128
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 1
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+loss:
+  latent:
+    weight: 1.0
+  sigreg:
+    weight: 0.09
+    kwargs:
+      knots: 17
+      num_proj: 1024

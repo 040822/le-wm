@@ -1,0 +1,3 @@
+# Share a Mode-Selectable DiT Across Fast-LeWAM Stages
+
+Fast-LeWAM uses one checkpoint and one set of DiT blocks with mode-specific token layouts and attention masks: Stage A applies bidirectional attention to action tokens, Stage B applies causal attention to clean-action and latent-query tokens, and the separately trained Stage C ablation jointly reads action and latent outputs from the causal layout. This preserves a single predictor that can act directly or satisfy LeWM's latent-cost solver interface, while keeping Stage A inference free of Stage B computation and preventing latent queries from seeing future actions.

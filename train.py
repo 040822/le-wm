@@ -21,10 +21,6 @@ from source.common.logging import get_run_dir, tee_output_to_file
 
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
 def run(cfg):
-    #########################
-    ##       dataset       ##
-    #########################
-
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop("name")
     run_dir, run_id = get_run_dir(cfg, dataset_name)
@@ -48,9 +44,11 @@ def run(cfg):
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
 
-        cfg.policy.model.action_encoder.input_dim = (
-            cfg.data.dataset.frameskip * dataset.get_dim("action")
-        )
+        action_block_dim = cfg.data.dataset.frameskip * dataset.get_dim("action")
+        if "action_encoder" in cfg.policy.model:
+            cfg.policy.model.action_encoder.input_dim = action_block_dim
+        if "action_dim" in cfg.policy.model:
+            cfg.policy.model.action_dim = action_block_dim
 
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform
@@ -76,15 +74,7 @@ def run(cfg):
         drop_last=False,
     )
 
-    ##############################
-    ##       policy / optim     ##
-    ##############################
-
     policy = hydra.utils.instantiate(cfg.policy)
-
-    ##########################
-    ##       training       ##
-    ##########################
 
     with open_dict(cfg):
         cfg.subdir = run_id

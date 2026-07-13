@@ -1,0 +1,45 @@
+_target_: source.policy.fast_lewam.FastLeWAMPolicy
+
+action_horizon: ${action_horizon}
+train_mode: ${train_mode}
+lambda_latent: ${loss.latent.weight}
+lambda_sigreg: ${loss.sigreg.weight}
+detach_clean_action: ${detach_clean_action}
+latent_loss_noise_threshold: ${latent_loss_noise_threshold}
+latent_action_mix_epochs: ${latent_action_mix_epochs}
+optimizer: ${optimizer}
+
+sigreg:
+  _target_: source.model.fast_lewam.modules.SIGReg
+  knots: ${loss.sigreg.kwargs.knots}
+  num_proj: ${loss.sigreg.kwargs.num_proj}
+
+model:
+  _target_: source.model.fast_lewam.jepa.FastLeWAM
+  latent_dim: ${embed_dim}
+  action_dim: null
+  action_horizon: ${action_horizon}
+  latent_head_dim: ${latent_head_dim}
+  latent_head_layers: ${latent_head_layers}
+  heads: 6
+  mlp_dim: 768
+  dropout: 0.0
+  task_condition_dim: null
+  inference_steps: ${inference_steps}
+
+  encoder:
+    _target_: stable_pretraining.backbone.utils.vit_hf
+    size: tiny
+    patch_size: 14
+    image_size: ${img_size}
+    pretrained: false
+    use_mask_token: false
+
+  projector:
+    _target_: source.model.fast_lewam.modules.MLP
+    input_dim: ${embed_dim}
+    output_dim: ${embed_dim}
+    hidden_dim: 2048
+    norm_fn:
+      _target_: torch.nn.BatchNorm1d
+      _partial_: true
