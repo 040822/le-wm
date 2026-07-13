@@ -7,6 +7,7 @@ from torch import nn
 
 from source.common.epoch_eval import (
     FastLeWAMEpochEvalCallback,
+    FastLeWAMEpochEvaluator,
     _load_eval_config,
 )
 
@@ -91,10 +92,21 @@ class FastLeWAMEpochEvalCallbackTests(unittest.TestCase):
         self.assertEqual(trainer.strategy.barriers, [])
 
     def test_eval_seed_is_resolved_into_cem_solver(self):
-        cfg = _load_eval_config("cube", 1, {}, seed=123)
+        cfg = _load_eval_config(
+            "cube", 1, {}, seed=123, dataset_name="ogbench/cube_single"
+        )
 
         self.assertEqual(cfg.seed, 123)
         self.assertEqual(cfg.solver.seed, 123)
+        self.assertEqual(cfg.eval.dataset_name, "ogbench/cube_single")
+
+        evaluator = FastLeWAMEpochEvaluator(
+            config_name="cube",
+            num_eval=1,
+            solver_overrides={},
+            seed=123,
+            dataset_name="ogbench/cube_single",
+        )
 
     def test_stage_a_failure_does_not_skip_stage_b(self):
         calls = []

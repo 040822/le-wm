@@ -26,7 +26,9 @@ from source.policy.fast_lewam_eval import make_fast_lewam_policy
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def _load_eval_config(config_name, num_eval, solver_overrides, seed):
+def _load_eval_config(
+    config_name, num_eval, solver_overrides, seed, dataset_name=None
+):
     """加载独立 eval YAML，并合并本地 launcher 与 CEM solver 默认配置。"""
     cfg = OmegaConf.load(_ROOT / "config" / "eval" / f"{config_name}.yaml")
     cfg.pop("defaults", None)
@@ -37,6 +39,8 @@ def _load_eval_config(config_name, num_eval, solver_overrides, seed):
     cfg.seed = int(seed)
     cfg.solver = OmegaConf.merge(solver, solver_overrides or {})
     cfg.eval.num_eval = int(num_eval)
+    if dataset_name is not None:
+        cfg.eval.dataset_name = dataset_name
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
     OmegaConf.resolve(cfg)
     return cfg
@@ -52,9 +56,12 @@ class FastLeWAMEpochEvaluator:
         solver_overrides=None,
         seed=42,
         save_video=False,
+        dataset_name=None,
     ):
         """记录轻量 epoch-eval 配置；数据集在首次实际评测时懒加载。"""
-        self.cfg = _load_eval_config(config_name, num_eval, solver_overrides, seed)
+        self.cfg = _load_eval_config(
+            config_name, num_eval, solver_overrides, seed, dataset_name
+        )
         self.save_video = save_video
         self._context = None
 
