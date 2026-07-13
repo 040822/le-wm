@@ -25,13 +25,14 @@ detach_clean_action: false
 latent_loss_noise_threshold: 0.2
 inference_steps: 10
 
-# 默认启用；每个 epoch 由 global rank 0 依次执行轻量 Stage A/B 环境评测。
+# 默认启用；每 5 个 epoch 由 global rank 0 依次执行轻量 Stage A/B 环境评测。
 epoch_eval:
   enabled: true
   # null 时自动使用当前 Hydra data 组名（cube/pusht/reacher/tworoom）。
   config_name: null
   modes: [stage_a, stage_b]
-  every_n_epochs: 1
+  # 可按需改为 1、10 等正整数，也可通过 Hydra 命令行覆盖。
+  every_n_epochs: 5
   num_eval: 5
   seed: 42
   save_video: false
