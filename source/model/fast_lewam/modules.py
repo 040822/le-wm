@@ -92,6 +92,12 @@ class DiTBlock(nn.Module):
         self.attention = Attention(dim, heads=heads, dropout=dropout)
         self.mlp = FeedForward(dim, mlp_dim, dropout=dropout)
         self.modulation = nn.Sequential(nn.SiLU(), nn.Linear(dim, 6 * dim))
+        final = self.modulation[-1]
+        nn.init.zeros_(final.weight)
+        nn.init.zeros_(final.bias)
+        with torch.no_grad():
+            final.bias[2 * dim : 3 * dim].fill_(1e-3)
+            final.bias[5 * dim : 6 * dim].fill_(1e-3)
 
     def forward(self, x, condition, attention_mask=None):
         modulation = self.modulation(condition).unsqueeze(1).chunk(6, dim=-1)

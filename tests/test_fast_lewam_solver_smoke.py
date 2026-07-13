@@ -1,0 +1,82 @@
+import unittest
+
+import gymnasium as gym
+import numpy as np
+from omegaconf import OmegaConf
+
+from source.policy.fast_lewam_eval import FastLeWAMChunkPolicy, make_fast_lewam_policy
+from tests.test_fast_lewam_model import make_model
+
+
+class FakeVectorEnv:
+    num_envs = 2
+    single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(2,))
+    action_space = gym.spaces.Box(-1.0, 1.0, shape=(2, 2))
+
+
+def solver_config():
+    return OmegaConf.create(
+        {
+            "_target_": "stable_worldmodel.solver.CEMSolver",
+            "model": "???",
+            "batch_size": 1,
+            "num_samples": 2,
+            "n_steps": 1,
+            "topk": 1,
+            "device": "cpu",
+            "seed": 9,
+        }
+    )
+
+
+class FastLeWAMSolverSmokeTests(unittest.TestCase):
+    def test_existing_cem_world_policy_executes_stage_b_cost(self):
+        policy = make_fast_lewam_policy(
+            make_model().eval(),
+            solver_cfg=solver_config(),
+            plan_config={
+                "horizon": 3,
+                "receding_horizon": 1,
+                "action_block": 2,
+                "warm_start": False,
+            },
+            process={},
+            transform={},
+            device="cpu",
+            mode="stage_b",
+        )
+        policy.set_env(FakeVectorEnv())
+        info = {
+            "pixels": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+            "goal": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+        }
+
+        action = policy.get_action(info)
+
+        self.assertEqual(action.shape, (2, 2))
+        self.assertTrue(np.isfinite(action).all())
+
+    def test_direct_policy_seed_reproduces_first_action_chunk(self):
+        info = {"pixels": np.random.randn(2, 1, 3, 8, 8).astype(np.float32)}
+        policies = [
+            FastLeWAMChunkPolicy(
+                make_model().eval(),
+                mode="stage_a",
+                action_block=2,
+                receding_horizon_blocks=1,
+                inference_steps=2,
+                seed=31,
+            )
+            for _ in range(2)
+        ]
+        for policy in policies:
+            policy.set_env(FakeVectorEnv())
+
+        first = policies[0].get_action(info)
+        second = policies[1].get_action(info)
+
+        self.assertTrue(np.array_equal(first, second))
+
+
+if __name__ == "__main__":
+    unittest.main()

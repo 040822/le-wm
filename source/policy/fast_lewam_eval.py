@@ -52,6 +52,17 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self.inference_steps = inference_steps
         self.seed = seed
         self._action_buffer = None
+        self._generators = {}
+
+    def _generator(self, device):
+        key = str(device)
+        if key not in self._generators:
+            self._generators[key] = torch.Generator(device=device).manual_seed(self.seed)
+        return self._generators[key]
+
+    def set_seed(self, seed):
+        self.seed = seed
+        self._generators.clear()
 
     def set_env(self, env):
         self.env = env
@@ -107,14 +118,19 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             z0 = self.model.encode_pixels(
                 self.model._last_frame(selected["pixels"])
             )
+            generator = self._generator(device)
             with torch.no_grad():
                 if self.mode == "stage_a":
                     chunk = self.model.sample_actions(
-                        z0, num_steps=self.inference_steps
+                        z0,
+                        num_steps=self.inference_steps,
+                        generator=generator,
                     )
                 else:
                     chunk = self.model.sample_joint(
-                        z0, num_steps=self.inference_steps
+                        z0,
+                        num_steps=self.inference_steps,
+                        generator=generator,
                     )["actions"]
 
             keep_blocks = min(
