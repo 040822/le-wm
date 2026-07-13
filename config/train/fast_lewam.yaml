@@ -25,12 +25,20 @@ detach_clean_action: false
 latent_loss_noise_threshold: 0.2
 inference_steps: 10
 
+data_pipeline:
+  # HDF5Dataset must return channel-first uint8 pixels whose stored spatial
+  # resolution already equals img_size; float conversion and normalization
+  # then run on the training device after batch transfer.
+  gpu_image_preprocessing: true
+  hdf5_chunk_size: 100
+
 trainer:
   max_epochs: 100
   devices: 1
   accelerator: gpu
   precision: bf16
   gradient_clip_val: 1.0
+  use_distributed_sampler: false
 
 loader:
   batch_size: 128

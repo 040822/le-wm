@@ -21,7 +21,7 @@ class TinyEncoder(nn.Module):
         return SimpleNamespace(last_hidden_state=cls[:, None])
 
 
-def make_model(action_horizon=3):
+def make_model(action_horizon=3, task_condition_dim=None):
     torch.manual_seed(7)
     return FastLeWAM(
         encoder=TinyEncoder(latent_dim=8),
@@ -34,10 +34,37 @@ def make_model(action_horizon=3):
         heads=3,
         mlp_dim=24,
         dropout=0.0,
+        task_condition_dim=task_condition_dim,
     )
 
 
 class FastLeWAMModelTests(unittest.TestCase):
+    def test_disabled_task_condition_registers_no_parameters(self):
+        model = make_model(task_condition_dim=None)
+
+        self.assertIsNone(model.task_condition)
+        self.assertFalse(
+            any(name.startswith("task_condition.") for name, _ in model.named_parameters())
+        )
+
+    def test_enabled_task_condition_is_projected(self):
+        model = make_model(task_condition_dim=5)
+        z0 = torch.randn(2, 8)
+        actions = torch.randn(2, 3, 4)
+        timestep = torch.tensor([0.2, 0.8])
+
+        output = model(
+            z0,
+            actions,
+            timestep,
+            mode="stage_a",
+            task_condition=torch.randn(2, 5),
+        )
+        output["action_velocity"].sum().backward()
+
+        self.assertEqual(output["action_velocity"].shape, (2, 3, 4))
+        self.assertIsNotNone(model.task_condition.weight.grad)
+
     def test_modes_return_action_and_latent_chunks_with_expected_shapes(self):
         model = make_model()
         z0 = torch.randn(2, 8)

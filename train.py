@@ -1,6 +1,5 @@
 import os
 from datetime import timedelta
-from pathlib import Path
 
 import hydra
 import lightning as pl
@@ -17,6 +16,50 @@ from source.common.checkpoint import (
 )
 from source.common.data import get_column_normalizer, get_img_preprocessor, load_dataset
 from source.common.logging import get_run_dir, tee_output_to_file
+from source.common.sampling import DistributedChunkLocalSampler
+
+
+def _data_pipeline_options(cfg):
+    pipeline = cfg.get("data_pipeline", {})
+    return (
+        bool(pipeline.get("gpu_image_preprocessing", False)),
+        pipeline.get("hdf5_chunk_size", None),
+    )
+
+
+def _make_dataloaders(cfg, train_set, val_set, rnd_gen, chunk_size):
+    train_sampler = None
+    val_sampler = None
+    if chunk_size is not None:
+        train_sampler = DistributedChunkLocalSampler(
+            train_set,
+            chunk_size=int(chunk_size),
+            shuffle=True,
+            seed=cfg.seed,
+        )
+        val_sampler = DistributedChunkLocalSampler(
+            val_set,
+            chunk_size=int(chunk_size),
+            shuffle=False,
+            seed=cfg.seed,
+        )
+
+    train = torch.utils.data.DataLoader(
+        train_set,
+        **cfg.loader,
+        sampler=train_sampler,
+        shuffle=train_sampler is None,
+        drop_last=True,
+        generator=rnd_gen,
+    )
+    val = torch.utils.data.DataLoader(
+        val_set,
+        **cfg.loader,
+        sampler=val_sampler,
+        shuffle=False,
+        drop_last=False,
+    )
+    return train, val
 
 
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
@@ -33,9 +76,14 @@ def run(cfg):
         cache_dir=cache_dir,
         **dataset_cfg,
     )
-    transforms = [
-        get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)
-    ]
+    gpu_image_preprocessing, chunk_size = _data_pipeline_options(cfg)
+    transforms = []
+    if not gpu_image_preprocessing:
+        transforms.append(
+            get_img_preprocessor(
+                source="pixels", target="pixels", img_size=cfg.img_size
+            )
+        )
 
     with open_dict(cfg):
         for col in cfg.data.dataset.keys_to_load:
@@ -50,8 +98,11 @@ def run(cfg):
         if "action_dim" in cfg.policy.model:
             cfg.policy.model.action_dim = action_block_dim
 
-    transform = spt.data.transforms.Compose(*transforms)
-    dataset.transform = transform
+    dataset.transform = spt.data.transforms.Compose(*transforms)
+    if gpu_image_preprocessing:
+        print("Using channel-first uint8 pixels with device-side ImageNet normalization")
+    if chunk_size is not None:
+        print(f"Using distributed HDF5 chunk-local sampler (chunk_size={chunk_size})")
 
     rnd_gen = torch.Generator().manual_seed(cfg.seed)
     train_set, val_set = spt.data.random_split(
@@ -59,19 +110,8 @@ def run(cfg):
         lengths=[cfg.train_split, 1 - cfg.train_split],
         generator=rnd_gen,
     )
-
-    train = torch.utils.data.DataLoader(
-        train_set,
-        **cfg.loader,
-        shuffle=True,
-        drop_last=True,
-        generator=rnd_gen,
-    )
-    val = torch.utils.data.DataLoader(
-        val_set,
-        **cfg.loader,
-        shuffle=False,
-        drop_last=False,
+    train, val = _make_dataloaders(
+        cfg, train_set, val_set, rnd_gen, chunk_size
     )
 
     policy = hydra.utils.instantiate(cfg.policy)

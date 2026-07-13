@@ -5,11 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from source.model.fast_lewam.modules import (
-    SharedDiT,
-    causal_attention_mask,
-    timestep_embedding,
-)
+from source.model.fast_lewam.modules import SharedDiT, causal_attention_mask, timestep_embedding
 
 
 class FastLeWAM(nn.Module):
@@ -41,12 +37,16 @@ class FastLeWAM(nn.Module):
         self.action_horizon = action_horizon
         self.model_dim = latent_head_dim
         self.inference_steps = inference_steps
-        self.task_condition_dim = task_condition_dim or latent_dim
+        self.task_condition_dim = task_condition_dim
 
         self.action_input = nn.Linear(action_dim, latent_head_dim)
         self.latent_input = nn.Linear(latent_dim, latent_head_dim)
         self.z_condition = nn.Linear(latent_dim, latent_head_dim)
-        self.task_condition = nn.Linear(self.task_condition_dim, latent_head_dim)
+        self.task_condition = (
+            nn.Linear(task_condition_dim, latent_head_dim)
+            if task_condition_dim is not None
+            else None
+        )
         self.time_mlp = nn.Sequential(
             nn.Linear(latent_head_dim, latent_head_dim),
             nn.SiLU(),
@@ -75,13 +75,20 @@ class FastLeWAM(nn.Module):
         )
 
     def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        """Encode any leading batch/time dimensions into LeWM CLS latents."""
+        """Encode pixels, normalizing raw uint8 images on their current device."""
         if pixels.ndim < 4:
             raise ValueError(
                 f"pixels must end in [C,H,W], got shape {tuple(pixels.shape)}"
             )
         leading = pixels.shape[:-3]
-        flat = pixels.float().reshape(-1, *pixels.shape[-3:])
+        flat = pixels.reshape(-1, *pixels.shape[-3:])
+        if flat.dtype == torch.uint8:
+            flat = flat.float().div_(255.0)
+            mean = flat.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
+            std = flat.new_tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
+            flat = flat.sub_(mean).div_(std)
+        else:
+            flat = flat.float()
         encoded = self.encoder(flat, interpolate_pos_encoding=True)
         latent = self.projector(encoded.last_hidden_state[:, 0])
         if latent.shape[-1] != self.latent_dim:
@@ -114,6 +121,10 @@ class FastLeWAM(nn.Module):
             timestep_embedding(timestep, self.model_dim).to(z0.dtype)
         )
         if task_condition is not None:
+            if self.task_condition is None:
+                raise ValueError(
+                    "task_condition was provided, but task_condition_dim is disabled"
+                )
             expected = (z0.shape[0], self.task_condition_dim)
             if tuple(task_condition.shape) != expected:
                 raise ValueError(
@@ -121,6 +132,29 @@ class FastLeWAM(nn.Module):
                 )
             condition = condition + self.task_condition(task_condition)
         return condition
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        if self.task_condition is None:
+            state_dict.pop(prefix + "task_condition.weight", None)
+            state_dict.pop(prefix + "task_condition.bias", None)
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
 
     def _stage_a(self, z0, noisy_actions, timestep, task_condition=None):
         condition = self._condition(z0, timestep, task_condition)
@@ -131,9 +165,7 @@ class FastLeWAM(nn.Module):
     def _joint_hidden(self, z0, actions, timestep, task_condition=None):
         condition = self._condition(z0, timestep, task_condition)
         batch = z0.shape[0]
-        tokens = z0.new_empty(
-            batch, 1 + 2 * self.action_horizon, self.model_dim
-        )
+        tokens = z0.new_empty(batch, 1 + 2 * self.action_horizon, self.model_dim)
         tokens[:, 0] = self.latent_input(z0)
         tokens[:, 1::2] = self.action_input(actions)
         tokens[:, 2::2] = self.query_tokens.expand(batch, -1, -1)
@@ -182,10 +214,7 @@ class FastLeWAM(nn.Module):
         shape = (z0.shape[0], self.action_horizon, self.action_dim)
         if noise is None:
             return torch.randn(
-                shape,
-                device=z0.device,
-                dtype=z0.dtype,
-                generator=generator,
+                shape, device=z0.device, dtype=z0.dtype, generator=generator
             )
         if tuple(noise.shape) != shape:
             raise ValueError(f"noise must have shape {shape}, got {tuple(noise.shape)}")
@@ -209,11 +238,7 @@ class FastLeWAM(nn.Module):
         for step in range(steps):
             timestep = z0.new_full((z0.shape[0],), step / steps)
             velocity = self(
-                z0,
-                actions,
-                timestep,
-                mode=mode,
-                task_condition=task_condition,
+                z0, actions, timestep, mode=mode, task_condition=task_condition
             )["action_velocity"]
             actions = actions + dt * velocity
         return actions
@@ -312,9 +337,7 @@ class FastLeWAM(nn.Module):
         current = self._last_frame(info_dict["pixels"])
         goal = self._last_frame(info_dict["goal"])
         z0 = self.encode_pixels(current).reshape(batch * samples, self.latent_dim)
-        goal_latent = self.encode_pixels(goal).reshape(
-            batch * samples, self.latent_dim
-        )
+        goal_latent = self.encode_pixels(goal).reshape(batch * samples, self.latent_dim)
         candidates = action_candidates.reshape(
             batch * samples, self.action_horizon, self.action_dim
         )
