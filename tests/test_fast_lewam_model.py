@@ -5,7 +5,10 @@ import torch
 from torch import nn
 
 from source.model.fast_lewam.jepa import FastLeWAM
-from source.model.fast_lewam.modules import causal_attention_mask
+from source.model.fast_lewam.modules import (
+    causal_attention_mask,
+    stage_a_attention_mask,
+)
 
 
 class TinyEncoder(nn.Module):
@@ -39,6 +42,13 @@ def make_model(action_horizon=3, task_condition_dim=None):
 
 
 class FastLeWAMModelTests(unittest.TestCase):
+    def test_stage_a_mask_protects_state_anchor(self):
+        mask = stage_a_attention_mask(action_horizon=3)
+        expected = torch.ones(4, 4, dtype=torch.bool)
+        expected[0, 1:] = False
+
+        self.assertTrue(torch.equal(mask, expected))
+
     def test_disabled_task_condition_registers_no_parameters(self):
         model = make_model(task_condition_dim=None)
 

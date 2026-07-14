@@ -8,6 +8,7 @@ from torch import nn
 from source.model.fast_lewam.modules import (
     SharedDiT,
     causal_attention_mask,
+    stage_a_attention_mask,
     timestep_embedding,
 )
 
@@ -79,6 +80,11 @@ class FastLeWAM(nn.Module):
         self.latent_head = nn.Linear(latent_head_dim, latent_dim)
         self.register_buffer(
             "causal_mask", causal_attention_mask(action_horizon), persistent=False
+        )
+        self.register_buffer(
+            "stage_a_mask",
+            stage_a_attention_mask(action_horizon),
+            persistent=False,
         )
 
     def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
@@ -184,11 +190,13 @@ class FastLeWAM(nn.Module):
         )
 
     def _stage_a(self, z0, noisy_actions, timestep, task_condition=None):
-        """以双向动作 self-attention 预测整段 noisy action chunk 的流速度。"""
+        """以受保护的状态锚点和双向动作 attention 预测动作流速度。"""
         condition = self._condition(z0, timestep, task_condition) # [B, latent_head_dim]
-        tokens = self.action_input(noisy_actions) + self.action_positions # [B,H,latent_head_dim]
-        hidden = self.predictor(tokens, condition, attention_mask=None)
-        return self.action_head(hidden)
+        state_token = self.latent_input(z0).unsqueeze(1)
+        action_tokens = self.action_input(noisy_actions) + self.action_positions
+        tokens = torch.cat((state_token, action_tokens), dim=1)
+        hidden = self.predictor(tokens, condition, attention_mask=self.stage_a_mask)
+        return self.action_head(hidden[:, 1:])
 
     def _joint_hidden(self, z0, actions, timestep, task_condition=None):
         """按 ``[z0,a1,q1,...,aH,qH]`` 排列 token，并计算严格因果隐藏状态。"""

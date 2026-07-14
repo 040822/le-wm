@@ -18,6 +18,20 @@ def causal_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
     return torch.ones(length, length, dtype=torch.bool, device=device).tril()
 
 
+def stage_a_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
+    """允许动作读取状态锚点，同时阻止状态锚点读取动作。"""
+    if action_horizon < 1:
+        raise ValueError("action_horizon must be positive")
+    mask = torch.ones(
+        action_horizon + 1,
+        action_horizon + 1,
+        dtype=torch.bool,
+        device=device,
+    )
+    mask[0, 1:] = False
+    return mask
+
+
 def timestep_embedding(timestep: torch.Tensor, dim: int) -> torch.Tensor:
     """将形状为 ``[B]``、范围为 ``[0, 1]`` 的流时间步编码为正弦向量。"""
     if timestep.ndim != 1:
@@ -149,5 +163,6 @@ __all__ = [
     "SIGReg",
     "SharedDiT",
     "causal_attention_mask",
+    "stage_a_attention_mask",
     "timestep_embedding",
 ]
