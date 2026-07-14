@@ -50,13 +50,14 @@ def fast_lewam_forward(
     # 一次共享编码得到当前 z0 和未来监督目标 z1:H，避免重复调用 Encoder。
     embeddings = self.model.encode_pixels(pixels[:, : action_horizon + 1])
     z0 = embeddings[:, 0]
-    target_latents = embeddings[:, 1 : action_horizon + 1]
-    clean_actions = actions[:, :action_horizon]
+    target_latents = embeddings[:, 1 : action_horizon + 1] # z1:H
+    clean_actions = actions[:, :action_horizon] # a0:H-1
     expected_action_shape = (
         pixels.shape[0],
         action_horizon,
         self.model.action_dim,
-    )
+    )# (B, H, dim)
+    
     if tuple(clean_actions.shape) != expected_action_shape:
         raise ValueError(
             f"training actions must have shape {expected_action_shape}, "
@@ -76,6 +77,7 @@ def fast_lewam_forward(
     task_condition = batch.get("task_condition")
 
     if train_mode == "stage_ab":
+        # Stage A 预测动作速度，Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
         stage_a = self.model(
             z0,
             noisy_actions,
@@ -124,6 +126,7 @@ def fast_lewam_forward(
             task_condition=task_condition,
         )["predicted_latents"]
     else:
+        # Stage C 直接同时预测动作速度和未来 latent，使用真值动作进行监督。
         joint = self.model(
             z0,
             noisy_actions,

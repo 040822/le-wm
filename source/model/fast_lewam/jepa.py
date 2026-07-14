@@ -107,7 +107,13 @@ class FastLeWAM(nn.Module):
         return latent.reshape(*leading, self.latent_dim)
 
     def _validate_inputs(self, z0, actions, timestep):
-        """检查当前 latent、动作 chunk 和流时间步形状，并规范时间步设备与 dtype。"""
+        """
+        检查当前 latent、动作 chunk 和流时间步形状，并规范时间步设备与 dtype。
+        z0: [B,latent_dim]
+        actions: [B,H,action_dim]
+        timestep: [B] or scalar => [B]
+        
+        """
         if z0.ndim != 2 or z0.shape[-1] != self.latent_dim:
             raise ValueError(
                 f"z0 must have shape [B,{self.latent_dim}], got {tuple(z0.shape)}"
@@ -130,7 +136,12 @@ class FastLeWAM(nn.Module):
         return timestep
 
     def _condition(self, z0, timestep, task_condition):
-        """融合当前 latent、流时间步以及可选任务条件，生成 AdaLN 条件向量。"""
+        """
+        融合当前 latent、流时间步以及可选任务条件，生成 AdaLN 条件向量。
+        z0: [B,latent_dim] => [B,latent_head_dim]
+        temestep: [B] => [B,latent_head_dim]
+        condition: [B,latent_head_dim] + [B,latent_head_dim] +( [B,latent_head_dim] if task_condition is not None )=> [B,latent_head_dim]
+        """
         condition = self.z_condition(z0) + self.time_mlp(
             timestep_embedding(timestep, self.model_dim).to(z0.dtype)
         )
@@ -174,8 +185,8 @@ class FastLeWAM(nn.Module):
 
     def _stage_a(self, z0, noisy_actions, timestep, task_condition=None):
         """以双向动作 self-attention 预测整段 noisy action chunk 的流速度。"""
-        condition = self._condition(z0, timestep, task_condition)
-        tokens = self.action_input(noisy_actions) + self.action_positions
+        condition = self._condition(z0, timestep, task_condition) # [B, latent_head_dim]
+        tokens = self.action_input(noisy_actions) + self.action_positions # [B,H,latent_head_dim]
         hidden = self.predictor(tokens, condition, attention_mask=None)
         return self.action_head(hidden)
 
@@ -201,14 +212,19 @@ class FastLeWAM(nn.Module):
         detach_clean_action: bool = False,
     ) -> dict[str, torch.Tensor]:
         """按 mode 执行 Stage A、B、A+B 或 C，并返回对应动作/latent 预测。"""
-        timestep = self._validate_inputs(z0, actions, timestep)
+        timestep = self._validate_inputs(z0, actions, timestep) # 检查shape，并规范设备和dtype
+        
+        # 不同stage mode
         if mode == "stage_a":
+            # Stage A 预测动作速度
             velocity = self._stage_a(z0, actions, timestep, task_condition)
             return {"action_velocity": velocity}
         if mode == "stage_b":
+            # Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
             hidden = self._joint_hidden(z0, actions, timestep, task_condition)
             return {"predicted_latents": self.latent_head(hidden[:, 2::2])}
         if mode == "stage_ab":
+            # Stage A 预测动作速度，Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
             velocity = self._stage_a(z0, actions, timestep, task_condition)
             clean = actions + (1.0 - timestep[:, None, None]) * velocity
             stage_b_actions = clean.detach() if detach_clean_action else clean
@@ -219,6 +235,7 @@ class FastLeWAM(nn.Module):
                 "predicted_latents": self.latent_head(hidden[:, 2::2]),
             }
         if mode == "stage_c":
+            # Stage C 直接同时预测动作速度和未来 latent，使用真值动作进行监督。
             hidden = self._joint_hidden(z0, actions, timestep, task_condition)
             return {
                 "action_velocity": self.action_head(hidden[:, 1::2]),

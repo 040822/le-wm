@@ -1,4 +1,9 @@
-"""批量加载 Fast-LeWAM epoch 权重并评测 Stage A 与 Stage B。"""
+"""
+批量加载 Fast-LeWAM epoch 权重并评测 Stage A 与 Stage B。
+
+  CUDA_VISIBLE_DEVICES=1 python3 eval_fast_lewam.py outputs/fast_lewam/cube/20260713_194403_043616150/checkpoints --epochs 4
+
+"""
 
 import argparse
 import json
@@ -251,9 +256,9 @@ def build_parser():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--num-eval", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--num-samples", type=int, help="覆盖 Stage B CEM num_samples")
-    parser.add_argument("--cem-steps", type=int, help="覆盖 Stage B CEM n_steps")
-    parser.add_argument("--topk", type=int, help="覆盖 Stage B CEM topk")
+    parser.add_argument("--num-samples", type=int, help="覆盖 Stage B CEM num_samples", default=300)
+    parser.add_argument("--cem-steps", type=int, help="覆盖 Stage B CEM n_steps", default=30)
+    parser.add_argument("--topk", type=int, help="覆盖 Stage B CEM topk", default=30)
     parser.add_argument("--no-video", action="store_true", help="关闭视频生成")
     return parser
 

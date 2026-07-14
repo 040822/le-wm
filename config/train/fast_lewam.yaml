@@ -6,8 +6,7 @@ defaults:
 
 output_model_name: fast_lewam
 subdir: null
-
-num_workers: 2
+num_workers: 8
 train_split: 0.9
 seed: 3072
 img_size: 224
@@ -25,21 +24,19 @@ detach_clean_action: false
 latent_loss_noise_threshold: 0.2
 inference_steps: 10
 
-# 默认启用；每 5 个 epoch 由 global rank 0 依次执行轻量 Stage A/B 环境评测。
 epoch_eval:
   enabled: true
   # null 时自动使用当前 Hydra data 组名（cube/pusht/reacher/tworoom）。
   config_name: null
   modes: [stage_a, stage_b]
-  # 可按需改为 1、10 等正整数，也可通过 Hydra 命令行覆盖。
   every_n_epochs: 5
-  num_eval: 5
+  num_eval: 10
   seed: 42
   save_video: false
   solver:
-    num_samples: 64
-    n_steps: 5
-    topk: 8
+    num_samples: 300
+    n_steps: 30
+    topk: 30
 
 data_pipeline:
   # HDF5Dataset must return channel-first uint8 pixels whose stored spatial
@@ -49,15 +46,16 @@ data_pipeline:
   hdf5_chunk_size: 100
 
 trainer:
-  max_epochs: 100
-  devices: 1
+  max_epochs: 10
+  devices: auto
   accelerator: gpu
   precision: bf16
   gradient_clip_val: 1.0
+  strategy: ddp
   use_distributed_sampler: false
 
 loader:
-  batch_size: 128
+  batch_size: 256
   num_workers: ${num_workers}
   persistent_workers: true
   prefetch_factor: 1
