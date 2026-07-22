@@ -25,6 +25,7 @@ model:
   mlp_dim: 768
   dropout: 0.0
   task_condition_dim: null
+  stage_a_goal_injection: ${stage_a_goal_injection}
   inference_steps: ${inference_steps}
 
   encoder:

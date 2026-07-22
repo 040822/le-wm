@@ -160,6 +160,17 @@ def run(cfg):
     )
 
     callbacks = [object_dump_callback, latest_checkpoint_callback]
+    validation_diagnostics_cfg = cfg.get("validation_diagnostics", {})
+    if validation_diagnostics_cfg.get("enabled", False):
+        callback_kwargs = OmegaConf.to_container(
+            validation_diagnostics_cfg, resolve=True
+        )
+        callback_kwargs.pop("enabled")
+        from source.common.fast_lewam_validation import (
+            FastLeWAMValidationDiagnosticsCallback,
+        )
+
+        callbacks.append(FastLeWAMValidationDiagnosticsCallback(**callback_kwargs))
     epoch_eval_cfg = cfg.get("epoch_eval", {})
     if epoch_eval_cfg.get("enabled", False):
         callback_kwargs = OmegaConf.to_container(epoch_eval_cfg, resolve=True)

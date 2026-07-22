@@ -10,10 +10,15 @@ from source.policy.lewm import build_lewm_optim
 
 
 def _predicted_action_probability(module, stage, mix_epochs):
-    """计算 Stage B 使用 Stage A 预测动作的课程学习概率。"""
+    """
+        计算 Stage B 使用 Stage A 预测动作的课程学习概率。
+    """
+    # 最大概率限制为 0.5，保证训练后期仍有一半样本使用真值动作进行 latent 监督，避免 Stage A 预测动作的偏差累积。
+    max_probability = 0.5
+
     if stage != "fit" or mix_epochs <= 0:
         return 1.0
-    return min(float(module.current_epoch) / float(mix_epochs), 1.0)
+    return min(float(module.current_epoch) / float(mix_epochs), max_probability)
 
 
 def fast_lewam_forward(
@@ -50,6 +55,7 @@ def fast_lewam_forward(
     # 一次共享编码得到当前 z0 和未来监督目标 z1:H，避免重复调用 Encoder。
     embeddings = self.model.encode_pixels(pixels[:, : action_horizon + 1])
     z0 = embeddings[:, 0]
+    goal_latent = embeddings[:, action_horizon]
     target_latents = embeddings[:, 1 : action_horizon + 1] # z1:H
     clean_actions = actions[:, :action_horizon] # a0:H-1
     expected_action_shape = (
@@ -84,6 +90,7 @@ def fast_lewam_forward(
             timestep,
             mode="stage_a",
             task_condition=task_condition,
+            goal_latent=goal_latent,
         )
         predicted_velocity = stage_a["action_velocity"]
         clean_estimate = noisy_actions + (
@@ -118,6 +125,7 @@ def fast_lewam_forward(
             timestep,
             torch.ones_like(timestep),
         )
+        latent_supervision_timestep = stage_b_timestep
         predicted_latents = self.model(
             z0,
             stage_b_actions,
@@ -139,12 +147,15 @@ def fast_lewam_forward(
         clean_estimate = noisy_actions + (
             1.0 - timestep[:, None, None]
         ) * predicted_velocity
+        latent_supervision_timestep = timestep
         predicted_probability = 1.0
 
     action_loss = F.mse_loss(predicted_velocity, target_velocity)
     latent_per_sample = (predicted_latents - target_latents).square().mean(dim=(1, 2))
     # t 越小代表噪声越强；线性权重会降低高噪声样本的 latent 监督强度。
-    noise_weight = (timestep / latent_loss_noise_threshold).clamp(max=1.0)
+    noise_weight = (
+        latent_supervision_timestep / latent_loss_noise_threshold
+    ).clamp(max=1.0)
     weighted_latent_loss = (noise_weight * latent_per_sample).mean()
     latent_prefix_loss = latent_per_sample.mean()
     sigreg_loss = self.sigreg(embeddings.transpose(0, 1))

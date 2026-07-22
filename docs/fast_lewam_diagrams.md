@@ -11,6 +11,7 @@ flowchart TD
     PIX["pixels<br/>B x (H+1) x 3 x 224 x 224<br/>uint8"] --> NORM["GPU float + ImageNet normalization"]
     NORM --> ENC["共享 LeWM ViT Encoder + Projector"]
     ENC --> Z0["当前 z0<br/>B x D"]
+    ENC --> ZGTRAIN["窗口末帧 goal zg=zH<br/>B x D"]
     ENC --> ZTGT["目标 z1:H<br/>B x H x D"]
     ENC --> SIG["SIGReg"]
 
@@ -21,6 +22,7 @@ flowchart TD
     TIME --> CONDA
     FLOW --> DITA["SharedDiT<br/>双向 action self-attention"]
     CONDA --> DITA
+    ZGTRAIN --> DITA
     DITA --> AHEAD["Action Head"]
     AHEAD --> VEL["velocity v_hat"]
     VEL --> CLEAN["a0_hat=x_t+(1-t)*v_hat"]
@@ -60,6 +62,7 @@ Action Head。真值动作样本没有这条间接路径，其 Stage B timestep 
 
 ```mermaid
 flowchart LR
+    ZG["goal token zg"] --> DIT
     Z0["z0 + timestep + task"] --> DIT["SharedDiT<br/>bidirectional attention"]
     X1["x_t,1 + pos1"] --> DIT
     X2["x_t,2 + pos2"] --> DIT
@@ -70,8 +73,10 @@ flowchart LR
     DIT --> VH["v_hatH"]
 ```
 
-所有动作 token 互相可见，一次并行输出整段 velocity；该调用不创建 latent query，
-也不执行 `latent_head`。
+token 顺序为 `[z0,zg,a0,...,aH-1]`。动作 token 可读取两个 anchor 和其他动作；
+`z0` 与 `zg` 可互读，但两个 anchor query 都不能读取 noisy action 列。训练时
+`zg` 来自同一窗口末帧（当前配置为首帧后 25 个环境步），不 detach，也不重复
+注入 AdaLN task condition。该调用不创建 latent query，也不执行 latent head。
 
 ## 3. Stage B：并行 causal-prefix latent 预测
 
@@ -113,11 +118,14 @@ Stage C 用一次 causal pass 同时输出动作和 latent，动作位置也受 
 
 ```mermaid
 flowchart TD
+    GOALOBS["目标 pixels"] --> PRE
     OBS["当前 pixels"] --> PRE["图像预处理<br/>默认 eval: CPU transform<br/>raw uint8: 模型所在设备归一化"]
     PRE --> ENC["Encoder + Projector"]
+    ENC --> ZG["zg"]
     ENC --> Z0["z0"]
     RNG["Gaussian action noise"] --> EULER["Euler integration<br/>默认 10 steps"]
     Z0 --> EULER
+    ZG --> EULER
     EULER --> DITA["Stage A SharedDiT + Action Head"]
     DITA --> EULER
     EULER --> CHUNK["action chunk<br/>B x H x A"]

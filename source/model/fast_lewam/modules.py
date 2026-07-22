@@ -18,17 +18,22 @@ def causal_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
     return torch.ones(length, length, dtype=torch.bool, device=device).tril()
 
 
-def stage_a_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
-    """允许动作读取状态锚点，同时阻止状态锚点读取动作。"""
+def stage_a_attention_mask(
+    action_horizon: int, device=None, num_anchor_tokens: int = 1
+) -> torch.Tensor:
+    """允许动作读取 latent 锚点，同时阻止锚点 query 读取噪声动作。"""
     if action_horizon < 1:
         raise ValueError("action_horizon must be positive")
+    if num_anchor_tokens not in {1, 2}:
+        raise ValueError("num_anchor_tokens must be 1 or 2")
+    length = action_horizon + num_anchor_tokens
     mask = torch.ones(
-        action_horizon + 1,
-        action_horizon + 1,
+        length,
+        length,
         dtype=torch.bool,
         device=device,
     )
-    mask[0, 1:] = False
+    mask[:num_anchor_tokens, num_anchor_tokens:] = False
     return mask
 
 

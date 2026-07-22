@@ -29,6 +29,7 @@ class FastLeWAM(nn.Module):
         mlp_dim: int = 768,
         dropout: float = 0.0,
         task_condition_dim: int | None = None,
+        stage_a_goal_injection: str = "none",
         inference_steps: int = 10,
     ):
         """构造视觉编码器接口、共享 DiT、动作头和 causal-prefix latent 头。"""
@@ -37,6 +38,8 @@ class FastLeWAM(nn.Module):
             raise ValueError(
                 "action_horizon, action_dim, and inference_steps must be positive"
             )
+        if stage_a_goal_injection not in {"none", "token"}:
+            raise ValueError("stage_a_goal_injection must be 'none' or 'token'")
 
         self.encoder = encoder
         self.projector = projector
@@ -46,6 +49,7 @@ class FastLeWAM(nn.Module):
         self.model_dim = latent_head_dim
         self.inference_steps = inference_steps
         self.task_condition_dim = task_condition_dim
+        self.stage_a_goal_injection = stage_a_goal_injection
 
         self.action_input = nn.Linear(action_dim, latent_head_dim)
         self.latent_input = nn.Linear(latent_dim, latent_head_dim)
@@ -62,6 +66,11 @@ class FastLeWAM(nn.Module):
         )
         self.action_positions = nn.Parameter(
             torch.randn(1, action_horizon, latent_head_dim) * 0.02
+        )
+        self.goal_token_embedding = (
+            nn.Parameter(torch.zeros(1, 1, latent_head_dim))
+            if stage_a_goal_injection == "token"
+            else None
         )
         self.joint_positions = nn.Parameter(
             torch.randn(1, 1 + 2 * action_horizon, latent_head_dim) * 0.02
@@ -83,7 +92,10 @@ class FastLeWAM(nn.Module):
         )
         self.register_buffer(
             "stage_a_mask",
-            stage_a_attention_mask(action_horizon),
+            stage_a_attention_mask(
+                action_horizon,
+                num_anchor_tokens=2 if stage_a_goal_injection == "token" else 1,
+            ),
             persistent=False,
         )
 
@@ -189,14 +201,31 @@ class FastLeWAM(nn.Module):
             error_msgs,
         )
 
-    def _stage_a(self, z0, noisy_actions, timestep, task_condition=None):
-        """以受保护的状态锚点和双向动作 attention 预测动作流速度。"""
+    def _stage_a(
+        self, z0, noisy_actions, timestep, task_condition=None, goal_latent=None
+    ):
+        """用受保护的 z0/zg 锚点和双向动作 attention 预测动作流。"""
         condition = self._condition(z0, timestep, task_condition) # [B, latent_head_dim]
         state_token = self.latent_input(z0).unsqueeze(1)
+        anchors = [state_token]
+        if self.stage_a_goal_injection == "token":
+            if goal_latent is None:
+                raise ValueError(
+                    "goal_latent is required when stage_a_goal_injection='token'"
+                )
+            if tuple(goal_latent.shape) != tuple(z0.shape):
+                raise ValueError(
+                    f"goal_latent must have shape {tuple(z0.shape)}, "
+                    f"got {tuple(goal_latent.shape)}"
+                )
+            anchors.append(
+                self.latent_input(goal_latent).unsqueeze(1)
+                + self.goal_token_embedding
+            )
         action_tokens = self.action_input(noisy_actions) + self.action_positions
-        tokens = torch.cat((state_token, action_tokens), dim=1)
+        tokens = torch.cat((*anchors, action_tokens), dim=1)
         hidden = self.predictor(tokens, condition, attention_mask=self.stage_a_mask)
-        return self.action_head(hidden[:, 1:])
+        return self.action_head(hidden[:, len(anchors):])
 
     def _joint_hidden(self, z0, actions, timestep, task_condition=None):
         """按 ``[z0,a1,q1,...,aH,qH]`` 排列 token，并计算严格因果隐藏状态。"""
@@ -217,6 +246,7 @@ class FastLeWAM(nn.Module):
         *,
         mode: str = "stage_a",
         task_condition: torch.Tensor | None = None,
+        goal_latent: torch.Tensor | None = None,
         detach_clean_action: bool = False,
     ) -> dict[str, torch.Tensor]:
         """按 mode 执行 Stage A、B、A+B 或 C，并返回对应动作/latent 预测。"""
@@ -225,7 +255,9 @@ class FastLeWAM(nn.Module):
         # 不同stage mode
         if mode == "stage_a":
             # Stage A 预测动作速度
-            velocity = self._stage_a(z0, actions, timestep, task_condition)
+            velocity = self._stage_a(
+                z0, actions, timestep, task_condition, goal_latent
+            )
             return {"action_velocity": velocity}
         if mode == "stage_b":
             # Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
@@ -233,7 +265,9 @@ class FastLeWAM(nn.Module):
             return {"predicted_latents": self.latent_head(hidden[:, 2::2])}
         if mode == "stage_ab":
             # Stage A 预测动作速度，Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
-            velocity = self._stage_a(z0, actions, timestep, task_condition)
+            velocity = self._stage_a(
+                z0, actions, timestep, task_condition, goal_latent
+            )
             clean = actions + (1.0 - timestep[:, None, None]) * velocity
             stage_b_actions = clean.detach() if detach_clean_action else clean
             hidden = self._joint_hidden(z0, stage_b_actions, timestep, task_condition)
@@ -273,6 +307,7 @@ class FastLeWAM(nn.Module):
         num_steps=None,
         generator=None,
         task_condition=None,
+        goal_latent=None,
     ):
         """从噪声出发，用固定步长显式 Euler 积分生成归一化动作 chunk。"""
         steps = self.inference_steps if num_steps is None else num_steps
@@ -283,7 +318,12 @@ class FastLeWAM(nn.Module):
         for step in range(steps):
             timestep = z0.new_full((z0.shape[0],), step / steps)
             velocity = self(
-                z0, actions, timestep, mode=mode, task_condition=task_condition
+                z0,
+                actions,
+                timestep,
+                mode=mode,
+                task_condition=task_condition,
+                goal_latent=goal_latent,
             )["action_velocity"]
             actions = actions + dt * velocity
         return actions
@@ -297,6 +337,7 @@ class FastLeWAM(nn.Module):
         num_steps=None,
         generator=None,
         task_condition=None,
+        goal_latent=None,
     ):
         """只运行 Stage A flow，采样一整段归一化动作 chunk。"""
         return self._euler_sample(
@@ -306,6 +347,7 @@ class FastLeWAM(nn.Module):
             num_steps=num_steps,
             generator=generator,
             task_condition=task_condition,
+            goal_latent=goal_latent,
         )
 
     @torch.no_grad()
@@ -350,6 +392,11 @@ class FastLeWAM(nn.Module):
                 f"horizon must be in [1,{self.action_horizon}], got {horizon}"
             )
         z0 = self.encode_pixels(self._last_frame(info["pixels"]))
+        goal_latent = None
+        if self.stage_a_goal_injection == "token":
+            if "goal" not in info:
+                raise ValueError("goal observations are required in Stage A token mode")
+            goal_latent = self.encode_pixels(self._last_frame(info["goal"]))
         if z0.ndim != 2:
             raise ValueError("get_action expects pixels with leading [B,T] dimensions")
         if prefix_actions is not None and prefix_actions.shape[1] > 0:
@@ -365,7 +412,7 @@ class FastLeWAM(nn.Module):
                 mode="stage_b",
             )["predicted_latents"]
             z0 = predicted[:, prefix_length - 1]
-        return self.sample_actions(z0)[:, :horizon]
+        return self.sample_actions(z0, goal_latent=goal_latent)[:, :horizon]
 
     def get_cost(self, info_dict, action_candidates):
         """用一次并行 Stage B 因果预测计算候选动作终点到目标 latent 的代价。"""

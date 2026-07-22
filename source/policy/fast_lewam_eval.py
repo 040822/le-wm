@@ -24,6 +24,30 @@ class StageBModelView(nn.Module):
         return self.model.get_cost(info_dict, action_candidates)
 
 
+def _validate_action_dim(model, env, action_block):
+    base_action_dim = int(np.prod(env.single_action_space.shape))
+    expected = int(action_block) * base_action_dim
+    if model.action_dim != expected:
+        raise ValueError(
+            f"model action_dim={model.action_dim} does not match "
+            f"action_block({action_block}) * "
+            f"env_action_dim({base_action_dim})={expected}"
+        )
+
+
+class FastLeWAMStageBPolicy(swm.policy.WorldModelPolicy):
+    """Solver-backed Stage B policy with Fast model shape validation."""
+
+    def __init__(self, *args, fast_model, action_block, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fast_model = fast_model
+        self.fast_action_block = int(action_block)
+
+    def set_env(self, env):
+        _validate_action_dim(self.fast_model, env, self.fast_action_block)
+        super().set_env(env)
+
+
 class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
     """缓存生成的动作块，并按 receding horizon 执行若干步后重新规划。"""
 
@@ -37,11 +61,14 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         receding_horizon_blocks=1,
         inference_steps=None,
         seed=0,
+        goal_mode="correct",
     ):
         """构造直接动作 policy，并冻结模型、记录动作块尺寸和采样参数。"""
         super().__init__()
         if mode not in {"stage_a", "stage_c"}:
             raise ValueError("chunk policy mode must be stage_a or stage_c")
+        if goal_mode not in {"correct", "cyclic_shift"}:
+            raise ValueError("goal_mode must be correct or cyclic_shift")
         if action_block < 1 or receding_horizon_blocks < 1:
             raise ValueError(
                 "action_block and receding_horizon_blocks must be positive"
@@ -56,6 +83,8 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self.receding_horizon_blocks = receding_horizon_blocks
         self.inference_steps = inference_steps
         self.seed = seed
+        self.goal_mode = goal_mode
+        self._goal_indices = None
         self._action_buffer = None
         self._generators = {}
 
@@ -70,19 +99,29 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         """更新采样种子，并清空各设备上已推进过状态的随机数生成器。"""
         self.seed = seed
         self._generators.clear()
+        if self._goal_indices is not None and self.goal_mode == "cyclic_shift":
+            num_envs = self.env.num_envs
+            if num_envs < 2:
+                raise ValueError("cyclic_shift goal ablation requires num_envs >= 2")
+            offset = 1 + self.seed % (num_envs - 1)
+            self._goal_indices = (
+                np.arange(num_envs, dtype=np.int64) + offset
+            ) % num_envs
 
     def set_env(self, env):
         """绑定向量环境、初始化每个环境的动作队列，并校验动作维度。"""
         self.env = env
         self._action_buffer = [deque() for _ in range(env.num_envs)]
-        base_action_dim = int(np.prod(env.single_action_space.shape))
-        expected = self.action_block * base_action_dim
-        if self.model.action_dim != expected:
-            raise ValueError(
-                f"model action_dim={self.model.action_dim} does not match "
-                f"action_block({self.action_block}) * "
-                f"env_action_dim({base_action_dim})={expected}"
-            )
+        if self.goal_mode == "cyclic_shift":
+            if env.num_envs < 2:
+                raise ValueError("cyclic_shift goal ablation requires num_envs >= 2")
+            offset = 1 + self.seed % (env.num_envs - 1)
+            self._goal_indices = (
+                np.arange(env.num_envs, dtype=np.int64) + offset
+            ) % env.num_envs
+        else:
+            self._goal_indices = np.arange(env.num_envs, dtype=np.int64)
+        _validate_action_dim(self.model, env, self.action_block)
 
     def _slice_info(self, info, indices):
         """只截取需要重新规划的环境信息，同时兼容 tensor、数组和列表。"""
@@ -126,7 +165,29 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             for key, value in selected.items():
                 if torch.is_tensor(value):
                     selected[key] = value.to(device)
-            z0 = self.model.encode_pixels(self.model._last_frame(selected["pixels"]))
+            current_frames = self.model._last_frame(selected["pixels"])
+            goal_latent = None
+            if (
+                self.mode == "stage_a"
+                and self.model.stage_a_goal_injection == "token"
+            ):
+                if "goal" not in info:
+                    raise ValueError(
+                        "goal observations are required for Stage A token mode"
+                    )
+                goal_indices = self._goal_indices[np.asarray(replan)]
+                goal_info = self._slice_info(info, goal_indices)
+                goal_frames = self.model._last_frame(
+                    goal_info["goal"]
+                )
+                if torch.is_tensor(goal_frames):
+                    goal_frames = goal_frames.to(device)
+                encoded = self.model.encode_pixels(
+                    torch.cat((current_frames, goal_frames))
+                )
+                z0, goal_latent = encoded.split(len(replan))
+            else:
+                z0 = self.model.encode_pixels(current_frames)
             generator = self._generator(device)
             with torch.no_grad():
                 if self.mode == "stage_a":
@@ -134,6 +195,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                         z0,
                         num_steps=self.inference_steps,
                         generator=generator,
+                        goal_latent=goal_latent,
                     )
                 else:
                     chunk = self.model.sample_joint(
@@ -171,9 +233,9 @@ def make_fast_lewam_policy(
     transform,
     device="cuda",
     mode="stage_a",
-    direct_receding_horizon=1,
     inference_steps=None,
     seed=0,
+    goal_mode="correct",
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -190,11 +252,13 @@ def make_fast_lewam_policy(
     if mode == "stage_b":
         solver_model = StageBModelView(model)
         solver = hydra.utils.instantiate(solver_cfg, model=solver_model)
-        return swm.policy.WorldModelPolicy(
+        return FastLeWAMStageBPolicy(
             solver=solver,
             config=config,
             process=process,
             transform=transform,
+            fast_model=model,
+            action_block=config.action_block,
         )
     if mode not in {"stage_a", "stage_c"}:
         raise ValueError("Fast-LeWAM policy mode must be stage_a, stage_b, or stage_c")
@@ -204,10 +268,16 @@ def make_fast_lewam_policy(
         transform=transform,
         mode=mode,
         action_block=config.action_block,
-        receding_horizon_blocks=direct_receding_horizon,
+        receding_horizon_blocks=config.receding_horizon,
         inference_steps=inference_steps,
         seed=seed,
+        goal_mode=goal_mode,
     )
 
 
-__all__ = ["FastLeWAMChunkPolicy", "StageBModelView", "make_fast_lewam_policy"]
+__all__ = [
+    "FastLeWAMChunkPolicy",
+    "FastLeWAMStageBPolicy",
+    "StageBModelView",
+    "make_fast_lewam_policy",
+]
