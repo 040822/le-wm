@@ -2,11 +2,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import torch
+from omegaconf import OmegaConf
+
 from source.common.checkpoint import (
     CHECKPOINTS_DIRNAME,
     LAST_CHECKPOINT_FILENAME,
     get_policy_eval_paths,
     get_policy_results_path,
+    load_policy_or_model,
     policy_checkpoint_candidates,
     resolve_training_resume_checkpoint,
     training_resume_checkpoint_candidates,
@@ -14,6 +18,71 @@ from source.common.checkpoint import (
 
 
 class CheckpointPathTests(unittest.TestCase):
+    def test_loads_relative_epoch_weights_from_saved_training_config(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            run_dir = Path(tmpdir)
+            checkpoint_dir = run_dir / CHECKPOINTS_DIRNAME
+            checkpoint_dir.mkdir()
+            checkpoint = checkpoint_dir / "lewm_weights_epoch_10.pt"
+            expected = torch.nn.Linear(3, 2)
+            with torch.no_grad():
+                expected.weight.fill_(1.25)
+                expected.bias.fill_(-0.5)
+            torch.save(expected.state_dict(), checkpoint)
+            OmegaConf.save(
+                OmegaConf.create(
+                    {
+                        "policy": {
+                            "model": {
+                                "_target_": "torch.nn.Linear",
+                                "in_features": 3,
+                                "out_features": 2,
+                            }
+                        }
+                    }
+                ),
+                run_dir / "config.yaml",
+            )
+
+            relative_checkpoint = checkpoint.relative_to(Path.cwd())
+            loaded, resolved_checkpoint = load_policy_or_model(relative_checkpoint)
+
+        self.assertTrue(torch.equal(loaded.weight, expected.weight))
+        self.assertTrue(torch.equal(loaded.bias, expected.bias))
+        self.assertEqual(resolved_checkpoint, checkpoint.resolve())
+
+    def test_loads_cache_relative_epoch_weights(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            run_dir = cache_dir / "run"
+            checkpoint_dir = run_dir / CHECKPOINTS_DIRNAME
+            checkpoint_dir.mkdir(parents=True)
+            checkpoint = checkpoint_dir / "lewm_weights_epoch_2.pt"
+            expected = torch.nn.Linear(2, 1)
+            torch.save(expected.state_dict(), checkpoint)
+            OmegaConf.save(
+                OmegaConf.create(
+                    {
+                        "policy": {
+                            "model": {
+                                "_target_": "torch.nn.Linear",
+                                "in_features": 2,
+                                "out_features": 1,
+                            }
+                        }
+                    }
+                ),
+                run_dir / "config.yaml",
+            )
+
+            loaded, resolved_checkpoint = load_policy_or_model(
+                "run/checkpoints/lewm_weights_epoch_2.pt",
+                cache_dir=cache_dir,
+            )
+
+        self.assertTrue(torch.equal(loaded.weight, expected.weight))
+        self.assertEqual(resolved_checkpoint, checkpoint)
+
     def test_policy_prefix_checks_old_and_nested_checkpoint_layouts(self):
         run_dir = Path("/tmp/lewm_run")
 

@@ -78,7 +78,56 @@ def _load_remapped_pretrained(policy_name, cache_dir=None):
         raise
 
 
+def _load_training_epoch_weights(checkpoint_path):
+    import hydra
+    from omegaconf import OmegaConf
+
+    checkpoint_path = Path(checkpoint_path)
+    run_dir = (
+        checkpoint_path.parent.parent
+        if checkpoint_path.parent.name == CHECKPOINTS_DIRNAME
+        else checkpoint_path.parent
+    )
+    config_path = run_dir / "config.yaml"
+    if not config_path.is_file():
+        raise FileNotFoundError(
+            f"Training run config not found for epoch weights: {config_path}"
+        )
+
+    run_cfg = OmegaConf.load(config_path)
+    model_cfg = OmegaConf.select(run_cfg, "policy.model")
+    if model_cfg is None:
+        raise ValueError(f"policy.model not found in training config: {config_path}")
+    model = hydra.utils.instantiate(model_cfg)
+    state_dict = torch_load_compat(checkpoint_path, map_location="cpu")
+    if not isinstance(state_dict, dict):
+        raise TypeError(
+            f"Expected a state_dict mapping in {checkpoint_path}, "
+            f"got {type(state_dict).__name__}"
+        )
+    model.load_state_dict(state_dict, strict=True)
+    return model
+
+
+def _is_training_epoch_weights(path):
+    name = Path(path).name
+    if not name.endswith(".pt"):
+        return False
+    prefix, marker, epoch = name[:-3].rpartition("_weights_epoch_")
+    return bool(prefix and marker and epoch.isdigit())
+
+
 def load_policy_or_model(policy_name, cache_dir=None):
+    if _is_training_epoch_weights(policy_name):
+        path = Path(policy_name).expanduser()
+        epoch_candidates = [path]
+        if not path.is_absolute():
+            epoch_candidates.append(resolve_policy_path(path, cache_dir=cache_dir))
+        for candidate in epoch_candidates:
+            if candidate.is_file():
+                candidate = candidate.resolve()
+                return _load_training_epoch_weights(candidate), candidate
+
     candidates = policy_checkpoint_candidates(policy_name, cache_dir=cache_dir)
     for candidate in candidates:
         if candidate.exists():
