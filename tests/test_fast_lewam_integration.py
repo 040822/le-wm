@@ -75,6 +75,44 @@ class FastLeWAMIntegrationTests(unittest.TestCase):
         self.assertEqual(tuple(sample["action"].shape), (6, 10))
         self.assertTrue(output["loss"].isfinite())
 
+    @unittest.skipUnless(PUSHT_PATH.exists(), "local PushT dataset is unavailable")
+    def test_real_pusht_window_runs_stage_b_only_forward_and_backward(self):
+        dataset = load_dataset(
+            "pusht.h5",
+            cache_dir=str(ROOT / "data"),
+            num_steps=6,
+            frameskip=5,
+            keys_to_load=["pixels", "action"],
+        )
+        sample = dataset[0]
+        module = FakeTrainingModule(make_pusht_model())
+
+        output = fast_lewam_forward(
+            module,
+            batch={key: value.unsqueeze(0) for key, value in sample.items()},
+            stage="fit",
+            action_horizon=5,
+            train_mode="stage_b",
+            lambda_latent=1.0,
+            lambda_sigreg=0.09,
+            detach_clean_action=True,
+            latent_loss_noise_threshold=0.2,
+            latent_action_mix_epochs=0,
+        )
+        output["loss"].backward()
+
+        shared_grad = module.model.predictor.layers[0].attention.to_qkv.weight.grad
+        encoder_grad = module.model.encoder.proj.weight.grad
+        latent_head_grad = module.model.latent_head.weight.grad
+        self.assertTrue(output["loss"].isfinite())
+        self.assertIsNotNone(shared_grad)
+        self.assertGreater(shared_grad.abs().sum().item(), 0.0)
+        self.assertIsNotNone(encoder_grad)
+        self.assertGreater(encoder_grad.abs().sum().item(), 0.0)
+        self.assertIsNotNone(latent_head_grad)
+        self.assertGreater(latent_head_grad.abs().sum().item(), 0.0)
+        self.assertIsNone(module.model.action_head.weight.grad)
+
     def test_hydra_instantiates_fast_and_legacy_policy_configs(self):
         with initialize_config_dir(
             config_dir=str(ROOT / "config" / "train"), version_base=None
@@ -93,6 +131,28 @@ class FastLeWAMIntegrationTests(unittest.TestCase):
         self.assertEqual(fast.data.dataset.num_steps, 6)
         self.assertEqual(fast_policy.model.action_horizon, 5)
         self.assertEqual(legacy_policy.model.action_encoder.patch_embed.in_channels, 10)
+
+    def test_stage_b_policy_freezes_only_stage_a_parameters(self):
+        with initialize_config_dir(
+            config_dir=str(ROOT / "config" / "train"), version_base=None
+        ):
+            cfg = compose(
+                config_name="fast_lewam",
+                overrides=[
+                    "data=pusht",
+                    "train_mode=stage_b",
+                    "policy.model.action_dim=10",
+                ],
+            )
+            policy = instantiate(cfg.policy)
+
+        self.assertFalse(policy.model.action_positions.requires_grad)
+        self.assertFalse(policy.model.action_head.weight.requires_grad)
+        self.assertFalse(policy.model.goal_token_embedding.requires_grad)
+        self.assertTrue(policy.model.action_input.weight.requires_grad)
+        shared_weight = policy.model.predictor.layers[0].attention.to_qkv.weight
+        self.assertTrue(shared_weight.requires_grad)
+        self.assertTrue(policy.model.latent_head.weight.requires_grad)
 
     @unittest.skipUnless(
         LEGACY_CHECKPOINT.exists(), "local legacy LeWM checkpoint is unavailable"

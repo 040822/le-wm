@@ -87,6 +87,11 @@ class FastLeWAMEpochEvalCallback(Callback):
         epoch = trainer.current_epoch + 1
         if epoch % self.every_n_epochs:
             return
+        stages = self.stages
+        if getattr(pl_module, "train_mode", None) == "stage_b":
+            stages = tuple(stage for stage in stages if stage == "stage_b")
+        if not stages:
+            return
         trainer.strategy.barrier("fast-lewam-epoch-eval-start")
         if trainer.is_global_zero:
             model = pl_module.model
@@ -103,7 +108,7 @@ class FastLeWAMEpochEvalCallback(Callback):
                 else None
             )
             try:
-                for stage in self.stages:
+                for stage in stages:
                     try:
                         result = self.evaluator(
                             model=model,

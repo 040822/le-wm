@@ -22,6 +22,42 @@ class FakeTrainingModule:
 
 
 class FastLeWAMPolicyTests(unittest.TestCase):
+    def test_stage_b_training_uses_only_latent_and_sigreg_losses(self):
+        torch.manual_seed(7)
+        module = FakeTrainingModule()
+        batch = {
+            "pixels": torch.randn(2, 4, 3, 8, 8),
+            "action": torch.randn(2, 4, 4),
+        }
+        output = fast_lewam_forward(
+            module,
+            batch=batch,
+            stage="fit",
+            action_horizon=3,
+            train_mode="stage_b",
+            lambda_latent=0.4,
+            lambda_sigreg=0.2,
+            detach_clean_action=True,
+            latent_loss_noise_threshold=0.25,
+            latent_action_mix_epochs=0,
+        )
+        expected = 0.4 * output["latent_prefix_loss"] + 0.2 * output["sigreg_loss"]
+        expected_latents = module.model(
+            output["emb"][:, 0],
+            batch["action"][:, :3],
+            torch.ones(2),
+            mode="stage_b",
+        )["predicted_latents"]
+        self.assertTrue(torch.allclose(output["loss"], expected))
+        self.assertTrue(torch.allclose(output["predicted_latents"], expected_latents))
+        self.assertEqual(output["predicted_latents"].shape, (2, 3, 8))
+        self.assertEqual(output["noise_weight"].item(), 1.0)
+        self.assertNotIn("action_loss", output)
+        self.assertNotIn("action_velocity", output)
+        self.assertNotIn("clean_action", output)
+        self.assertNotIn("predicted_action_probability", output)
+        self.assertNotIn("fit/action_loss", module.logged)
+
     def test_stage_ab_training_combines_flow_latent_and_sigreg_losses(self):
         torch.manual_seed(11)
         module = FakeTrainingModule(stage_a_goal_injection="token")

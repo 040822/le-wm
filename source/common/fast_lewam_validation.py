@@ -149,7 +149,7 @@ class FastLeWAMValidationDiagnosticsCallback(Callback):
         """复用 validation forward 输出，并限制每个 epoch 的诊断 batch 数。"""
         if trainer.sanity_checking or batch_idx >= self.max_batches:
             return
-        if getattr(pl_module, "train_mode", None) != "stage_ab":
+        if getattr(pl_module, "train_mode", None) not in {"stage_ab", "stage_b"}:
             return
         precision_plugin = getattr(trainer, "precision_plugin", None)
         forward_context = (

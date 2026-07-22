@@ -34,8 +34,8 @@ def fast_lewam_forward(
     latent_action_mix_epochs,
 ):
     """执行 Fast-LeWAM 前向，并组合 flow、causal-prefix latent 与 SIGReg 损失。"""
-    if train_mode not in {"stage_ab", "stage_c"}:
-        raise ValueError("train_mode must be 'stage_ab' or 'stage_c'")
+    if train_mode not in {"stage_ab", "stage_b", "stage_c"}:
+        raise ValueError("train_mode must be 'stage_ab', 'stage_b', or 'stage_c'")
     if not 0 < latent_loss_noise_threshold <= 1:
         raise ValueError("latent_loss_noise_threshold must be in (0, 1]")
 
@@ -70,17 +70,33 @@ def fast_lewam_forward(
             f"got {tuple(clean_actions.shape)}"
         )
 
-    # 线性 flow matching：x_t=(1-t)noise+t*action，目标速度为 action-noise。
-    timestep = torch.rand(
-        pixels.shape[0], device=clean_actions.device, dtype=clean_actions.dtype
-    )
-    noise = torch.randn_like(clean_actions)
-    noisy_actions = (
-        (1.0 - timestep[:, None, None]) * noise
-        + timestep[:, None, None] * clean_actions
-    )
-    target_velocity = clean_actions - noise
     task_condition = batch.get("task_condition")
+
+    if train_mode == "stage_b":
+        # Stage-B-only 只用数据中的 expert actions 学习并行 latent dynamics。
+        latent_supervision_timestep = torch.ones(
+            pixels.shape[0],
+            device=clean_actions.device,
+            dtype=clean_actions.dtype,
+        )
+        predicted_latents = self.model(
+            z0,
+            clean_actions,
+            latent_supervision_timestep,
+            mode="stage_b",
+            task_condition=task_condition,
+        )["predicted_latents"]
+    else:
+        # 线性 flow matching：x_t=(1-t)noise+t*action，目标速度为 action-noise。
+        timestep = torch.rand(
+            pixels.shape[0], device=clean_actions.device, dtype=clean_actions.dtype
+        )
+        noise = torch.randn_like(clean_actions)
+        noisy_actions = (
+            (1.0 - timestep[:, None, None]) * noise
+            + timestep[:, None, None] * clean_actions
+        )
+        target_velocity = clean_actions - noise
 
     if train_mode == "stage_ab":
         # Stage A 预测动作速度，Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
@@ -133,7 +149,7 @@ def fast_lewam_forward(
             mode="stage_b",
             task_condition=task_condition,
         )["predicted_latents"]
-    else:
+    elif train_mode == "stage_c":
         # Stage C 直接同时预测动作速度和未来 latent，使用真值动作进行监督。
         joint = self.model(
             z0,
@@ -150,7 +166,6 @@ def fast_lewam_forward(
         latent_supervision_timestep = timestep
         predicted_probability = 1.0
 
-    action_loss = F.mse_loss(predicted_velocity, target_velocity)
     latent_per_sample = (predicted_latents - target_latents).square().mean(dim=(1, 2))
     # t 越小代表噪声越强；线性权重会降低高噪声样本的 latent 监督强度。
     noise_weight = (
@@ -159,25 +174,27 @@ def fast_lewam_forward(
     weighted_latent_loss = (noise_weight * latent_per_sample).mean()
     latent_prefix_loss = latent_per_sample.mean()
     sigreg_loss = self.sigreg(embeddings.transpose(0, 1))
-    loss = (
-        action_loss
-        + lambda_latent * weighted_latent_loss
-        + lambda_sigreg * sigreg_loss
-    )
+    loss = lambda_latent * weighted_latent_loss + lambda_sigreg * sigreg_loss
 
     output = {
         "loss": loss,
-        "action_loss": action_loss,
         "latent_prefix_loss": latent_prefix_loss,
         "weighted_latent_prefix_loss": weighted_latent_loss,
         "sigreg_loss": sigreg_loss,
         "noise_weight": noise_weight.mean(),
-        "predicted_action_probability": loss.new_tensor(predicted_probability),
-        "action_velocity": predicted_velocity,
-        "clean_action": clean_estimate,
         "predicted_latents": predicted_latents,
         "emb": embeddings,
     }
+    if train_mode != "stage_b":
+        action_loss = F.mse_loss(predicted_velocity, target_velocity)
+        loss = loss + action_loss
+        output.update(
+            loss=loss,
+            action_loss=action_loss,
+            predicted_action_probability=loss.new_tensor(predicted_probability),
+            action_velocity=predicted_velocity,
+            clean_action=clean_estimate,
+        )
     metric_names = {
         "loss",
         "action_loss",
@@ -215,6 +232,15 @@ class FastLeWAMPolicy(spt.Module):
         optim_interval="epoch",
     ):
         """绑定训练超参数，并复用 LeWM 的 optimizer/scheduler checkpoint 逻辑。"""
+        if train_mode not in {"stage_ab", "stage_b", "stage_c"}:
+            raise ValueError(
+                "train_mode must be 'stage_ab', 'stage_b', or 'stage_c'"
+            )
+        if train_mode == "stage_b":
+            model.action_positions.requires_grad_(False)
+            model.action_head.requires_grad_(False)
+            if model.goal_token_embedding is not None:
+                model.goal_token_embedding.requires_grad_(False)
         forward = partial(
             fast_lewam_forward,
             action_horizon=action_horizon,

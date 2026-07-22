@@ -119,5 +119,40 @@ class FastLeWAMValidationMetricsTests(unittest.TestCase):
         self.assertTrue(log_kwargs["on_epoch"])
         self.assertTrue(log_kwargs["sync_dist"])
 
+    def test_callback_logs_stage_b_only_validation(self):
+        clean_actions = torch.tensor(
+            [
+                [[1.0, 0.0], [2.0, 0.5]],
+                [[-1.0, 0.5], [-2.0, -0.5]],
+            ]
+        )
+        target_latents = clean_actions.clone()
+        policy = FakePolicy()
+        policy.train_mode = "stage_b"
+        callback = FastLeWAMValidationDiagnosticsCallback(
+            max_batches=1,
+            noise_std=0.25,
+            seed=7,
+        )
+
+        callback.on_validation_batch_end(
+            FakeTrainer(),
+            policy,
+            {
+                "emb": torch.cat(
+                    [torch.zeros(2, 1, 2), target_latents], dim=1
+                ),
+                "predicted_latents": target_latents,
+            },
+            {"action": clean_actions},
+            batch_idx=0,
+        )
+
+        self.assertEqual(len(policy.logged), 1)
+        self.assertIn(
+            "validate/stage_b_expert_preference_accuracy",
+            policy.logged[0][0],
+        )
+
 if __name__ == "__main__":
     unittest.main()

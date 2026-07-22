@@ -138,6 +138,18 @@ class FastLeWAMEpochEvalCallbackTests(unittest.TestCase):
             ["stage_a", "stage_a_shuffled_goal", "stage_b", "stage_c"],
         )
 
+    def test_stage_b_only_policy_evaluates_only_stage_b(self):
+        calls = []
+        callback = FastLeWAMEpochEvalCallback(
+            evaluator=lambda **kwargs: calls.append(kwargs["stage"]) or {},
+        )
+        module = FakeModule()
+        module.train_mode = "stage_b"
+
+        callback.on_train_epoch_end(FakeTrainer(), module)
+
+        self.assertEqual(calls, ["stage_b"])
+
     def test_metric_logging_skips_none_metadata(self):
         logged = []
         logger_type = type(
