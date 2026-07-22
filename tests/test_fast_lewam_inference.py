@@ -35,5 +35,13 @@ class FastLeWAMInferenceTests(unittest.TestCase):
         self.assertGreater(candidates.grad.abs().sum().item(), 0.0)
 
 
+    def test_goal_token_stage_a_sampler_requires_goal(self):
+        model = make_model(stage_a_goal_injection="token").eval()
+        z0 = torch.randn(2, 8)
+        with self.assertRaisesRegex(ValueError, "goal_latent"):
+            model.sample_actions(z0, num_steps=2)
+        actions = model.sample_actions(z0, goal_latent=torch.randn(2, 8), num_steps=2)
+        self.assertEqual(actions.shape, (2, 3, 4))
+
 if __name__ == "__main__":
     unittest.main()

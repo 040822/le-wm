@@ -17,26 +17,27 @@ num_preds: ${action_horizon}
 checkpoint_interval_minutes: 30
 
 train_mode: stage_ab
+stage_a_goal_injection: token
 latent_head_layers: 6
 latent_head_dim: 192
-latent_action_mix_epochs: 20
+latent_action_mix_epochs: 10
 detach_clean_action: false
 latent_loss_noise_threshold: 0.2
 inference_steps: 10
+
+validation_diagnostics:
+  enabled: true
+  max_batches: 8
+  noise_std: 0.1
+  seed: ${seed}
 
 epoch_eval:
   enabled: true
   # null 时自动使用当前 Hydra data 组名（cube/pusht/reacher/tworoom）。
   config_name: null
-  modes: [stage_a, stage_b]
+  stages: [stage_a, stage_a_shuffled_goal, stage_b, stage_c]
   every_n_epochs: 5
-  num_eval: 10
-  seed: 42
-  save_video: false
-  solver:
-    num_samples: 300
-    n_steps: 30
-    topk: 30
+  eval_overrides: []
 
 data_pipeline:
   # HDF5Dataset must return channel-first uint8 pixels whose stored spatial
@@ -55,7 +56,7 @@ trainer:
   use_distributed_sampler: false
 
 loader:
-  batch_size: 256
+  batch_size: 200
   num_workers: ${num_workers}
   persistent_workers: true
   prefetch_factor: 1

@@ -24,7 +24,7 @@ class TinyEncoder(nn.Module):
         return SimpleNamespace(last_hidden_state=cls[:, None])
 
 
-def make_model(action_horizon=3, task_condition_dim=None):
+def make_model(action_horizon=3, task_condition_dim=None, stage_a_goal_injection="none"):
     torch.manual_seed(7)
     return FastLeWAM(
         encoder=TinyEncoder(latent_dim=8),
@@ -38,6 +38,7 @@ def make_model(action_horizon=3, task_condition_dim=None):
         mlp_dim=24,
         dropout=0.0,
         task_condition_dim=task_condition_dim,
+        stage_a_goal_injection=stage_a_goal_injection,
     )
 
 
@@ -149,6 +150,23 @@ class FastLeWAMModelTests(unittest.TestCase):
             )
         )
 
+
+    def test_goal_token_mode_uses_two_anchors_and_requires_goal(self):
+        mask = stage_a_attention_mask(action_horizon=3, num_anchor_tokens=2)
+        expected = torch.ones(5, 5, dtype=torch.bool)
+        expected[:2, 2:] = False
+        self.assertTrue(torch.equal(mask, expected))
+        model = make_model(stage_a_goal_injection="token")
+        z0 = torch.randn(2, 8)
+        actions = torch.randn(2, 3, 4)
+        timestep = torch.tensor([0.2, 0.8])
+        with self.assertRaisesRegex(ValueError, "goal_latent"):
+            model(z0, actions, timestep, mode="stage_a")
+        goal = torch.randn(2, 8, requires_grad=True)
+        output = model(z0, actions, timestep, mode="stage_a", goal_latent=goal)
+        output["action_velocity"].square().mean().backward()
+        self.assertIsNotNone(goal.grad)
+        self.assertGreater(goal.grad.abs().sum().item(), 0.0)
 
 if __name__ == "__main__":
     unittest.main()

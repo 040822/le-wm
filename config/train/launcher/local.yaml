@@ -4,13 +4,15 @@
 defaults:
   - override /hydra/launcher: basic
 
+info:
+
 wandb:
   enabled: True
   config:
     entity: wxflwyr-sun-yat-sen-university
     project: LeWorldModel
-    name: ${output_model_name}
-    id: ${subdir}
+    name: ${output_model_name}_${now:%Y%m%d_%H%M%S_%f}_${info}
+    # id: ${subdir}
     resume: allow
     log_model: False
 

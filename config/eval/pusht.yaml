@@ -25,11 +25,13 @@ plan_config:
 
 # evaluation from dataset (replay expert trajectories)
 eval:
+  task_name: pusht
   num_eval: 50
   goal_offset_steps: 25
   eval_budget: 50
   img_size: 224
-  dataset_name: pusht_expert_train
+  dataset_name: pusht
+  benchmark_dataset_name: pusht_expert_train
   callables:
     # -- set state
     - method: _set_state
@@ -43,4 +45,4 @@ eval:
           value: goal_state
           
 output:
-  filename: pusht_results.txt
+  save_video: true

@@ -1,14 +1,18 @@
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
 
 from eval_fast_lewam import (
+    FAST_LEWAM_STAGES,
     discover_weight_checkpoints,
     load_model_from_weights,
-    resolve_eval_dataset_name,
+    parse_cli,
+    resolve_eval_config_name,
+    run_evaluation,
 )
 
 
@@ -61,17 +65,58 @@ class FastLeWAMBatchEvalTests(unittest.TestCase):
         self.assertTrue(torch.equal(loaded.weight, expected.weight))
         self.assertTrue(torch.equal(loaded.bias, expected.bias))
 
-    def test_eval_dataset_defaults_to_training_run_and_allows_override(self):
-        cfg = OmegaConf.create(
-            {"data": {"dataset": {"name": "ogbench/cube_single.h5"}}}
+    def test_eval_task_uses_saved_hydra_choice_and_allows_explicit_override(self):
+        cfg = OmegaConf.create({"data": {"dataset": {"name": "pusht.h5"}}})
+        with tempfile.TemporaryDirectory() as root:
+            hydra_dir = Path(root) / ".hydra"
+            hydra_dir.mkdir()
+            OmegaConf.save(
+                OmegaConf.create(
+                    {"hydra": {"runtime": {"choices": {"data": "reacher"}}}}
+                ),
+                hydra_dir / "hydra.yaml",
+            )
+            inferred = resolve_eval_config_name(Path(root), cfg)
+            overridden = resolve_eval_config_name(Path(root), cfg, "cube")
+
+        self.assertEqual(inferred, "reacher")
+        self.assertEqual(overridden, "cube")
+
+    def test_cli_keeps_batch_arguments_and_forwards_eval_dotlist(self):
+        args, overrides = parse_cli(
+            [
+                "checkpoints",
+                "--epochs",
+                "5",
+                "10",
+                "seed=7",
+                "solver.n_steps=12",
+            ]
         )
 
-        inferred = resolve_eval_dataset_name(cfg)
-        overridden = resolve_eval_dataset_name(cfg, "ogbench/cube_single_expert")
+        self.assertEqual(args.epochs, [5, 10])
+        self.assertEqual(tuple(args.stages), FAST_LEWAM_STAGES)
+        self.assertEqual(overrides, ("seed=7", "solver.n_steps=12"))
 
-        self.assertEqual(inferred, "ogbench/cube_single")
-        self.assertEqual(overridden, "ogbench/cube_single_expert")
+    def test_setup_failure_writes_machine_and_human_artifacts(self):
+        with tempfile.TemporaryDirectory() as root:
+            checkpoint_dir = Path(root) / "checkpoints"
+            checkpoint_dir.mkdir()
+            (checkpoint_dir / "fast_lewam_weights_epoch_1.pt").touch()
+            args = Namespace(
+                checkpoint_dir=str(checkpoint_dir),
+                epochs=None,
+                run_config=None,
+                config_name=None,
+                stages=FAST_LEWAM_STAGES,
+            )
 
+            with self.assertRaisesRegex(FileNotFoundError, "run config"):
+                run_evaluation(args)
+
+            failure_dir = Path(root) / "eval" / "setup"
+            self.assertTrue((failure_dir / "failure.json").is_file())
+            self.assertTrue((failure_dir / "failure.txt").is_file())
 
 if __name__ == "__main__":
     unittest.main()

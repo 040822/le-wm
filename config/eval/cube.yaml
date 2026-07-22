@@ -30,11 +30,13 @@ plan_config:
 
 # evaluation from dataset (replay expert trajectories)
 eval:
+  task_name: cube
   num_eval: 50
   goal_offset_steps: 25
   eval_budget: 50
   img_size: 224
-  dataset_name: ogbench/cube_single_expert
+  dataset_name: ogbench/cube_single
+  benchmark_dataset_name: ogbench/cube_single_expert
   callables:
     # -- set state
     - method: set_state
@@ -55,5 +57,4 @@ eval:
           value: goal_privileged_block_0_quat
 
 output:
-  filename: ogb_cube_results.txt
-
+  save_video: true

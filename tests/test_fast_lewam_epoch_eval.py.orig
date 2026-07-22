@@ -9,6 +9,7 @@ from torch import nn
 from source.common.epoch_eval import (
     FastLeWAMEpochEvalCallback,
     FastLeWAMEpochEvaluator,
+    _load_eval_config,
 )
 
 
@@ -40,9 +41,9 @@ class FastLeWAMEpochEvalCallbackTests(unittest.TestCase):
         calls = []
         callback = FastLeWAMEpochEvalCallback(
             config_name="cube",
-            stages=("stage_a", "stage_b"),
+            modes=("stage_a", "stage_b"),
             every_n_epochs=1,
-            evaluator=lambda **kwargs: calls.append(kwargs["stage"]) or {},
+            evaluator=lambda **kwargs: calls.append(kwargs["mode"]) or {},
         )
         trainer = FakeTrainer(epoch=0, global_zero=True)
 
@@ -92,33 +93,39 @@ class FastLeWAMEpochEvalCallbackTests(unittest.TestCase):
         self.assertEqual(trainer.strategy.barriers, [])
 
     def test_eval_seed_is_resolved_into_cem_solver(self):
+        cfg = _load_eval_config(
+            "cube", 1, {}, seed=123, dataset_name="ogbench/cube_single"
+        )
+
+        self.assertEqual(cfg.seed, 123)
+        self.assertEqual(cfg.solver.seed, 123)
+        self.assertEqual(cfg.eval.dataset_name, "ogbench/cube_single")
+
         evaluator = FastLeWAMEpochEvaluator(
             config_name="cube",
-            eval_overrides=("eval.num_eval=1", "seed=123"),
+            num_eval=1,
+            solver_overrides={},
+            seed=123,
+            dataset_name="ogbench/cube_single",
         )
-        self.assertEqual(evaluator.cfg.seed, 123)
-        self.assertEqual(evaluator.cfg.solver.seed, 123)
-        self.assertEqual(evaluator.cfg.eval.num_eval, 1)
 
     def test_stage_a_failure_does_not_skip_stage_b(self):
         calls = []
 
         def evaluator(**kwargs):
-            stage = kwargs["stage"]
-            calls.append(stage)
-            if stage == "stage_a":
+            mode = kwargs["mode"]
+            calls.append(mode)
+            if mode == "stage_a":
                 raise RuntimeError("stage a failed")
             return {}
 
-        callback = FastLeWAMEpochEvalCallback(
-            stages=("stage_a", "stage_b"), evaluator=evaluator
-        )
+        callback = FastLeWAMEpochEvalCallback(evaluator=evaluator)
         with tempfile.TemporaryDirectory() as root:
             trainer = FakeTrainer(root=root)
             callback.on_train_epoch_end(trainer, FakeModule())
             failure = (
                 Path(root)
-                / "eval"
+                / "epoch_eval"
                 / "epoch_1"
                 / "stage_a"
                 / "failure.txt"
@@ -127,35 +134,22 @@ class FastLeWAMEpochEvalCallbackTests(unittest.TestCase):
         self.assertEqual(calls, ["stage_a", "stage_b"])
         self.assertEqual(len(trainer.strategy.barriers), 2)
 
-    def test_default_stages_include_stage_c_reference(self):
+    def test_logs_goal_conditioning_gap_for_paired_stage_a_modes(self):
         calls = []
+        rates = {"stage_a": 70.0, "stage_a_shuffled_goal": 40.0, "stage_b": 60.0}
         callback = FastLeWAMEpochEvalCallback(
-            evaluator=lambda **kwargs: calls.append(kwargs["stage"]) or {},
+            modes=("stage_a", "stage_a_shuffled_goal", "stage_b"),
+            evaluator=lambda **kwargs: calls.append(kwargs["mode"])
+            or {"success_rate": rates[kwargs["mode"]]},
         )
-        callback.on_train_epoch_end(FakeTrainer(), FakeModule())
-        self.assertEqual(
-            calls,
-            ["stage_a", "stage_a_shuffled_goal", "stage_b", "stage_c"],
-        )
-
-    def test_metric_logging_skips_none_metadata(self):
         logged = []
         logger_type = type(
             "Logger", (), {"log_metrics": lambda self, metrics, step: logged.append(metrics)}
         )
         trainer = FakeTrainer()
         trainer.logger = logger_type()
-        metrics = {
-            "success_rate": 80.0,
-            "episode_successes": np.array(
-                [True, True, False, True, False, True, True, True, True, True]
-            ),
-            "seeds": None,
-        }
-
-        FastLeWAMEpochEvalCallback._log_metrics(trainer, "stage_a", metrics)
-
-        self.assertEqual(logged, [{"epoch_eval/stage_a/success_rate": 80.0}])
-
+        callback.on_train_epoch_end(trainer, FakeModule())
+        self.assertEqual(calls, list(rates))
+        self.assertTrue(any(item.get("epoch_eval/stage_a/goal_conditioning_gap") == 30.0 for item in logged))
 if __name__ == "__main__":
     unittest.main()
