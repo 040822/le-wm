@@ -36,6 +36,11 @@ _DATASET_TASKS = {
     "tworoom": "tworoom",
 }
 
+FAST_LEWAM_OFFLINE_STAGES = (
+    *FAST_LEWAM_STAGES,
+    "stage_b_actor_warm_start",
+)
+
 
 @dataclass(frozen=True)
 class WeightCheckpoint:
@@ -200,7 +205,7 @@ def build_parser():
     parser.add_argument(
         "--stages",
         nargs="+",
-        choices=FAST_LEWAM_STAGES,
+        choices=FAST_LEWAM_OFFLINE_STAGES,
         default=FAST_LEWAM_STAGES,
     )
     return parser

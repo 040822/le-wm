@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import stable_worldmodel as swm
 from omegaconf import OmegaConf
+from stable_worldmodel.protocols import Actionable
 
 from source.common.eval import (
     EpisodeEvaluation,
@@ -16,6 +17,7 @@ from source.common.eval import (
     select_eval_cohort,
     write_evaluation_artifacts,
 )
+from tests.test_fast_lewam_model import make_model
 
 
 class FakeDataset:
@@ -247,6 +249,90 @@ class EvaluationProtocolTests(unittest.TestCase):
             payload = json.loads(result_path.read_text())
 
         self.assertEqual(payload["status"], "old-success")
+
+    def test_actor_warm_start_stage_records_distinct_protocol_metadata(self):
+        cfg = OmegaConf.create(
+            {
+                "cache_dir": None,
+                "seed": 42,
+                "world": {"env_name": "fake", "num_envs": 2},
+                "dataset": {"keys_to_cache": []},
+                "plan_config": {
+                    "horizon": 1,
+                    "receding_horizon": 1,
+                    "action_block": 1,
+                },
+                "solver": {
+                    "_target_": "stable_worldmodel.solver.CEMSolver",
+                    "model": "???",
+                    "batch_size": 1,
+                    "num_samples": 2,
+                    "n_steps": 1,
+                    "topk": 1,
+                    "device": "cpu",
+                    "seed": 42,
+                },
+                "fast_lewam": {"inference_steps": 2},
+                "eval": {
+                    "num_eval": 2,
+                    "goal_offset_steps": 2,
+                    "eval_budget": 4,
+                    "img_size": 8,
+                    "dataset_name": "local_cube",
+                    "benchmark_dataset_name": "official_cube",
+                    "callables": [],
+                },
+                "output": {"save_video": False},
+            }
+        )
+        policies = []
+
+        class FakeWorld:
+            def __init__(self, **kwargs):
+                pass
+
+            def set_policy(self, policy):
+                policies.append(policy)
+
+            def evaluate(self, **kwargs):
+                return {
+                    "success_rate": 50.0,
+                    "episode_successes": np.array([True, False]),
+                    "seeds": None,
+                }
+
+            def close(self):
+                pass
+
+        session = DatasetEvaluationSession(
+            cfg,
+            task="cube",
+            dataset=FakeDataset(),
+            world_factory=FakeWorld,
+        )
+        identity = EvaluationIdentity(
+            entrypoint="eval_fast_lewam",
+            policy_kind="fast_lewam",
+            checkpoint="weights_epoch_10.pt",
+            epoch=10,
+            stage="stage_b_actor_warm_start",
+        )
+
+        with tempfile.TemporaryDirectory() as root:
+            result = session.evaluate(
+                make_model(
+                    action_horizon=1,
+                    stage_a_goal_injection="token",
+                ),
+                identity=identity,
+                output_dir=root,
+                device="cpu",
+            )
+
+        self.assertIsInstance(policies[0].solver.model, Actionable)
+        self.assertTrue(result.parameters["actor_warm_start"])
+        self.assertEqual(result.parameters["actor_seed"], 42)
+        self.assertEqual(result.parameters["inference_steps"], 2)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,42 @@ class StageBModelView(nn.Module):
         return self.model.get_cost(info_dict, action_candidates)
 
 
+class ActorWarmStartModelView(nn.Module):
+    """为 Stage B planner 同时暴露 latent cost 和确定性的 Stage A 初始化。"""
+
+    def __init__(self, model, *, seed=0, inference_steps=None):
+        super().__init__()
+        self.model = model
+        self.seed = int(seed)
+        self.inference_steps = inference_steps
+        self._generators = {}
+
+    def _generator(self, device):
+        key = str(device)
+        if key not in self._generators:
+            self._generators[key] = torch.Generator(device=device).manual_seed(
+                self.seed
+            )
+        return self._generators[key]
+
+    def get_action(self, info, horizon=1, prefix_actions=None):
+        device = next(self.model.parameters()).device
+        info = {
+            key: value.to(device) if torch.is_tensor(value) else value
+            for key, value in info.items()
+        }
+        return self.model.get_action(
+            info,
+            horizon=horizon,
+            prefix_actions=prefix_actions,
+            generator=self._generator(device),
+            num_steps=self.inference_steps,
+        )
+
+    def get_cost(self, info_dict, action_candidates):
+        return self.model.get_cost(info_dict, action_candidates)
+
+
 def _validate_action_dim(model, env, action_block):
     base_action_dim = int(np.prod(env.single_action_space.shape))
     expected = int(action_block) * base_action_dim
@@ -236,6 +272,7 @@ def make_fast_lewam_policy(
     inference_steps=None,
     seed=0,
     goal_mode="correct",
+    actor_warm_start=False,
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -250,7 +287,15 @@ def make_fast_lewam_policy(
         else swm.PlanConfig(**plan_kwargs)
     )
     if mode == "stage_b":
-        solver_model = StageBModelView(model)
+        solver_model = (
+            ActorWarmStartModelView(
+                model,
+                seed=seed,
+                inference_steps=inference_steps,
+            )
+            if actor_warm_start
+            else StageBModelView(model)
+        )
         solver = hydra.utils.instantiate(solver_cfg, model=solver_model)
         return FastLeWAMStageBPolicy(
             solver=solver,
@@ -276,6 +321,7 @@ def make_fast_lewam_policy(
 
 
 __all__ = [
+    "ActorWarmStartModelView",
     "FastLeWAMChunkPolicy",
     "FastLeWAMStageBPolicy",
     "StageBModelView",

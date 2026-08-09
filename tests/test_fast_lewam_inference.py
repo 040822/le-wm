@@ -43,5 +43,32 @@ class FastLeWAMInferenceTests(unittest.TestCase):
         actions = model.sample_actions(z0, goal_latent=torch.randn(2, 8), num_steps=2)
         self.assertEqual(actions.shape, (2, 3, 4))
 
+    def test_actionable_warm_start_accepts_an_existing_action_prefix(self):
+        model = make_model(stage_a_goal_injection="token").eval()
+        info = {
+            "pixels": torch.randn(2, 1, 3, 8, 8),
+            "goal": torch.randn(2, 1, 3, 8, 8),
+        }
+        prefix = torch.randn(2, 1, 4)
+        generator = torch.Generator().manual_seed(17)
+
+        tail = model.get_action(
+            info,
+            horizon=2,
+            prefix_actions=prefix,
+            generator=generator,
+            num_steps=2,
+        )
+
+        self.assertEqual(tail.shape, (2, 2, 4))
+        self.assertTrue(tail.isfinite().all())
+
+    def test_actionable_goal_token_mode_requires_goal_observations(self):
+        model = make_model(stage_a_goal_injection="token").eval()
+        info = {"pixels": torch.randn(2, 1, 3, 8, 8)}
+
+        with self.assertRaisesRegex(ValueError, "goal observations"):
+            model.get_action(info, horizon=3, num_steps=2)
+
 if __name__ == "__main__":
     unittest.main()

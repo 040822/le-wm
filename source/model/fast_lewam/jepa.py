@@ -385,7 +385,15 @@ class FastLeWAM(nn.Module):
             raise ValueError(f"pixels must end in [C,H,W], got {tuple(pixels.shape)}")
         return pixels if pixels.ndim == 4 else pixels.select(dim=-4, index=-1)
 
-    def get_action(self, info, horizon=1, prefix_actions=None):
+    def get_action(
+        self,
+        info,
+        horizon=1,
+        prefix_actions=None,
+        *,
+        generator=None,
+        num_steps=None,
+    ):
         """实现 solver warm start 使用的 Actionable 接口，并支持已有动作前缀。"""
         if not 1 <= horizon <= self.action_horizon:
             raise ValueError(
@@ -412,7 +420,12 @@ class FastLeWAM(nn.Module):
                 mode="stage_b",
             )["predicted_latents"]
             z0 = predicted[:, prefix_length - 1]
-        return self.sample_actions(z0, goal_latent=goal_latent)[:, :horizon]
+        return self.sample_actions(
+            z0,
+            generator=generator,
+            num_steps=num_steps,
+            goal_latent=goal_latent,
+        )[:, :horizon]
 
     def get_cost(self, info_dict, action_candidates):
         """用一次并行 Stage B 因果预测计算候选动作终点到目标 latent 的代价。"""

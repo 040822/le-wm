@@ -22,6 +22,7 @@ _FAST_LEWAM_STAGES = {
     "stage_a",
     "stage_a_shuffled_goal",
     "stage_b",
+    "stage_b_actor_warm_start",
     "stage_c",
 }
 
@@ -301,9 +302,17 @@ class DatasetEvaluationSession:
                     f"plan_config.horizon={self.cfg.plan_config.horizon}"
                 )
             shuffled = identity.stage == "stage_a_shuffled_goal"
+            actor_warm_start = (
+                identity.stage == "stage_b_actor_warm_start"
+            )
             if shuffled and int(self.cfg.eval.num_eval) < 2:
                 raise ValueError("shuffled-goal evaluation requires num_eval >= 2")
-            mode = "stage_a" if shuffled else identity.stage
+            if shuffled:
+                mode = "stage_a"
+            elif actor_warm_start:
+                mode = "stage_b"
+            else:
+                mode = identity.stage
             inference_steps = self.cfg.get("fast_lewam", {}).get(
                 "inference_steps", None
             )
@@ -318,6 +327,7 @@ class DatasetEvaluationSession:
                 inference_steps=inference_steps,
                 seed=int(self.cfg.seed),
                 goal_mode="cyclic_shift" if shuffled else "correct",
+                actor_warm_start=actor_warm_start,
             )
         if identity.stage is not None:
             raise ValueError("stage is only valid for Fast-LeWAM evaluation")
@@ -414,15 +424,26 @@ class DatasetEvaluationSession:
                 "save_video": save_video,
             }
             model = getattr(policy_or_model, "model", policy_or_model)
+            actor_warm_start = (
+                identity.stage == "stage_b_actor_warm_start"
+            )
+            if identity.stage in {
+                "stage_b",
+                "stage_b_actor_warm_start",
+            }:
+                parameters["actor_warm_start"] = actor_warm_start
             if identity.stage in {
                 "stage_a",
                 "stage_a_shuffled_goal",
+                "stage_b_actor_warm_start",
                 "stage_c",
             }:
                 parameters["inference_steps"] = int(
                     self.cfg.get("fast_lewam", {}).get("inference_steps")
                     or model.inference_steps
                 )
+            if actor_warm_start:
+                parameters["actor_seed"] = int(self.cfg.seed)
             result = EvaluationResult(
                 task=self.task,
                 local_dataset=str(self.cfg.eval.dataset_name),

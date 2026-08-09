@@ -98,6 +98,19 @@ class FastLeWAMBatchEvalTests(unittest.TestCase):
         self.assertEqual(tuple(args.stages), FAST_LEWAM_STAGES)
         self.assertEqual(overrides, ("seed=7", "solver.n_steps=12"))
 
+    def test_cli_allows_explicit_actor_warm_start_without_changing_defaults(self):
+        args, overrides = parse_cli(
+            [
+                "checkpoints",
+                "--stages",
+                "stage_b_actor_warm_start",
+            ]
+        )
+
+        self.assertEqual(args.stages, ["stage_b_actor_warm_start"])
+        self.assertNotIn("stage_b_actor_warm_start", FAST_LEWAM_STAGES)
+        self.assertEqual(overrides, ())
+
     def test_setup_failure_writes_machine_and_human_artifacts(self):
         with tempfile.TemporaryDirectory() as root:
             checkpoint_dir = Path(root) / "checkpoints"
