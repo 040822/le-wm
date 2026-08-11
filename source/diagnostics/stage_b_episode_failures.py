@@ -102,7 +102,7 @@ def load_diagnostic_manifest(path: str | Path) -> DiagnosticManifest:
 
 @dataclass
 class CEMTraceCollector:
-    """Own all trace state behind one interface shared by solver/policy proxies."""
+    """Own trace state behind one interface shared by solver/world-policy proxies."""
 
     detailed_steps: set[int] = field(
         default_factory=lambda: {0, 1, 2, 5, 10, 20, 29}
@@ -310,7 +310,7 @@ class TracedCEMSolver:
 
 
 class TracedPolicy(swm.policy.BasePolicy):
-    """Policy adapter injecting stable slots and recording executed actions."""
+    """World Policy adapter injecting slots and recording executed actions."""
 
     def __init__(self, policy: Any, collector: CEMTraceCollector):
         super().__init__()
@@ -353,6 +353,68 @@ class GroundingPanel:
     actions: torch.Tensor
     sources: tuple[str, ...]
     candidate_indices: tuple[int | None, ...]
+
+
+def build_shared_initial_panel(
+    expert: torch.Tensor,
+    actor: torch.Tensor,
+    *,
+    random_candidates: int,
+    actor_neighbors: int,
+    actor_noise_std: float,
+    generator: torch.Generator,
+) -> GroundingPanel:
+    """Build the task-level initial panel shared by every scoring model."""
+    expert = torch.as_tensor(expert).detach().cpu().float()
+    actor = torch.as_tensor(actor).detach().cpu().float()
+    if expert.ndim != 2 or actor.shape != expert.shape:
+        raise ValueError("expert and actor must share shape [H,A]")
+    if random_candidates < 0 or actor_neighbors < 0:
+        raise ValueError("candidate counts must be non-negative")
+    if actor_noise_std <= 0:
+        raise ValueError("actor_noise_std must be positive")
+    actions = [
+        expert,
+        torch.zeros_like(expert),
+        expert.flip(0),
+        expert.roll(shifts=1, dims=0),
+        actor,
+    ]
+    sources = [
+        "expert",
+        "zero",
+        "time_reverse",
+        "time_roll",
+        "actor",
+    ]
+    if random_candidates:
+        random = torch.randn(
+            int(random_candidates),
+            *expert.shape,
+            generator=generator,
+            dtype=expert.dtype,
+        )
+        actions.extend(random)
+        sources.extend(
+            f"random_{index}" for index in range(int(random_candidates))
+        )
+    if actor_neighbors:
+        noise = torch.randn(
+            int(actor_neighbors),
+            *expert.shape,
+            generator=generator,
+            dtype=expert.dtype,
+        )
+        actions.extend(actor.unsqueeze(0) + float(actor_noise_std) * noise)
+        sources.extend(
+            f"actor_neighbor_{index}"
+            for index in range(int(actor_neighbors))
+        )
+    return GroundingPanel(
+        actions=torch.stack(actions),
+        sources=tuple(sources),
+        candidate_indices=tuple(None for _ in actions),
+    )
 
 
 def build_prefix_replay_actions(
@@ -593,7 +655,11 @@ def classify_failure(evidence: dict[str, Any]) -> list[str]:
     successes = [bool(value) for value in evidence.get("candidate_successes", [])]
     if evidence.get("all_candidates_grounded") and successes and not any(successes):
         labels.append("coverage_failure")
-    if any(successes):
+    final_selection_success = evidence.get(
+        "final_selection_success",
+        evidence.get("final_success"),
+    )
+    if any(successes) and final_selection_success is False:
         labels.append("ranking_failure")
 
     predicted_latent = evidence.get("predicted_true_latent_spearman")
@@ -635,8 +701,10 @@ def classify_failure(evidence: dict[str, Any]) -> list[str]:
         and reference_oob is not None
         and failed_norm is not None
         and reference_norm is not None
-        and failed_oob > reference_oob + 0.05
-        and failed_norm > 1.5 * max(reference_norm, 1e-12)
+        and (
+            failed_oob > reference_oob + 0.05
+            or failed_norm > 1.5 * max(reference_norm, 1e-12)
+        )
     ):
         labels.append("action_ood")
 
@@ -816,6 +884,7 @@ __all__ = [
     "TracedCEMSolver",
     "TracedPolicy",
     "build_prefix_replay_actions",
+    "build_shared_initial_panel",
     "classify_failure",
     "compute_physical_terminal_cost",
     "load_diagnostic_manifest",

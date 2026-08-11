@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -37,6 +38,78 @@ def _next_sections(labels):
     if "latent_metric_error" in labels:
         sections.add("§5.1")
     return sorted(sections)
+
+
+def _all_finite(value):
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(_all_finite(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_all_finite(item) for item in value)
+    return True
+
+
+def _grounding_is_complete(
+    *,
+    output_dir,
+    label,
+    task,
+    reproduction,
+    grounded,
+    selected_slots,
+):
+    if reproduction["status"] != "reproducible" or grounded is None:
+        return False
+    expected = set(int(slot) for slot in selected_slots)
+    actual = {
+        int(slot)
+        for slot in grounded.get(
+            "diagnostic_slots",
+            [item["slot"] for item in grounded.get("slots", [])],
+        )
+    }
+    if actual != expected:
+        return False
+    grounded_by_slot = {
+        int(item["slot"]): item for item in grounded.get("slots", [])
+    }
+    for slot in expected:
+        item = grounded_by_slot.get(slot)
+        if item is None or not item.get("panels") or not _all_finite(item):
+            return False
+        slot_trace_path = (
+            output_dir / label / "slots" / f"slot_{slot:02d}.json"
+        )
+        if not slot_trace_path.is_file():
+            return False
+        slot_trace = json.loads(slot_trace_path.read_text(encoding="utf-8"))
+        replans = slot_trace.get("replans", [])
+        if len(replans) < 2 and not slot_trace.get("early_termination_reason"):
+            return False
+        panels = item["panels"]
+        if replans and not any(
+            panel.get("kind") == "shared_initial" for panel in panels
+        ):
+            return False
+        expected_cem = {
+            (int(replan["replan"]), iteration)
+            for replan in replans
+            for iteration in (0, 5, 29)
+        }
+        actual_cem = {
+            (int(panel["replan"]), int(panel["iteration"]))
+            for panel in panels
+            if panel.get("kind") == "cem"
+        }
+        if actual_cem != expected_cem:
+            return False
+        if (
+            not reproduction["success_vector"][slot]
+            and not item.get("labels")
+        ):
+            return False
+    return True
 
 
 def summarize(*, manifest_path, output_dir):
@@ -73,6 +146,7 @@ def summarize(*, manifest_path, output_dir):
         )
         grounded_path = output_dir / label / "grounded" / "result.json"
         labels = set()
+        grounded = None
         if grounded_path.is_file():
             grounded = json.loads(grounded_path.read_text(encoding="utf-8"))
             for slot in grounded["slots"]:
@@ -87,6 +161,14 @@ def summarize(*, manifest_path, output_dir):
                 "mismatch_slots": reproduction["mismatch_slots"],
                 "trace": reproduction["trace"],
                 "labels": sorted(labels),
+                "grounding_complete": _grounding_is_complete(
+                    output_dir=output_dir,
+                    label=label,
+                    task=run.task,
+                    reproduction=reproduction,
+                    grounded=grounded,
+                    selected_slots=task_selections[run.task]["slots"],
+                ),
             }
         )
 
@@ -94,16 +176,23 @@ def summarize(*, manifest_path, output_dir):
     reproducible = [
         row for row in completed if row["status"] == "reproducible"
     ]
+    accepted_runs = [
+        row
+        for row in completed
+        if row["status"] == "reproducible"
+        and row.get("grounding_complete", False)
+    ]
     summary = {
         "status": (
             "accepted"
             if len(completed) == len(rows)
-            and len(reproducible) == len(rows)
+            and len(accepted_runs) == len(rows)
             else "incomplete_or_non_reproducible"
         ),
         "runs_expected": len(rows),
         "runs_completed": len(completed),
         "runs_reproducible": len(reproducible),
+        "runs_grounding_complete": len(accepted_runs),
         "slot_selection": task_selections,
         "recommended_next_sections": _next_sections(all_labels),
         "rows": rows,

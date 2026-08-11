@@ -34,12 +34,14 @@ from source.common.eval import (
 from source.diagnostics.stage_b_episode_failures import (
     FixedRawSequencePolicy,
     build_prefix_replay_actions,
+    build_shared_initial_panel,
     classify_failure,
     compute_physical_terminal_cost,
     load_diagnostic_manifest,
     normalize_expert_plan,
     prepare_image_info,
     select_grounding_panel,
+    should_expand_grounding,
 )
 
 
@@ -144,12 +146,12 @@ class SimulatorGrounder:
             prefix_raw=prefix_raw,
         )
         count = len(raw)
-        policy = FixedRawSequencePolicy(raw)
+        world_policy = FixedRawSequencePolicy(raw)
         world_cfg = OmegaConf.to_container(self.cfg.world, resolve=True)
         world_cfg["num_envs"] = count
         world_cfg["max_episode_steps"] = 2 * int(self.cfg.eval.eval_budget)
         world = swm.World(**world_cfg, image_shape=(224, 224))
-        world.set_policy(policy)
+        world.set_policy(world_policy)
         try:
             metrics = world.evaluate(
                 dataset=self.dataset,
@@ -181,6 +183,8 @@ class SimulatorGrounder:
             "physical_cost": physical,
             "true_terminal_latent_cost": latent,
             "terminal_latent": terminal_latent,
+            "terminal_pixels": terminal["pixels"].detach().cpu(),
+            "terminal_goal": terminal["goal"].detach().cpu(),
             "success": success,
         }
 
@@ -223,7 +227,12 @@ def _candidate_rows(
     return rows
 
 
-def _panel_evidence(rows, *, all_candidates_grounded):
+def _panel_evidence(
+    rows,
+    *,
+    all_candidates_grounded,
+    final_selection_success,
+):
     predicted = [row["predicted_cost"] for row in rows]
     latent = [row["true_terminal_latent_cost"] for row in rows]
     physical = [row["physical_cost"] for row in rows]
@@ -243,7 +252,8 @@ def _panel_evidence(rows, *, all_candidates_grounded):
     evidence = {
         "all_candidates_grounded": bool(all_candidates_grounded),
         "candidate_successes": successes,
-        "final_success": False,
+        "final_success": bool(final_selection_success),
+        "final_selection_success": bool(final_selection_success),
         "predicted_true_latent_spearman": predicted_latent,
         "true_latent_physical_spearman": latent_physical,
     }
@@ -284,6 +294,16 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
     scaler = fit_eval_processors(dataset, ["action"])["action"]
     subject = _load_subject(run, device)
     model = getattr(subject, "model", subject).to(device).eval()
+    actor_run = next(
+        candidate
+        for candidate in manifest.runs.values()
+        if candidate.task == run.task and candidate.family == "e3_384"
+    )
+    if actor_run.checkpoint == run.checkpoint and hasattr(model, "get_action"):
+        actor_model = model
+    else:
+        actor_subject = _load_subject(actor_run, device)
+        actor_model = getattr(actor_subject, "model", actor_subject).to(device).eval()
     grounder = SimulatorGrounder(
         cfg=cfg,
         dataset=dataset,
@@ -308,10 +328,15 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
         for slot, success in enumerate(reproduction["success_vector"])
         if not success
     ]
+    diagnostic_slots = [
+        int(slot)
+        for slot in reproduction["metadata"]["slot_selection"]["slots"]
+    ]
     grounded_root = run_output / "grounded"
     grounded_root.mkdir(parents=True, exist_ok=True)
     result_slots = []
-    for slot in failed_slots:
+    for slot in diagnostic_slots:
+        final_success = bool(reproduction["success_vector"][slot])
         episode = reference["parameters"]["episode_ids"][slot]
         start = int(reference["parameters"]["start_steps"][slot])
         slot_panels = []
@@ -339,6 +364,122 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                 horizon=int(cfg.plan_config.horizon),
                 action_block=int(cfg.plan_config.action_block),
             )
+            if replan == 0:
+                actor_info = {
+                    key: value.to(device)
+                    for key, value in plan["planning_info"].items()
+                    if torch.is_tensor(value)
+                }
+                actor_generator = torch.Generator(device=device).manual_seed(
+                    int(manifest.protocol["seed"]) + 1009 * slot
+                )
+                with torch.inference_mode():
+                    actor = actor_model.get_action(
+                        actor_info,
+                        horizon=int(cfg.plan_config.horizon),
+                        generator=actor_generator,
+                        num_steps=int(actor_model.inference_steps),
+                    )[0].detach().cpu()
+                shared_panel = build_shared_initial_panel(
+                    expert,
+                    actor,
+                    random_candidates=16,
+                    actor_neighbors=16,
+                    actor_noise_std=0.2,
+                    generator=torch.Generator().manual_seed(
+                        int(manifest.protocol["seed"]) + 1009 * slot
+                    ),
+                )
+                shared_predicted = _predict_costs(
+                    model,
+                    plan["planning_info"],
+                    shared_panel.actions,
+                    device,
+                )
+                shared_predicted_terminal = _predict_terminal_latents(
+                    model,
+                    plan["planning_info"],
+                    shared_panel.actions,
+                    device,
+                )
+                shared_cache = (
+                    Path(output_dir).expanduser().resolve()
+                    / "_shared_initial"
+                    / run.task
+                    / f"slot_{slot:02d}.pt"
+                )
+                if shared_cache.is_file():
+                    cached = torch.load(
+                        shared_cache,
+                        map_location="cpu",
+                        weights_only=False,
+                    )
+                    torch.testing.assert_close(
+                        cached["actions"],
+                        shared_panel.actions,
+                        rtol=0,
+                        atol=0,
+                    )
+                    terminal_latent, terminal_cost = _terminal_latents(
+                        model,
+                        {
+                            "pixels": cached["terminal_pixels"].to(device),
+                            "goal": cached["terminal_goal"].to(device),
+                        },
+                    )
+                    shared_grounded = {
+                        "physical_cost": cached["physical_cost"],
+                        "true_terminal_latent_cost": terminal_cost,
+                        "terminal_latent": terminal_latent,
+                        "success": cached["success"],
+                    }
+                else:
+                    shared_grounded = grounder.run(
+                        task=run.task,
+                        episode=episode,
+                        start=start,
+                        candidates=shared_panel.actions,
+                        prefix_raw=None,
+                    )
+                    shared_cache.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(
+                        {
+                            "actions": shared_panel.actions,
+                            "sources": shared_panel.sources,
+                            "physical_cost": shared_grounded["physical_cost"],
+                            "success": shared_grounded["success"],
+                            "terminal_pixels": shared_grounded[
+                                "terminal_pixels"
+                            ],
+                            "terminal_goal": shared_grounded["terminal_goal"],
+                        },
+                        shared_cache,
+                    )
+                shared_rows = _candidate_rows(
+                    shared_panel.actions,
+                    shared_panel.sources,
+                    shared_predicted,
+                    shared_predicted_terminal,
+                    shared_grounded,
+                )
+                shared_summary = _panel_evidence(
+                    shared_rows,
+                    all_candidates_grounded=False,
+                    final_selection_success=final_success,
+                )
+                slot_panels.append(
+                    {
+                        "kind": "shared_initial",
+                        "replan": 0,
+                        "iteration": None,
+                        "expanded_to_all_candidates": False,
+                        "expansion_reason": None,
+                        "summary": shared_summary,
+                        "candidates": shared_rows,
+                    }
+                )
+                if not final_success:
+                    slot_labels.update(shared_summary["labels"])
             for iteration in (0, 5, 29):
                 detail = details[(slot, replan, iteration)]
                 panel = select_grounding_panel(
@@ -405,8 +546,37 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                     for row in rows
                     if row["success"] or row["source"] == "anchor_expert"
                 ]
-                expanded = False
-                if not grounded["success"].any():
+                selection_rows = [
+                    row for row in rows if row["source"] == "elite_mean"
+                ]
+                if not selection_rows:
+                    selection_rows = [
+                        row
+                        for row in rows
+                        if row["source"] == "previous_mean"
+                    ]
+                selection_success = selection_rows[0]["success"]
+                predicted_latent = _finite_spearman(
+                    [row["predicted_cost"] for row in rows],
+                    [row["true_terminal_latent_cost"] for row in rows],
+                )
+                latent_physical = _finite_spearman(
+                    [row["true_terminal_latent_cost"] for row in rows],
+                    [row["physical_cost"] for row in rows],
+                )
+                error_decomposition_clear = (
+                    predicted_latent is not None
+                    and latent_physical is not None
+                    and abs(predicted_latent) >= 0.2
+                    and abs(latent_physical) >= 0.2
+                )
+                expansion_reason = should_expand_grounding(
+                    panel_successes=grounded["success"],
+                    final_selection_success=selection_success,
+                    error_decomposition_clear=error_decomposition_clear,
+                )
+                expanded = expansion_reason is not None
+                if expanded:
                     expanded = True
                     full_actions = detail["candidates"]
                     full_predicted = detail["costs"].numpy()
@@ -436,6 +606,7 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                 summary = _panel_evidence(
                     rows,
                     all_candidates_grounded=expanded,
+                    final_selection_success=selection_success,
                 )
                 summary["elite_physical_cost_mean"] = (
                     float(np.mean(elite_physical))
@@ -455,12 +626,27 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                     if reference_actions
                     else None
                 )
-                slot_labels.update(summary["labels"])
+                summary["reference_action_out_of_bounds_fraction_mean"] = (
+                    float(
+                        np.mean(
+                            [
+                                row["action_out_of_bounds_fraction"]
+                                for row in reference_actions
+                            ]
+                        )
+                    )
+                    if reference_actions
+                    else None
+                )
+                if not final_success:
+                    slot_labels.update(summary["labels"])
                 slot_panels.append(
                     {
+                        "kind": "cem",
                         "replan": replan,
                         "iteration": iteration,
                         "expanded_to_all_candidates": expanded,
+                        "expansion_reason": expansion_reason,
                         "summary": summary,
                         "candidates": rows,
                     }
@@ -468,9 +654,9 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
             replan_panels = [
                 panel
                 for panel in slot_panels
-                if panel["replan"] == replan
+                if panel["kind"] == "cem" and panel["replan"] == replan
             ]
-            if len(replan_panels) == 3:
+            if len(replan_panels) == 3 and not final_success:
                 predicted_curve = [
                     float(
                         details[
@@ -505,7 +691,11 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                     )
                     slot_labels.update(exploitation)
 
-        if (slot, 0) in plans and (slot, 1) in plans:
+        if (
+            not final_success
+            and (slot, 0) in plans
+            and (slot, 1) in plans
+        ):
             init_state, goal_state, _ = _extract_init_goal(
                 dataset,
                 [episode],
@@ -562,7 +752,17 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                 for panel in slot_panels
                 if panel["summary"]["reference_action_norm_mean"] is not None
             ]
-            if reference_norms:
+            reference_oob = [
+                panel["summary"][
+                    "reference_action_out_of_bounds_fraction_mean"
+                ]
+                for panel in slot_panels
+                if panel["summary"][
+                    "reference_action_out_of_bounds_fraction_mean"
+                ]
+                is not None
+            ]
+            if reference_norms and reference_oob:
                 slot_labels.update(
                     classify_failure(
                         {
@@ -570,7 +770,9 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                             "failed_action_out_of_bounds_fraction": float(
                                 (final_plan.abs() > 1).float().mean().item()
                             ),
-                            "reference_action_out_of_bounds_fraction": 0.0,
+                            "reference_action_out_of_bounds_fraction": float(
+                                np.mean(reference_oob)
+                            ),
                             "failed_action_norm": float(final_plan.norm().item()),
                             "reference_action_norm": float(
                                 np.mean(reference_norms)
@@ -603,6 +805,7 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
         "status": "ok",
         "run_label": run_label,
         "failed_slots": failed_slots,
+        "diagnostic_slots": diagnostic_slots,
         "slots": result_slots,
     }
     (grounded_root / "result.json").write_text(

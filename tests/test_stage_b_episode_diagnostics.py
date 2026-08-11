@@ -15,6 +15,7 @@ from source.diagnostics.stage_b_episode_failures import (
     TracedCEMSolver,
     TracedPolicy,
     build_prefix_replay_actions,
+    build_shared_initial_panel,
     classify_failure,
     load_diagnostic_manifest,
     select_diagnostic_slots,
@@ -178,6 +179,42 @@ class StageBEpisodeTraceTests(unittest.TestCase):
             )
         )
 
+    def test_shared_initial_panel_contains_fixed_candidate_families(self):
+        expert = torch.zeros(2, 3)
+        actor = torch.ones(2, 3)
+
+        first = build_shared_initial_panel(
+            expert,
+            actor,
+            random_candidates=3,
+            actor_neighbors=2,
+            actor_noise_std=0.1,
+            generator=torch.Generator().manual_seed(42),
+        )
+        second = build_shared_initial_panel(
+            expert,
+            actor,
+            random_candidates=3,
+            actor_neighbors=2,
+            actor_noise_std=0.1,
+            generator=torch.Generator().manual_seed(42),
+        )
+
+        torch.testing.assert_close(first.actions, second.actions, rtol=0, atol=0)
+        self.assertEqual(first.sources, second.sources)
+        self.assertEqual(
+            first.sources[:6],
+            (
+                "expert",
+                "zero",
+                "time_reverse",
+                "time_roll",
+                "actor",
+                "random_0",
+            ),
+        )
+        self.assertEqual(len(first.actions), 10)
+
     def test_slot_selection_uses_failures_controls_and_e0_rescues(self):
         selected = select_diagnostic_slots(
             {
@@ -280,6 +317,28 @@ class StageBEpisodeTraceTests(unittest.TestCase):
         for evidence, expected in cases:
             with self.subTest(expected):
                 self.assertIn(expected, classify_failure(evidence))
+
+    def test_ranking_requires_failed_final_selection_and_ood_uses_or(self):
+        self.assertNotIn(
+            "ranking_failure",
+            classify_failure(
+                {
+                    "final_success": False,
+                    "final_selection_success": True,
+                    "candidate_successes": [True, False],
+                }
+            ),
+        )
+        labels = classify_failure(
+            {
+                "final_success": False,
+                "failed_action_out_of_bounds_fraction": 0.2,
+                "reference_action_out_of_bounds_fraction": 0.0,
+                "failed_action_norm": 2.0,
+                "reference_action_norm": 2.0,
+            }
+        )
+        self.assertIn("action_ood", labels)
 
     def test_manifest_fixes_the_exact_eight_run_matrix(self):
         manifest = load_diagnostic_manifest(
