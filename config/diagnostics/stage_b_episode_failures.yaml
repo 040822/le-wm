@@ -1,0 +1,79 @@
+version: 1
+repository_root: ../..
+protocol:
+  seed: 42
+  num_eval: 50
+  goal_offset_steps: 25
+  eval_budget: 50
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+  num_samples: 300
+  n_steps: 30
+  topk: 30
+  detailed_iterations: [0, 1, 2, 5, 10, 20, 29]
+runs:
+  pusht_e0:
+    task: pusht
+    family: e0
+    model_kind: lewm
+    epoch: 10
+    run_config: outputs/lewm/pusht/0803_e0_lewm_baseline_bs128/config.yaml
+    checkpoint: outputs/lewm/pusht/0803_e0_lewm_baseline_bs128/checkpoints/lewm_object.ckpt
+    reference_result: outputs/lewm/pusht/0803_e0_lewm_baseline_bs128/eval/result.json
+  pusht_e1_192:
+    task: pusht
+    family: e1_192
+    model_kind: fast_lewam
+    epoch: 10
+    run_config: outputs/fast_lewam/pusht/0802_e1_stage_b_only/config.yaml
+    checkpoint: outputs/fast_lewam/pusht/0802_e1_stage_b_only/checkpoints/fast_lewam_weights_epoch_10.pt
+    reference_result: outputs/fast_lewam/pusht/0802_e1_stage_b_only/eval/epoch_10/stage_b/result.json
+  pusht_e1_384:
+    task: pusht
+    family: e1_384
+    model_kind: fast_lewam
+    epoch: 10
+    run_config: outputs/fast_lewam/pusht/0811_e1_stage_b_only_384/config.yaml
+    checkpoint: outputs/fast_lewam/pusht/0811_e1_stage_b_only_384/checkpoints/fast_lewam_weights_epoch_10.pt
+    reference_result: outputs/fast_lewam/pusht/0811_e1_stage_b_only_384/eval/epoch_10/stage_b/result.json
+  pusht_e3_192:
+    task: pusht
+    family: e3_192
+    model_kind: fast_lewam
+    epoch: 10
+    run_config: outputs/fast_lewam/pusht/0802_e3_expert_actions/config.yaml
+    checkpoint: outputs/fast_lewam/pusht/0802_e3_expert_actions/checkpoints/fast_lewam_weights_epoch_10.pt
+    reference_result: outputs/fast_lewam/pusht/0802_e3_expert_actions/eval/epoch_10/stage_b/result.json
+  pusht_e3_384:
+    task: pusht
+    family: e3_384
+    model_kind: fast_lewam
+    epoch: 10
+    run_config: outputs/fast_lewam/pusht/0811_e3_expert_actions_384/config.yaml
+    checkpoint: outputs/fast_lewam/pusht/0811_e3_expert_actions_384/checkpoints/fast_lewam_weights_epoch_10.pt
+    reference_result: outputs/fast_lewam/pusht/0811_e3_expert_actions_384/eval/epoch_10/stage_b/result.json
+  reacher_e0:
+    task: reacher
+    family: e0
+    model_kind: lewm
+    epoch: 10
+    run_config: outputs/lewm/reacher/0721_/config.yaml
+    checkpoint: outputs/lewm/reacher/0721_/checkpoints/lewm_object.ckpt
+    reference_result: outputs/lewm/reacher/0721_/eval/result.json
+  reacher_e1_384:
+    task: reacher
+    family: e1_384
+    model_kind: fast_lewam
+    epoch: 10
+    run_config: outputs/fast_lewam/reacher/0811_e1_stage_b_only_384/config.yaml
+    checkpoint: outputs/fast_lewam/reacher/0811_e1_stage_b_only_384/checkpoints/fast_lewam_weights_epoch_10.pt
+    reference_result: outputs/fast_lewam/reacher/0811_e1_stage_b_only_384/eval/epoch_10/stage_b/result.json
+  reacher_e3_384:
+    task: reacher
+    family: e3_384
+    model_kind: fast_lewam
+    epoch: 10
+    run_config: outputs/fast_lewam/reacher/0811_e3_expert_actions_384/config.yaml
+    checkpoint: outputs/fast_lewam/reacher/0811_e3_expert_actions_384/checkpoints/fast_lewam_weights_epoch_10.pt
+    reference_result: outputs/fast_lewam/reacher/0811_e3_expert_actions_384/eval/epoch_10/stage_b/result.json
