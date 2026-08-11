@@ -410,10 +410,21 @@ def build_shared_initial_panel(
             f"actor_neighbor_{index}"
             for index in range(int(actor_neighbors))
         )
+    unique_actions = []
+    unique_sources = []
+    seen = set()
+    for source, action in zip(sources, actions):
+        action = action.contiguous()
+        key = (str(action.dtype), tuple(action.shape), action.numpy().tobytes())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_actions.append(action.clone())
+        unique_sources.append(source)
     return GroundingPanel(
-        actions=torch.stack(actions),
-        sources=tuple(sources),
-        candidate_indices=tuple(None for _ in actions),
+        actions=torch.stack(unique_actions),
+        sources=tuple(unique_sources),
+        candidate_indices=tuple(None for _ in unique_actions),
     )
 
 

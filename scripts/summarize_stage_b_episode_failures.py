@@ -50,6 +50,10 @@ def _all_finite(value):
     return True
 
 
+def _format_metric(value):
+    return "—" if value is None else f"{value:.4f}"
+
+
 def _grounding_is_complete(
     *,
     output_dir,
@@ -116,6 +120,7 @@ def summarize(*, manifest_path, output_dir):
     manifest = load_diagnostic_manifest(manifest_path)
     output_dir = Path(output_dir).expanduser().resolve()
     rows = []
+    cross_model_rows = []
     task_selections = {}
     all_labels = set()
     for task in ("pusht", "reacher"):
@@ -151,6 +156,32 @@ def summarize(*, manifest_path, output_dir):
             grounded = json.loads(grounded_path.read_text(encoding="utf-8"))
             for slot in grounded["slots"]:
                 labels.update(slot["labels"])
+                for panel in slot.get("panels", []):
+                    if panel.get("kind") != "shared_initial":
+                        continue
+                    panel_summary = panel["summary"]
+                    cross_model_rows.append(
+                        {
+                            "task": run.task,
+                            "slot": int(slot["slot"]),
+                            "run_label": label,
+                            "family": run.family,
+                            "oracle_success": panel_summary["oracle_success"],
+                            "topk_success_recall": panel_summary[
+                                "topk_success_recall"
+                            ],
+                            "regret": panel_summary["regret"],
+                            "predicted_physical_spearman": panel_summary[
+                                "predicted_physical_spearman"
+                            ],
+                            "predicted_true_latent_spearman": panel_summary[
+                                "predicted_true_latent_spearman"
+                            ],
+                            "true_latent_physical_spearman": panel_summary[
+                                "true_latent_physical_spearman"
+                            ],
+                        }
+                    )
         all_labels.update(labels)
         rows.append(
             {
@@ -195,6 +226,7 @@ def summarize(*, manifest_path, output_dir):
         "runs_grounding_complete": len(accepted_runs),
         "slot_selection": task_selections,
         "recommended_next_sections": _next_sections(all_labels),
+        "cross_model_shared_initial": cross_model_rows,
         "rows": rows,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -215,6 +247,40 @@ def summarize(*, manifest_path, output_dir):
             f"| {row['task']} | {row['family']} | {row['status']} | "
             f"{len(row['mismatch_slots'])} | "
             f"{', '.join(row['labels']) or '—'} |"
+        )
+    comparison.extend(
+        [
+            "",
+            "## Shared initial candidates by slot and model",
+            "",
+            (
+                "| task | slot | run | oracle | top-k recall | regret | "
+                "pred↔physical ρ | pred↔latent ρ | latent↔physical ρ |"
+            ),
+            "|---|---:|---|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    if cross_model_rows:
+        for item in sorted(
+            cross_model_rows,
+            key=lambda value: (
+                value["task"],
+                value["slot"],
+                value["run_label"],
+            ),
+        ):
+            comparison.append(
+                f"| {item['task']} | {item['slot']} | {item['family']} | "
+                f"{item['oracle_success']} | "
+                f"{_format_metric(item['topk_success_recall'])} | "
+                f"{_format_metric(item['regret'])} | "
+                f"{_format_metric(item['predicted_physical_spearman'])} | "
+                f"{_format_metric(item['predicted_true_latent_spearman'])} | "
+                f"{_format_metric(item['true_latent_physical_spearman'])} |"
+            )
+    else:
+        comparison.append(
+            "| — | — | — | — | — | — | — | — | — |"
         )
     (output_dir / "comparison.md").write_text(
         "\n".join(comparison) + "\n",
@@ -240,15 +306,20 @@ def summarize(*, manifest_path, output_dir):
         report.append(
             f"- {row['run_label']}: {row['status']}{mismatch}"
         )
+    gate_message = (
+        "- 八个 run 已通过复现与 grounding 验收，可同步第二轮实验报告。"
+        if summary["status"] == "accepted"
+        else (
+            "- 当前复现门未全量通过；non-reproducible run 不进行机制归因，"
+            "第二轮实验报告暂不同步为已验收结论。"
+        )
+    )
     report.extend(
         [
             "",
             "## 后续",
             "",
-            (
-                "- 当前复现门未全量通过；non-reproducible run 不进行机制归因，"
-                "第二轮实验报告暂不同步为已验收结论。"
-            ),
+            gate_message,
             (
                 "- 已有 grounded 标签建议进入："
                 + (

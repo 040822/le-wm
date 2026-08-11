@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 
@@ -23,6 +25,7 @@ import torch
 from stable_worldmodel.world.world import _extract_init_goal
 from scripts.diagnose_stage_b_episode_failures import (
     _load_subject,
+    _sha256,
     _validate_device,
 )
 from source.common.eval import (
@@ -299,6 +302,7 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
         for candidate in manifest.runs.values()
         if candidate.task == run.task and candidate.family == "e3_384"
     )
+    actor_checkpoint_sha256 = _sha256(actor_run.checkpoint)
     if actor_run.checkpoint == run.checkpoint and hasattr(model, "get_action"):
         actor_model = model
     else:
@@ -408,18 +412,76 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                     / run.task
                     / f"slot_{slot:02d}.pt"
                 )
-                if shared_cache.is_file():
-                    cached = torch.load(
-                        shared_cache,
-                        map_location="cpu",
-                        weights_only=False,
-                    )
-                    torch.testing.assert_close(
-                        cached["actions"],
-                        shared_panel.actions,
-                        rtol=0,
-                        atol=0,
-                    )
+                cache_identity = {
+                    "task": run.task,
+                    "slot": slot,
+                    "episode": int(episode),
+                    "start": start,
+                    "seed": int(manifest.protocol["seed"]),
+                    "goal_offset_steps": int(
+                        manifest.protocol["goal_offset_steps"]
+                    ),
+                    "horizon": int(manifest.protocol["horizon"]),
+                    "action_block": int(manifest.protocol["action_block"]),
+                    "manifest_sha256": reproduction["metadata"][
+                        "manifest_sha256"
+                    ],
+                    "actor_checkpoint_sha256": actor_checkpoint_sha256,
+                }
+                shared_cache.parent.mkdir(parents=True, exist_ok=True)
+                with shared_cache.with_suffix(".lock").open("a+b") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                    if shared_cache.is_file():
+                        cached = torch.load(
+                            shared_cache,
+                            map_location="cpu",
+                            weights_only=False,
+                        )
+                        if cached.get("identity") != cache_identity:
+                            raise RuntimeError(
+                                f"stale shared cache identity: {shared_cache}"
+                            )
+                        torch.testing.assert_close(
+                            cached["actions"],
+                            shared_panel.actions,
+                            rtol=0,
+                            atol=0,
+                        )
+                    else:
+                        shared_grounded = grounder.run(
+                            task=run.task,
+                            episode=episode,
+                            start=start,
+                            candidates=shared_panel.actions,
+                            prefix_raw=None,
+                        )
+                        payload = {
+                            "identity": cache_identity,
+                            "actions": shared_panel.actions,
+                            "sources": shared_panel.sources,
+                            "physical_cost": shared_grounded[
+                                "physical_cost"
+                            ],
+                            "success": shared_grounded["success"],
+                            "terminal_pixels": shared_grounded[
+                                "terminal_pixels"
+                            ],
+                            "terminal_goal": shared_grounded[
+                                "terminal_goal"
+                            ],
+                        }
+                        with tempfile.NamedTemporaryFile(
+                            dir=shared_cache.parent,
+                            prefix=f".{shared_cache.name}.",
+                            delete=False,
+                        ) as temporary:
+                            temporary_path = Path(temporary.name)
+                        try:
+                            torch.save(payload, temporary_path)
+                            os.replace(temporary_path, shared_cache)
+                        finally:
+                            temporary_path.unlink(missing_ok=True)
+                        cached = payload
                     terminal_latent, terminal_cost = _terminal_latents(
                         model,
                         {
@@ -433,28 +495,6 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                         "terminal_latent": terminal_latent,
                         "success": cached["success"],
                     }
-                else:
-                    shared_grounded = grounder.run(
-                        task=run.task,
-                        episode=episode,
-                        start=start,
-                        candidates=shared_panel.actions,
-                        prefix_raw=None,
-                    )
-                    shared_cache.parent.mkdir(parents=True, exist_ok=True)
-                    torch.save(
-                        {
-                            "actions": shared_panel.actions,
-                            "sources": shared_panel.sources,
-                            "physical_cost": shared_grounded["physical_cost"],
-                            "success": shared_grounded["success"],
-                            "terminal_pixels": shared_grounded[
-                                "terminal_pixels"
-                            ],
-                            "terminal_goal": shared_grounded["terminal_goal"],
-                        },
-                        shared_cache,
-                    )
                 shared_rows = _candidate_rows(
                     shared_panel.actions,
                     shared_panel.sources,

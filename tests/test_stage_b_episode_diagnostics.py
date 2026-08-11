@@ -9,6 +9,7 @@ import torch
 from sklearn.preprocessing import StandardScaler
 
 from stable_worldmodel.solver import CEMSolver
+from scripts.summarize_stage_b_episode_failures import _grounding_is_complete
 
 from source.diagnostics.stage_b_episode_failures import (
     CEMTraceCollector,
@@ -180,8 +181,8 @@ class StageBEpisodeTraceTests(unittest.TestCase):
         )
 
     def test_shared_initial_panel_contains_fixed_candidate_families(self):
-        expert = torch.zeros(2, 3)
-        actor = torch.ones(2, 3)
+        expert = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        actor = torch.ones(3, 3)
 
         first = build_shared_initial_panel(
             expert,
@@ -214,6 +215,17 @@ class StageBEpisodeTraceTests(unittest.TestCase):
             ),
         )
         self.assertEqual(len(first.actions), 10)
+
+        deduplicated = build_shared_initial_panel(
+            torch.zeros(2, 3),
+            torch.ones(2, 3),
+            random_candidates=3,
+            actor_neighbors=2,
+            actor_noise_std=0.1,
+            generator=torch.Generator().manual_seed(42),
+        )
+        self.assertEqual(len(deduplicated.actions), 7)
+        self.assertEqual(len(set(deduplicated.sources)), 7)
 
     def test_slot_selection_uses_failures_controls_and_e0_rescues(self):
         selected = select_diagnostic_slots(
@@ -363,6 +375,53 @@ class StageBEpisodeTraceTests(unittest.TestCase):
             self.assertTrue(run.checkpoint.is_file(), run.checkpoint)
             self.assertTrue(run.reference_result.is_file(), run.reference_result)
             self.assertEqual(run.epoch, 10)
+
+    def test_grounding_acceptance_requires_complete_finite_panels(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            slot_root = root / "run" / "slots"
+            slot_root.mkdir(parents=True)
+            (slot_root / "slot_00.json").write_text(
+                json.dumps(
+                    {
+                        "replans": [{"replan": 0}, {"replan": 1}],
+                        "early_termination_reason": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            panels = [
+                {"kind": "shared_initial", "replan": 0, "iteration": None}
+            ] + [
+                {"kind": "cem", "replan": replan, "iteration": iteration}
+                for replan in (0, 1)
+                for iteration in (0, 5, 29)
+            ]
+            reproduction = {
+                "status": "reproducible",
+                "success_vector": [False],
+            }
+            grounded = {
+                "diagnostic_slots": [0],
+                "slots": [
+                    {
+                        "slot": 0,
+                        "labels": ["ranking_failure"],
+                        "panels": panels,
+                    }
+                ],
+            }
+            arguments = {
+                "output_dir": root,
+                "label": "run",
+                "task": "pusht",
+                "reproduction": reproduction,
+                "grounded": grounded,
+                "selected_slots": [0],
+            }
+            self.assertTrue(_grounding_is_complete(**arguments))
+            grounded["slots"][0]["panels"][1]["metric"] = float("nan")
+            self.assertFalse(_grounding_is_complete(**arguments))
 
     def test_smoke_artifacts_have_complete_finite_schema(self):
         collector = CEMTraceCollector(detailed_steps={0, 1})
