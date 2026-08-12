@@ -660,6 +660,35 @@ def planning_state_sha256(planning_info: dict[str, Any]) -> str:
     return digest.hexdigest()
 
 
+_SHARED_PLANNING_STATE_KEYS = {
+    "reacher": ("pixels", "goal", "qpos", "qvel", "target_pos"),
+    "pusht": ("pixels", "goal", "state", "proprio"),
+    "cube": (
+        "pixels",
+        "goal",
+        "proprio",
+        "privileged_block_0_pos",
+    ),
+}
+
+
+def shared_planning_state_sha256(
+    task: str, planning_info: dict[str, Any]
+) -> str:
+    """Hash only canonical model observations and physical state fields."""
+    try:
+        keys = _SHARED_PLANNING_STATE_KEYS[task]
+    except KeyError as error:
+        raise ValueError(f"unsupported diagnostic task {task!r}") from error
+    missing = [key for key in keys if key not in planning_info]
+    if missing:
+        raise KeyError(f"{task} planning state is missing keys {missing}")
+    digest = hashlib.sha256()
+    for key in keys:
+        digest.update(key.encode("utf-8"))
+        digest.update(tensor_bytes_sha256(planning_info[key]).encode("ascii"))
+    return digest.hexdigest()
+
 def cem_candidate_indices(panel: CandidatePanel) -> tuple[int, ...]:
     """Return proposal indices, excluding a standalone expert anchor."""
     return tuple(
@@ -1243,6 +1272,7 @@ __all__ = [
     "planning_state_sha256",
     "require_identity",
     "require_matching_cache_identity",
+    "shared_planning_state_sha256",
     "sha256_file",
     "summarize_grounded_pair",
     "tensor_bytes_sha256",

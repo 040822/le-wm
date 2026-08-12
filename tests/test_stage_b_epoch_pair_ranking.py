@@ -155,6 +155,34 @@ class EpochPairManifestTests(unittest.TestCase):
             planning_state_sha256(changed_state),
         )
 
+    def test_shared_pusht_hash_ignores_transient_wrapper_fields(self):
+        base = {
+            "pixels": torch.zeros(1, 1),
+            "goal": torch.ones(1, 1),
+            "state": torch.tensor([[1.0, 2.0]]),
+            "proprio": torch.tensor([[3.0, 4.0]]),
+            "id": torch.tensor([[10]]),
+            "n_contacts": torch.tensor([[0]]),
+        }
+        transient_changes = {
+            **base,
+            "id": torch.tensor([[99]]),
+            "n_contacts": torch.tensor([[1]]),
+        }
+        physical_change = {
+            **base,
+            "state": torch.tensor([[1.0, 3.0]]),
+        }
+        shared_hash = diagnostic_cli.shared_planning_state_sha256
+        self.assertEqual(
+            shared_hash("pusht", base),
+            shared_hash("pusht", transient_changes),
+        )
+        self.assertNotEqual(
+            shared_hash("pusht", base),
+            shared_hash("pusht", physical_change),
+        )
+
     def test_cube_physical_metric_matches_position_only_success_geometry(self):
         cost = compute_pair_physical_terminal_cost(
             "cube",
@@ -667,7 +695,11 @@ class TraceArtifactTests(unittest.TestCase):
                             "planning_info": {
                                 "pixels": torch.tensor(
                                     [[[float(replan)]]]
-                                )
+                                ),
+                                "goal": torch.zeros(1, 1, 1),
+                                "qpos": torch.zeros(1, 1, 2),
+                                "qvel": torch.zeros(1, 1, 2),
+                                "target_pos": torch.zeros(1, 1, 2),
                             },
                         }
                     )

@@ -64,6 +64,7 @@ from source.diagnostics.stage_b_epoch_pair_ranking import (
     planning_state_sha256,
     require_identity,
     require_matching_cache_identity,
+    shared_planning_state_sha256,
     summarize_grounded_pair,
     tensor_bytes_sha256,
     validate_pair_device,
@@ -829,8 +830,9 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
         )
         if has_shared_replan:
             hashes = {
-                label: planning_state_sha256(
-                    plans[label][(slot, 0)]["planning_info"]
+                label: shared_planning_state_sha256(
+                    pair.task,
+                    plans[label][(slot, 0)]["planning_info"],
                 )
                 for label in EPOCH_LABELS
             }
