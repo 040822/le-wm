@@ -50,12 +50,16 @@ from source.diagnostics.stage_b_epoch_pair_ranking import (
     CandidatePanel,
     build_cross_epoch_panel,
     build_full_cross_epoch_panel,
+    build_ground_identity,
     build_pair_identity,
+    build_summary_identity,
     candidate_actions_sha256,
+    cem_candidate_indices,
     classify_epoch_pair_failure,
     compute_pair_physical_terminal_cost,
     compute_ranking_metrics,
     cross_score_costs,
+    grounded_pair_acceptance_errors,
     load_epoch_pair_manifest,
     planning_state_sha256,
     require_identity,
@@ -355,6 +359,7 @@ def _score_and_summarize_panel(
     )
     physical = np.asarray(grounded["physical_cost"], dtype=np.float64)
     success = np.asarray(grounded["success"], dtype=bool)
+    cem_indices = cem_candidate_indices(panel)
     model_payload = {}
     model_results = {}
     for epoch_label, model in models.items():
@@ -421,6 +426,7 @@ def _score_and_summarize_panel(
         "candidate_count": len(panel.actions),
         "candidate_sha256": panel.sha256,
         "candidate_successes": success.tolist(),
+        "cem_candidate_successes": success[list(cem_indices)].tolist(),
         "physical_cost_min": float(physical.min()),
         "selected_true_outcomes": _source_outcomes(
             panel.source_aliases, physical, success
@@ -431,7 +437,7 @@ def _score_and_summarize_panel(
 
 
 def _expansion_reason(panel_result: dict[str, Any]) -> str | None:
-    if not any(panel_result["candidate_successes"]):
+    if not any(panel_result["cem_candidate_successes"]):
         return "no_success_in_sampled_panel"
     for model in panel_result["models"].values():
         metrics = model["metrics"]
@@ -464,8 +470,8 @@ def _evaluate_ground_panel(
     prefix_sha = tensor_bytes_sha256(prefix)
     identity = {
         **base_identity,
-        "prefix_sha256": prefix_sha,
-        "candidate_sha256": panel.sha256,
+        "panel_prefix_sha256": prefix_sha,
+        "panel_candidate_sha256": panel.sha256,
         "cache_name": cache_name,
     }
     cache_path = cache_root / f"{cache_name}.pt"
@@ -538,7 +544,9 @@ def _attributions_for_slot(
                     "all_candidates_grounded": bool(
                         panel["expanded_to_all_candidates"]
                     ),
-                    "candidate_successes": panel["candidate_successes"],
+                    "candidate_successes": panel[
+                        "cem_candidate_successes"
+                    ],
                     "selected_success": metrics["top1_success"],
                     "predicted_true_terminal_latent_spearman": metrics[
                         "predicted_true_terminal_latent_spearman"
@@ -641,6 +649,74 @@ def _attributions_for_slot(
     return attributions, replan_distances
 
 
+def _ground_artifact_errors(
+    *, pair_root: Path, pair: Any, result: dict[str, Any], iterations: Any
+) -> list[str]:
+    errors = grounded_pair_acceptance_errors(
+        pair, result, detailed_iterations=iterations
+    )
+    score_root = (pair_root / "ground" / "scores").resolve()
+    for slot in result.get("slots", []):
+        for panel in slot.get("panels", []):
+            label = (
+                f"slot {slot.get('slot')}/replan {panel.get('replan')}/"
+                f"state {panel.get('state_epoch')}/iteration "
+                f"{panel.get('iteration')}"
+            )
+            raw_path = panel.get("scores_file")
+            if not raw_path:
+                errors.append(f"{label} has no score artifact")
+                continue
+            path = Path(raw_path)
+            try:
+                path.resolve().relative_to(score_root)
+            except ValueError:
+                errors.append(f"{label} score artifact is outside pair output")
+                continue
+            if not path.is_file():
+                errors.append(f"{label} score artifact is missing")
+                continue
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+            candidate_hash = panel.get("candidate_sha256")
+            if payload.get("candidate_sha256") != candidate_hash:
+                errors.append(f"{label} score candidate hash mismatch")
+            if (
+                candidate_actions_sha256(payload.get("actions"))
+                != candidate_hash
+            ):
+                errors.append(f"{label} score action bytes mismatch")
+            identity = payload.get("identity", {})
+            for key, value in result.get("identity", {}).items():
+                if identity.get(key) != value:
+                    errors.append(f"{label} score identity mismatch for {key}")
+            if identity.get("panel_prefix_sha256") != panel.get(
+                "prefix_sha256"
+            ):
+                errors.append(f"{label} score prefix hash mismatch")
+            if identity.get("panel_candidate_sha256") != candidate_hash:
+                errors.append(f"{label} score identity candidate hash mismatch")
+            count = int(panel.get("candidate_count", 0))
+            model_payloads = payload.get("models", {})
+            if set(model_payloads) != set(EPOCH_LABELS):
+                errors.append(f"{label} score artifact lacks both models")
+                continue
+            for epoch_label in EPOCH_LABELS:
+                for key in (
+                    "predicted_cost",
+                    "true_terminal_latent_cost",
+                    "predicted_terminal_latent",
+                    "true_terminal_latent",
+                ):
+                    values = torch.as_tensor(
+                        model_payloads[epoch_label].get(key)
+                    )
+                    if len(values) != count or not torch.isfinite(values).all():
+                        errors.append(
+                            f"{label}/{epoch_label} invalid score tensor {key}"
+                        )
+    return errors
+
+
 def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
     manifest = load_epoch_pair_manifest(manifest_path)
     pair = manifest.pairs[pair_label]
@@ -677,12 +753,20 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
         traces[epoch_label] = trace
         reproductions[epoch_label] = reproduction
 
-    base_identity = build_pair_identity(manifest, pair, phase="ground")
+    base_identity = build_ground_identity(manifest, pair, traces)
     result_path = pair_root / "ground" / "result.json"
     if require_matching_cache_identity(result_path, base_identity):
         cached = _read_json(result_path)
-        if cached.get("status") != "ok":
-            raise RuntimeError(f"cached ground result is {cached.get('status')}")
+        cache_errors = _ground_artifact_errors(
+            pair_root=pair_root,
+            pair=pair,
+            result=cached,
+            iterations=manifest.protocol["detailed_iterations"],
+        )
+        if cached.get("status") != "ok" or cache_errors:
+            raise RuntimeError(
+                f"cached ground result failed acceptance: {cache_errors}"
+            )
         print(f"{pair.label}: reuse ground result", flush=True)
         return cached
 
@@ -717,6 +801,7 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
         plans = {label: maps[label][0] for label in EPOCH_LABELS}
         details = {label: maps[label][1] for label in EPOCH_LABELS}
         state_specs = []
+        terminal_before_replan_1 = []
         has_shared_replan = all(
             (slot, 0) in plans[label] for label in EPOCH_LABELS
         ) and all(
@@ -726,7 +811,9 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
         )
         if has_shared_replan:
             hashes = {
-                label: planning_state_sha256(plans[label][(slot, 0)]["planning_info"])
+                label: planning_state_sha256(
+                    plans[label][(slot, 0)]["planning_info"]
+                )
                 for label in EPOCH_LABELS
             }
             prefixes = {
@@ -740,24 +827,39 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
                     f"slot {slot} replan 0 is not a shared simulator state"
                 )
             state_specs.append(
-                ("shared", 0, plans["e8"][(slot, 0)])
+                ("shared", 0, plans["e8"][(slot, 0)], EPOCH_LABELS)
             )
         else:
             skipped_states.append("missing_shared_replan_0")
         for state_epoch in EPOCH_LABELS:
-            if (slot, 1) in plans[state_epoch] and all(
-                (slot, 1, iteration) in details[label]
+            if (slot, 1) not in plans[state_epoch]:
+                if reproductions[state_epoch]["success_vector"][slot]:
+                    terminal_before_replan_1.append(state_epoch)
+                else:
+                    skipped_states.append(f"missing_{state_epoch}_replan_1")
+                continue
+            available_labels = tuple(
+                label
                 for label in EPOCH_LABELS
-                for iteration in manifest.protocol["detailed_iterations"]
-            ):
-                state_specs.append(
-                    (state_epoch, 1, plans[state_epoch][(slot, 1)])
+                if all(
+                    (slot, 1, int(iteration)) in details[label]
+                    for iteration in manifest.protocol["detailed_iterations"]
                 )
-            else:
+            )
+            if not available_labels:
                 skipped_states.append(
-                    f"{state_epoch}_terminated_before_replan_1"
+                    f"no_candidates_for_{state_epoch}_replan_1"
                 )
-        for state_epoch, replan, state_plan in state_specs:
+                continue
+            state_specs.append(
+                (
+                    state_epoch,
+                    1,
+                    plans[state_epoch][(slot, 1)],
+                    available_labels,
+                )
+            )
+        for state_epoch, replan, state_plan, available_labels in state_specs:
             prefix = np.asarray(
                 state_plan["executed_prefix_before"], dtype=np.float32
             )
@@ -784,7 +886,7 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
             for iteration in manifest.protocol["detailed_iterations"]:
                 epoch_details = {
                     label: details[label][(slot, replan, int(iteration))]
-                    for label in EPOCH_LABELS
+                    for label in available_labels
                 }
                 seed = (
                     int(manifest.protocol["seed"])
@@ -859,6 +961,9 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
                         "candidate_successes": final[
                             "candidate_successes"
                         ],
+                        "cem_candidate_successes": final[
+                            "cem_candidate_successes"
+                        ],
                         "expanded_to_all_candidates": expanded,
                         "expansion_reason": expansion_reason,
                         "models": final["models"],
@@ -894,6 +999,7 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
                 for label in EPOCH_LABELS
             },
             "skipped_states": skipped_states,
+            "terminal_before_replan_1": terminal_before_replan_1,
             "panels": panels,
         }
         shared_iterations = {
@@ -926,12 +1032,21 @@ def run_ground(*, manifest_path: str | Path, pair_label: str, device: str):
         )
     result = {
         "schema_version": 1,
-        "status": "ok",
+        "status": "pending_acceptance",
         "pair": pair.label,
         "identity": base_identity,
         "diagnostic_slots": list(pair.slots),
         "slots": result_slots,
     }
+    result["acceptance_errors"] = _ground_artifact_errors(
+        pair_root=pair_root,
+        pair=pair,
+        result=result,
+        iterations=manifest.protocol["detailed_iterations"],
+    )
+    result["status"] = (
+        "ok" if not result["acceptance_errors"] else "incomplete"
+    )
     write_atomic_json(result_path, result)
     return result
 
@@ -999,15 +1114,33 @@ def run_summarize(*, manifest_path: str | Path, pair_label: str):
     pair = manifest.pairs[pair_label]
     pair_root = manifest.output_root / pair.label
     grounded = _read_json(pair_root / "ground" / "result.json")
-    ground_identity = build_pair_identity(manifest, pair, phase="ground")
+    traces = {
+        label: torch.load(
+            pair_root / "trace" / label / "trace.pt",
+            map_location="cpu",
+            weights_only=False,
+        )
+        for label in EPOCH_LABELS
+    }
+    ground_identity = build_ground_identity(manifest, pair, traces)
     require_identity(
         grounded.get("identity", {}),
         ground_identity,
         source=pair_root / "ground" / "result.json",
     )
+    artifact_errors = _ground_artifact_errors(
+        pair_root=pair_root,
+        pair=pair,
+        result=grounded,
+        iterations=manifest.protocol["detailed_iterations"],
+    )
+    grounded = dict(grounded)
+    grounded["acceptance_errors"] = artifact_errors
+    if artifact_errors:
+        grounded["status"] = "incomplete"
     summary = summarize_grounded_pair(pair, grounded)
-    summary["identity"] = build_pair_identity(
-        manifest, pair, phase="summarize"
+    summary["identity"] = build_summary_identity(
+        manifest, pair, ground_identity
     )
     write_atomic_json(pair_root / "summary.json", summary)
     write_atomic_text(pair_root / "summary.md", _pair_markdown(summary))
@@ -1020,8 +1153,23 @@ def run_summarize(*, manifest_path: str | Path, pair_label: str):
             missing.append(label)
             continue
         row = _read_json(path)
-        expected = build_pair_identity(
-            manifest, configured_pair, phase="summarize"
+        configured_traces = {
+            epoch_label: torch.load(
+                manifest.output_root
+                / label
+                / "trace"
+                / epoch_label
+                / "trace.pt",
+                map_location="cpu",
+                weights_only=False,
+            )
+            for epoch_label in EPOCH_LABELS
+        }
+        configured_ground_identity = build_ground_identity(
+            manifest, configured_pair, configured_traces
+        )
+        expected = build_summary_identity(
+            manifest, configured_pair, configured_ground_identity
         )
         require_identity(row.get("identity", {}), expected, source=path)
         pairs[label] = {

@@ -428,6 +428,87 @@ def build_pair_identity(
     return identity
 
 
+def build_ground_identity(
+    manifest: EpochPairManifest,
+    pair: EpochPair,
+    traces: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Bind a pair-level ground result to every traced state and candidate."""
+    if set(traces) != {"e8", "e10"}:
+        raise ValueError("ground identity requires e8 and e10 traces")
+    prefix_records = []
+    candidate_records = []
+    state_records = []
+    for epoch_label in ("e8", "e10"):
+        trace = traces[epoch_label]
+        for plan in trace.get("plans", []):
+            context = [epoch_label, int(plan["slot"]), int(plan["replan"])]
+            prefix_records.append(
+                context
+                + [tensor_bytes_sha256(plan["executed_prefix_before"])]
+            )
+            state_records.append(
+                context + [planning_state_sha256(plan["planning_info"])]
+            )
+        for detail in trace.get("details", []):
+            candidate_records.append(
+                [
+                    epoch_label,
+                    int(detail["slot"]),
+                    int(detail["replan"]),
+                    int(detail["iteration"]),
+                    *[
+                        tensor_bytes_sha256(detail[key])
+                        for key in (
+                            "candidates",
+                            "costs",
+                            "topk_indices",
+                            "previous_mean",
+                            "best_ever",
+                        )
+                    ],
+                ]
+            )
+
+    def digest(records: list[list[Any]]) -> str:
+        payload = json.dumps(
+            sorted(records), separators=(",", ":"), ensure_ascii=True
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    identity = build_pair_identity(
+        manifest,
+        pair,
+        phase="ground",
+        prefix_sha256=digest(prefix_records),
+        candidate_sha256=digest(candidate_records),
+    )
+    identity["planning_state_sha256"] = digest(state_records)
+    return identity
+
+
+def build_summary_identity(
+    manifest: EpochPairManifest,
+    pair: EpochPair,
+    ground_identity: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind a summary to the exact prefix, state, and candidate ground inputs."""
+    identity = build_pair_identity(manifest, pair, phase="summarize")
+    for key in (
+        "prefix_sha256",
+        "candidate_sha256",
+        "planning_state_sha256",
+    ):
+        identity[key] = ground_identity[key]
+    return identity
+
+
+def _validate_detail_labels(details: dict[str, dict[str, Any]]) -> None:
+    labels = set(details)
+    if not labels or not labels <= {"e8", "e10"}:
+        raise ValueError("details must contain one or both of e8 and e10")
+
+
 def build_cross_epoch_panel(
     details: dict[str, dict[str, Any]],
     *,
@@ -435,13 +516,14 @@ def build_cross_epoch_panel(
     non_elite_count: int = 10,
     seed: int = 42,
 ) -> CandidatePanel:
-    """Union both epochs' selected CEM candidates behind one interface."""
-    if set(details) != {"e8", "e10"}:
-        raise ValueError("details must contain exactly e8 and e10")
+    """Union available epochs' selected CEM candidates behind one interface."""
+    _validate_detail_labels(details)
     if int(non_elite_count) < 0:
         raise ValueError("non_elite_count must be non-negative")
     entries: list[tuple[str, torch.Tensor]] = []
-    for position, epoch_label in enumerate(("e8", "e10")):
+    for position, epoch_label in enumerate(
+        label for label in ("e8", "e10") if label in details
+    ):
         detail = details[epoch_label]
         candidates = torch.as_tensor(detail["candidates"]).detach().cpu()
         costs = torch.as_tensor(detail["costs"]).detach().cpu().reshape(-1)
@@ -519,12 +601,13 @@ def build_cross_epoch_panel(
 def build_full_cross_epoch_panel(
     details: dict[str, dict[str, Any]], *, expert: torch.Tensor
 ) -> CandidatePanel:
-    """Union both epochs' complete sampled candidates for adaptive grounding."""
-    if set(details) != {"e8", "e10"}:
-        raise ValueError("details must contain exactly e8 and e10")
+    """Union available epochs' complete candidates for adaptive grounding."""
+    _validate_detail_labels(details)
     entries = [
         (f"{epoch_label}:candidate_{index}", candidate)
-        for epoch_label in ("e8", "e10")
+        for epoch_label in (
+            label for label in ("e8", "e10") if label in details
+        )
         for index, candidate in enumerate(details[epoch_label]["candidates"])
     ]
     entries.append(("anchor:expert", expert))
@@ -575,6 +658,15 @@ def planning_state_sha256(planning_info: dict[str, Any]) -> str:
         digest.update(str(key).encode("utf-8"))
         digest.update(tensor_bytes_sha256(value).encode("ascii"))
     return digest.hexdigest()
+
+
+def cem_candidate_indices(panel: CandidatePanel) -> tuple[int, ...]:
+    """Return proposal indices, excluding a standalone expert anchor."""
+    return tuple(
+        index
+        for index, aliases in enumerate(panel.source_aliases)
+        if any(not source.startswith("anchor:") for source in aliases)
+    )
 
 
 def compute_pair_physical_terminal_cost(
@@ -837,7 +929,7 @@ def compute_ranking_metrics(
         "successful_candidate_recall_at_k": (
             float(success[list(predicted_order[:k])].sum() / success_count)
             if success_count
-            else None
+            else 0.0
         ),
         "top1_success": bool(success[top1]),
         "oracle_success": bool(success_count),
@@ -996,13 +1088,112 @@ def _decision_from_attributions(summary: dict[str, Any]) -> str:
     return "expand_grounded_panel_before_new_training"
 
 
+def grounded_pair_acceptance_errors(
+    pair: EpochPair,
+    grounded: dict[str, Any],
+    *,
+    detailed_iterations: Any = (0, 5, 29),
+) -> list[str]:
+    """Return every reason a grounded pair cannot claim formal completion."""
+    errors: list[str] = []
+    iterations = {int(value) for value in detailed_iterations}
+    slots = list(grounded.get("slots", []))
+    slot_ids = [int(slot.get("slot", -1)) for slot in slots]
+    if len(slot_ids) != len(set(slot_ids)) or set(slot_ids) != set(pair.slots):
+        errors.append("diagnostic slot set is incomplete or duplicated")
+    for slot in slots:
+        slot_id = int(slot.get("slot", -1))
+        if slot_id not in pair.slots:
+            continue
+        if slot.get("category") != pair.category_for(slot_id):
+            errors.append(f"slot {slot_id} category mismatch")
+        final_success = slot.get("final_success", {})
+        terminal = set(slot.get("terminal_before_replan_1", []))
+        if not terminal <= {"e8", "e10"}:
+            errors.append(f"slot {slot_id} has invalid terminal epoch labels")
+        for epoch_label in terminal:
+            if final_success.get(epoch_label) is not True:
+                errors.append(
+                    f"slot {slot_id}/{epoch_label} missing replan 1 without success"
+                )
+        expected_contexts = {
+            ("shared", 0, iteration) for iteration in iterations
+        }
+        expected_contexts.update(
+            (epoch_label, 1, iteration)
+            for epoch_label in ("e8", "e10")
+            if epoch_label not in terminal
+            for iteration in iterations
+        )
+        panels = list(slot.get("panels", []))
+        actual_contexts = [
+            (
+                str(panel.get("state_epoch")),
+                int(panel.get("replan", -1)),
+                int(panel.get("iteration", -1)),
+            )
+            for panel in panels
+        ]
+        if len(actual_contexts) != len(set(actual_contexts)):
+            errors.append(f"slot {slot_id} has duplicate grounded panels")
+        if set(actual_contexts) != expected_contexts:
+            errors.append(f"slot {slot_id} grounded panel set is incomplete")
+        for panel in panels:
+            context = (
+                f"slot {slot_id}/replan {panel.get('replan')}/"
+                f"state {panel.get('state_epoch')}/iteration "
+                f"{panel.get('iteration')}"
+            )
+            for key in (
+                "planning_state_sha256",
+                "prefix_sha256",
+                "sampled_candidate_sha256",
+                "candidate_sha256",
+            ):
+                value = panel.get(key)
+                if not isinstance(value, str) or len(value) != 64:
+                    errors.append(f"{context} has invalid {key}")
+            candidate_count = int(panel.get("candidate_count", 0))
+            if (
+                candidate_count <= 0
+                or len(panel.get("candidate_successes", []))
+                != candidate_count
+            ):
+                errors.append(f"{context} has inconsistent candidates")
+            if not panel.get("cem_candidate_successes"):
+                errors.append(f"{context} has no CEM candidates")
+            models = panel.get("models", {})
+            if set(models) != {"e8", "e10"}:
+                errors.append(f"{context} is not cross-scored by both models")
+                continue
+            for epoch_label in ("e8", "e10"):
+                metrics = models[epoch_label].get("metrics", {})
+                for key in PAIR_METRIC_KEYS:
+                    value = metrics.get(key)
+                    if value is None:
+                        errors.append(
+                            f"{context}/"
+                            f"{epoch_label} missing finite {key}"
+                        )
+                        continue
+                    try:
+                        finite = np.isfinite(float(value))
+                    except (TypeError, ValueError):
+                        finite = False
+                    if not finite:
+                        errors.append(f"{context}/{epoch_label} non-finite {key}")
+    return errors
+
 def summarize_grounded_pair(
     pair: EpochPair, grounded: dict[str, Any]
 ) -> dict[str, Any]:
     """Summarize paired e10-e8 deltas without cross-task physical averaging."""
-    if grounded.get("status") != "ok":
-        raise ValueError("grounded pair status must be ok")
+    if grounded.get("status") not in {"ok", "incomplete"}:
+        raise ValueError("grounded pair status must be ok or incomplete")
     slots = list(grounded.get("slots", []))
+    acceptance_errors = list(grounded.get("acceptance_errors", []))
+    acceptance_errors.extend(grounded_pair_acceptance_errors(pair, grounded))
+    acceptance_errors = list(dict.fromkeys(acceptance_errors))
     by_category = {
         category: [
             slot for slot in slots if slot.get("category") == category
@@ -1012,9 +1203,10 @@ def summarize_grounded_pair(
     summary = {
         "status": (
             "ok"
-            if {int(slot["slot"]) for slot in slots} == set(pair.slots)
+            if grounded.get("status") == "ok" and not acceptance_errors
             else "incomplete"
         ),
+        "acceptance_errors": acceptance_errors,
         "pair": pair.label,
         "task": pair.task,
         "section": pair.section,
@@ -1037,12 +1229,16 @@ __all__ = [
     "PAIR_METRIC_KEYS",
     "build_cross_epoch_panel",
     "build_full_cross_epoch_panel",
+    "build_ground_identity",
     "build_pair_identity",
+    "build_summary_identity",
     "candidate_actions_sha256",
+    "cem_candidate_indices",
     "classify_epoch_pair_failure",
     "compute_ranking_metrics",
     "compute_pair_physical_terminal_cost",
     "cross_score_costs",
+    "grounded_pair_acceptance_errors",
     "load_epoch_pair_manifest",
     "planning_state_sha256",
     "require_identity",
