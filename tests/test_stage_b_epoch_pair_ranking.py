@@ -550,6 +550,91 @@ class TraceArtifactTests(unittest.TestCase):
         self.assertEqual({row["slot"] for row in trace["details"]}, {1})
         self.assertEqual(len(trace["summaries"]), 2)
 
+    def test_simulator_grounder_batches_large_panels_without_reordering(self):
+        batch_sizes = []
+        next_offset = [0]
+
+        class FakeWorld:
+            def __init__(self, *, num_envs, **kwargs):
+                if num_envs > 128:
+                    raise RuntimeError(
+                        "Offscreen framebuffer is not complete, error 0x8cdd"
+                    )
+                self.num_envs = num_envs
+                self.offset = next_offset[0]
+                next_offset[0] += num_envs
+                batch_sizes.append(num_envs)
+
+            def set_policy(self, policy):
+                pass
+
+            def evaluate(self, **kwargs):
+                values = np.arange(
+                    self.offset,
+                    self.offset + self.num_envs,
+                    dtype=np.float32,
+                )
+                self.infos = {
+                    "qpos": np.stack([values, np.zeros_like(values)], axis=1),
+                    "goal_qpos": np.zeros((self.num_envs, 2), dtype=np.float32),
+                    "pixels": values[:, None],
+                    "goal": np.zeros((self.num_envs, 1), dtype=np.float32),
+                }
+                return {
+                    "episode_successes": (values % 2 == 0).tolist()
+                }
+
+            def close(self):
+                pass
+
+        cfg = SimpleNamespace(
+            world=diagnostic_cli.OmegaConf.create({}),
+            plan_config=SimpleNamespace(action_block=1),
+            eval=SimpleNamespace(
+                eval_budget=2,
+                goal_offset_steps=1,
+                callables=diagnostic_cli.OmegaConf.create({})
+            ),
+        )
+        with mock.patch.object(
+            diagnostic_cli, "img_transform", return_value=lambda value: value
+        ), mock.patch.object(
+            diagnostic_cli.swm, "World", FakeWorld
+        ), mock.patch.object(
+            diagnostic_cli,
+            "build_prefix_replay_actions",
+            side_effect=lambda candidates, **kwargs: np.zeros(
+                (len(candidates), 1, 1), dtype=np.float32
+            ),
+        ), mock.patch.object(
+            diagnostic_cli,
+            "prepare_image_info",
+            side_effect=lambda info, transform, device: {
+                key: torch.as_tensor(value) for key, value in info.items()
+            },
+        ):
+            grounder = diagnostic_cli.PairSimulatorGrounder(
+                cfg=cfg, dataset=object(), scaler=object(), device="cpu"
+            )
+            result = grounder.run(
+                task="reacher",
+                episode=0,
+                start=0,
+                candidates=torch.zeros(129, 1, 1),
+                prefix_raw=None,
+            )
+
+        self.assertEqual(batch_sizes, [128, 1])
+        np.testing.assert_array_equal(
+            result["physical_cost"], np.arange(129, dtype=np.float32)
+        )
+        torch.testing.assert_close(
+            result["terminal_pixels"].reshape(-1),
+            torch.arange(129, dtype=torch.float32),
+        )
+        self.assertEqual(len(result["success"]), 129)
+
+
     def test_reacher_single_slot_trace_ground_summarize_runtime_smoke(self):
         class FakeModel:
             def to(self, device):

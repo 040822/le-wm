@@ -97,43 +97,61 @@ class PairSimulatorGrounder:
             action_block=int(self.cfg.plan_config.action_block),
             prefix_raw=prefix_raw,
         )
-        policy = FixedRawSequencePolicy(raw)
-        world_cfg = OmegaConf.to_container(self.cfg.world, resolve=True)
-        world_cfg["num_envs"] = len(raw)
-        world_cfg["max_episode_steps"] = 2 * int(self.cfg.eval.eval_budget)
-        world = swm.World(**world_cfg, image_shape=(224, 224))
-        world.set_policy(policy)
-        try:
-            metrics = world.evaluate(
-                dataset=self.dataset,
-                episodes_idx=[episode] * len(raw),
-                start_steps=[start] * len(raw),
-                goal_offset=int(self.cfg.eval.goal_offset_steps),
-                eval_budget=int(raw.shape[1]),
-                callables=OmegaConf.to_container(
-                    self.cfg.eval.callables, resolve=True
-                ),
-                reset_mode="wait",
+        physical_batches = []
+        terminal_pixel_batches = []
+        terminal_goal_batches = []
+        success_batches = []
+        for batch_start in range(0, len(raw), 128):
+            batch_raw = raw[batch_start : batch_start + 128]
+            policy = FixedRawSequencePolicy(batch_raw)
+            world_cfg = OmegaConf.to_container(self.cfg.world, resolve=True)
+            world_cfg["num_envs"] = len(batch_raw)
+            world_cfg["max_episode_steps"] = 2 * int(
+                self.cfg.eval.eval_budget
             )
-            physical = compute_pair_physical_terminal_cost(task, world.infos)
-            terminal = prepare_image_info(
-                {
-                    "pixels": world.infos["pixels"],
-                    "goal": world.infos["goal"],
-                },
-                self.transform,
-                self.device,
-            )
-            success = np.asarray(
-                metrics["episode_successes"], dtype=bool
-            ).reshape(-1)
-        finally:
-            world.close()
+            world = swm.World(**world_cfg, image_shape=(224, 224))
+            world.set_policy(policy)
+            try:
+                metrics = world.evaluate(
+                    dataset=self.dataset,
+                    episodes_idx=[episode] * len(batch_raw),
+                    start_steps=[start] * len(batch_raw),
+                    goal_offset=int(self.cfg.eval.goal_offset_steps),
+                    eval_budget=int(batch_raw.shape[1]),
+                    callables=OmegaConf.to_container(
+                        self.cfg.eval.callables, resolve=True
+                    ),
+                    reset_mode="wait",
+                )
+                physical_batches.append(
+                    compute_pair_physical_terminal_cost(task, world.infos)
+                )
+                terminal = prepare_image_info(
+                    {
+                        "pixels": world.infos["pixels"],
+                        "goal": world.infos["goal"],
+                    },
+                    self.transform,
+                    self.device,
+                )
+                terminal_pixel_batches.append(
+                    terminal["pixels"].detach().cpu()
+                )
+                terminal_goal_batches.append(
+                    terminal["goal"].detach().cpu()
+                )
+                success_batches.append(
+                    np.asarray(
+                        metrics["episode_successes"], dtype=bool
+                    ).reshape(-1)
+                )
+            finally:
+                world.close()
         return {
-            "physical_cost": physical,
-            "terminal_pixels": terminal["pixels"].detach().cpu(),
-            "terminal_goal": terminal["goal"].detach().cpu(),
-            "success": success,
+            "physical_cost": np.concatenate(physical_batches),
+            "terminal_pixels": torch.cat(terminal_pixel_batches),
+            "terminal_goal": torch.cat(terminal_goal_batches),
+            "success": np.concatenate(success_batches),
         }
 
 
