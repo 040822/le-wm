@@ -1,0 +1,89 @@
+version: 1
+repository_root: /data/users/wenxin/pre-exp/le-wm
+output_root: outputs/experiments/fast_lewam_parallel_pilots/0815
+seed: 42
+identity_files:
+  - config/train/fast_lewam.yaml
+  - config/train/policy/fast_lewam.yaml
+  - train.py
+  - eval_fast_lewam.py
+  - scripts/run_fast_lewam_pilot_worker.py
+  - source/experiments/planner_transition_collection.py
+  - source/experiments/planner_transition_replay.py
+identity_directories:
+  - config/train
+  - config/eval
+dataset_files:
+  - data/datasets/dmcontrol/reacher.h5
+  - data/datasets/ogbench/cube_single.h5
+  - data/datasets/pusht.h5
+
+levels:
+  1:
+    max_epochs: 3
+    num_eval: 20
+    grounded_slots: 6
+  2:
+    max_epochs: 5
+    num_eval: 50
+    grounded_slots: 18
+
+promotion:
+  maximum_success_regression_pp: 5.0
+  success_gain_pp: 10.0
+  spearman_gain: 0.10
+  regret_reduction_fraction: 0.10
+
+replay:
+  iteration: 29
+  fixed_non_elites: 10
+  random_candidates: 10
+  actor_neighbors: 8
+  actor_noise_std: 0.10
+  simulator_batch_size: 32
+  train_batch_size: 64
+  expert_fraction: 0.50
+  learning_rate: 0.00001
+  weight_decay: 0.001
+
+pilots:
+  reacher_offline_alignment:
+    gpu: 0
+    task: reacher
+    direction: offline_alignment
+    baseline_run_config: outputs/fast_lewam/reacher/0809_e1_stage_b_only_seed3072_tmux/config.yaml
+    baseline_checkpoint: outputs/fast_lewam/reacher/0809_e1_stage_b_only_seed3072_tmux/checkpoints/fast_lewam_weights_epoch_10.pt
+    actor_run_config: outputs/fast_lewam/reacher/0809_e3_expert_actions_seed3072_tmux/config.yaml
+    actor_checkpoint: outputs/fast_lewam/reacher/0809_e3_expert_actions_seed3072_tmux/checkpoints/fast_lewam_weights_epoch_10.pt
+    trace: outputs/diagnostics/fast_lewam_serial_one_step/0813/reacher_s34/trace/e8/trace.pt
+    slots: [3, 6, 10, 22, 0, 9, 1, 2, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16]
+
+  cube_action_tokens:
+    gpu: 1
+    task: cube
+    direction: action_tokens_25
+    baseline_run_config: outputs/fast_lewam/cube/0804_e1_stage_b_only_seed3073/config.yaml
+    baseline_checkpoint: outputs/fast_lewam/cube/0804_e1_stage_b_only_seed3073/checkpoints/fast_lewam_weights_epoch_10.pt
+    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+
+  pusht_streaming_online:
+    gpu: 2
+    task: pusht
+    direction: streaming_online
+    baseline_run_config: outputs/fast_lewam/pusht/0802_e1_stage_b_only/config.yaml
+    baseline_checkpoint: outputs/fast_lewam/pusht/0802_e1_stage_b_only/checkpoints/fast_lewam_weights_epoch_10.pt
+    actor_run_config: outputs/fast_lewam/pusht/0802_e3_expert_actions/config.yaml
+    actor_checkpoint: outputs/fast_lewam/pusht/0802_e3_expert_actions/checkpoints/fast_lewam_weights_epoch_10.pt
+    trace: outputs/diagnostics/fast_lewam_serial_one_step/0813/pusht_s34/trace/e8/trace.pt
+    slots: [15, 32, 1, 4, 0, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16]
+
+  pusht_offline_alignment:
+    gpu: 3
+    task: pusht
+    direction: offline_alignment
+    baseline_run_config: outputs/fast_lewam/pusht/0802_e1_stage_b_only/config.yaml
+    baseline_checkpoint: outputs/fast_lewam/pusht/0802_e1_stage_b_only/checkpoints/fast_lewam_weights_epoch_10.pt
+    actor_run_config: outputs/fast_lewam/pusht/0802_e3_expert_actions/config.yaml
+    actor_checkpoint: outputs/fast_lewam/pusht/0802_e3_expert_actions/checkpoints/fast_lewam_weights_epoch_10.pt
+    trace: outputs/diagnostics/fast_lewam_serial_one_step/0813/pusht_s34/trace/e8/trace.pt
+    slots: [15, 32, 1, 4, 0, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16]
