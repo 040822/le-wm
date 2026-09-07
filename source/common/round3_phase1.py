@@ -1253,6 +1253,7 @@ def write_round3_result(
     output_dir: str | Path,
     *,
     trace_records: Sequence[Mapping[str, Any]] | None = None,
+    trace_output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Write the Phase 1 result schema, preserving an optional trace file."""
     target_dir = Path(output_dir)
@@ -1262,7 +1263,8 @@ def write_round3_result(
     result.setdefault("protocol", ROUND3_PROTOCOL)
     result.setdefault("status", "ok")
     if trace_records is not None:
-        trace_path = target_dir / "episodes.jsonl"
+        trace_dir = Path(trace_output_dir) if trace_output_dir is not None else target_dir
+        trace_path = trace_dir / "episodes.jsonl"
         write_trace_jsonl(trace_records, trace_path)
         result["trace_path"] = str(trace_path)
         result["trace_schema_version"] = TRACE_SCHEMA_VERSION

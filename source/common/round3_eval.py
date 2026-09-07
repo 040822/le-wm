@@ -97,6 +97,7 @@ def run_round3_evaluation(
     manifest: CohortManifest,
     output_dir: str | Path,
     dataset: Any | None = None,
+    trace_output_dir: str | Path | None = None,
     device: str | None = None,
     trace: bool = True,
 ) -> dict[str, Any]:
@@ -216,7 +217,12 @@ def run_round3_evaluation(
     payload.setdefault("status", "ok")
     validate_cohort_manifest(manifest, expected_count=len(manifest.entries))
     validate_result_payload(payload, expected_count=len(manifest.entries))
-    return write_round3_result(payload, target, trace_records=trace_records)
+    return write_round3_result(
+        payload,
+        target,
+        trace_records=trace_records,
+        trace_output_dir=trace_output_dir,
+    )
 
 
 __all__ = ["run_round3_evaluation", "validate_gpu_visibility", "validate_round3_config"]

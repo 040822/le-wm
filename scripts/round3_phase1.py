@@ -220,6 +220,7 @@ def command_evaluate(args: argparse.Namespace) -> None:
         manifest=manifest,
         dataset=dataset,
         output_dir=output_dir,
+        trace_output_dir=Path(args.output) / "traces" / args.task / args.method / args.protocol_variant / args.stage,
         device=args.device,
         trace=True,
     )
