@@ -10,11 +10,14 @@ from pathlib import Path
 import sys
 import tempfile
 
-os.environ.setdefault("MUJOCO_GL", "egl")
-
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+if __name__ == "__main__":
+    from source.common.gpu_environment import configure_mujoco_egl_device
+
+    configure_mujoco_egl_device()
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -269,6 +272,20 @@ def _panel_evidence(
         "oracle_success": bool(any(successes)),
         "labels": classify_failure(evidence),
     }
+
+
+def _reference_action_statistics(panels):
+    norms = []
+    out_of_bounds = []
+    for panel in panels:
+        summary = panel.get("summary", {})
+        norm = summary.get("reference_action_norm_mean")
+        oob = summary.get("reference_action_out_of_bounds_fraction_mean")
+        if norm is not None:
+            norms.append(norm)
+        if oob is not None:
+            out_of_bounds.append(oob)
+    return norms, out_of_bounds
 
 
 def run_grounding(*, manifest_path, run_label, device, output_dir):
@@ -787,21 +804,9 @@ def run_grounding(*, manifest_path, run_label, device, output_dir):
                 )
             )
             final_plan = plans[(slot, 1)]["normalized_plan"]
-            reference_norms = [
-                panel["summary"]["reference_action_norm_mean"]
-                for panel in slot_panels
-                if panel["summary"]["reference_action_norm_mean"] is not None
-            ]
-            reference_oob = [
-                panel["summary"][
-                    "reference_action_out_of_bounds_fraction_mean"
-                ]
-                for panel in slot_panels
-                if panel["summary"][
-                    "reference_action_out_of_bounds_fraction_mean"
-                ]
-                is not None
-            ]
+            reference_norms, reference_oob = _reference_action_statistics(
+                slot_panels
+            )
             if reference_norms and reference_oob:
                 slot_labels.update(
                     classify_failure(

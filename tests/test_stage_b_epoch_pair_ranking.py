@@ -7,6 +7,7 @@ import unittest
 from unittest import mock
 
 import numpy as np
+from omegaconf import OmegaConf
 import torch
 
 from scripts import diagnose_fast_lewam_epoch_pair_ranking as diagnostic_cli
@@ -89,6 +90,28 @@ def _complete_slot(pair, slot):
 
 
 class EpochPairManifestTests(unittest.TestCase):
+    def test_manifest_member_can_override_pair_run_config(self):
+        source = Path(
+            "config/diagnostics/fast_lewam_epoch_pair_ranking.yaml"
+        ).resolve()
+        raw = OmegaConf.load(source)
+        raw.repository_root = str(Path.cwd().resolve())
+        override = raw.pairs.pusht_s41.run_config
+        raw.pairs.reacher_s32.epochs.e8.run_config = override
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest_path = Path(temporary) / "manifest.yaml"
+            OmegaConf.save(raw, manifest_path)
+            pair = load_epoch_pair_manifest(manifest_path).pairs["reacher_s32"]
+
+        self.assertEqual(
+            pair.epochs["e8"].run_config,
+            (Path.cwd() / str(override)).resolve(),
+        )
+        self.assertNotEqual(
+            pair.epochs["e8"].run_config,
+            pair.epochs["e10"].run_config,
+        )
+
     def test_manifest_declares_three_valid_pairs_and_38_fixed_slots(self):
         manifest = load_epoch_pair_manifest(
             "config/diagnostics/fast_lewam_epoch_pair_ranking.yaml"
@@ -325,6 +348,42 @@ class CacheIdentityTests(unittest.TestCase):
                     require_matching_cache_identity(path, changed)
             self.assertEqual(json.loads(path.read_text())["status"], "ok")
 
+    def test_summary_identity_ignores_only_unrelated_manifest_changes(self):
+        actual = {
+            "manifest_sha256": "old",
+            "phase": "summarize",
+            "pair": "reacher_s34",
+            "protocol": {"seed": 42},
+            "candidate_sha256": "candidate-a",
+        }
+        expected = {**actual, "manifest_sha256": "new"}
+        pair = SimpleNamespace(slots=(0, 1))
+        grounded = {"diagnostic_slots": [0, 1]}
+        diagnostic_cli._require_pair_compatible_summary_identity(
+            actual=actual,
+            expected=expected,
+            pair=pair,
+            grounded=grounded,
+            source=Path("summary.json"),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "stale cache identity"):
+            diagnostic_cli._require_pair_compatible_summary_identity(
+                actual={**actual, "candidate_sha256": "candidate-b"},
+                expected=expected,
+                pair=pair,
+                grounded=grounded,
+                source=Path("summary.json"),
+            )
+        with self.assertRaisesRegex(RuntimeError, "diagnostic slots"):
+            diagnostic_cli._require_pair_compatible_summary_identity(
+                actual=actual,
+                expected=expected,
+                pair=pair,
+                grounded={"diagnostic_slots": [0]},
+                source=Path("summary.json"),
+            )
+
     def test_pair_ground_identity_covers_prefix_and_all_panel_inputs(self):
         manifest = load_epoch_pair_manifest(
             "config/diagnostics/fast_lewam_epoch_pair_ranking.yaml"
@@ -425,6 +484,58 @@ class AttributionTests(unittest.TestCase):
 
 
 class PairedSummaryTests(unittest.TestCase):
+    def test_serial_control_uses_pre_registered_task_decisions(self):
+        source = load_epoch_pair_manifest(
+            "config/diagnostics/fast_lewam_epoch_pair_ranking.yaml"
+        ).pairs["pusht_s41"]
+        pair = EpochPair(
+            label="pusht_s34",
+            task="pusht",
+            section="3.4",
+            preferred_gpu=3,
+            run_config=source.run_config,
+            epochs=source.epochs,
+            slot_categories={
+                "regression": (),
+                "improvement_control": (0, 1),
+                "stable_success": (),
+                "stable_failure": (),
+            },
+        )
+        panels = []
+        for _ in range(2):
+            panel = _complete_panel("shared", 0, 0)
+            panel["models"]["e8"]["metrics"].update(
+                predicted_physical_spearman=0.4,
+                physical_topk_recall=0.4,
+                physical_best_candidate_regret=0.2,
+            )
+            panel["models"]["e10"]["metrics"].update(
+                predicted_physical_spearman=0.5,
+                physical_topk_recall=0.5,
+                physical_best_candidate_regret=0.1,
+            )
+            panels.append(panel)
+        grounded = {
+            "status": "incomplete",
+            "acceptance_errors": ["synthetic"],
+            "slots": [
+                {
+                    "slot": slot,
+                    "category": "improvement_control",
+                    "final_success": {"e8": slot == 0, "e10": True},
+                    "attributions": {"e8": [], "e10": []},
+                    "panels": [panels[slot]],
+                }
+                for slot in range(2)
+            ],
+        }
+
+        summary = summarize_grounded_pair(pair, grounded)
+
+        self.assertEqual(summary["final_success_rate"], {"e8": 0.5, "e10": 1.0})
+        self.assertEqual(summary["decision"], "serial_pusht_signal_met")
+
     def test_summary_reports_e10_minus_e8_within_slot_category(self):
         pair = load_epoch_pair_manifest(
             "config/diagnostics/fast_lewam_epoch_pair_ranking.yaml"
@@ -779,6 +890,7 @@ class TraceArtifactTests(unittest.TestCase):
                 epochs[label] = PairEpoch(
                     label=label,
                     epoch=epoch,
+                    run_config=run_config,
                     checkpoint=checkpoint,
                     reference_result=reference,
                 )

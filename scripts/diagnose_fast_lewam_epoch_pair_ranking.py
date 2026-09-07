@@ -11,11 +11,20 @@ from pathlib import Path
 import sys
 from typing import Any
 
-os.environ.setdefault("MUJOCO_GL", "egl")
-
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+_requested_phase = None
+if "--phase" in sys.argv:
+    _phase_index = sys.argv.index("--phase") + 1
+    if _phase_index < len(sys.argv):
+        _requested_phase = sys.argv[_phase_index]
+
+if __name__ == "__main__" and _requested_phase in {"trace", "ground", "all"}:
+    from source.common.gpu_environment import configure_mujoco_egl_device
+
+    configure_mujoco_egl_device()
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -165,7 +174,7 @@ def _subject_model(subject: Any, device: str) -> Any:
 
 
 def _load_subject(pair: Any, epoch_label: str, device: str) -> Any:
-    run_cfg = OmegaConf.load(pair.run_config)
+    run_cfg = OmegaConf.load(pair.epochs[epoch_label].run_config)
     return load_model_from_weights(
         run_cfg, pair.epochs[epoch_label].checkpoint, device
     )
@@ -1113,6 +1122,7 @@ def _global_markdown(summary: dict[str, Any]) -> str:
         "# Fast-LeWAM epoch-pair ranking diagnostics",
         "",
         f"- status: `{summary['status']}`",
+        f"- decision: `{summary.get('decision', 'n/a')}`",
         "",
         "| pair | task | status | decision |",
         "|---|---|---|---|",
@@ -1127,6 +1137,33 @@ def _global_markdown(summary: dict[str, Any]) -> str:
             ["", f"Missing pairs: `{summary['missing_pairs']}`"]
         )
     return "\n".join(lines) + "\n"
+
+
+def _require_pair_compatible_summary_identity(
+    *,
+    actual,
+    expected,
+    pair,
+    grounded,
+    source,
+):
+    """Allow only the whole-manifest hash to drift for an unchanged pair."""
+    actual_slots = tuple(
+        int(slot) for slot in grounded.get("diagnostic_slots", [])
+    )
+    if actual_slots != tuple(int(slot) for slot in pair.slots):
+        raise RuntimeError(
+            f"stale cache identity in {source}: diagnostic slots changed"
+        )
+    actual_without_manifest = {
+        key: value for key, value in actual.items() if key != "manifest_sha256"
+    }
+    expected_without_manifest = {
+        key: value for key, value in expected.items() if key != "manifest_sha256"
+    }
+    require_identity(
+        actual_without_manifest, expected_without_manifest, source=source
+    )
 
 
 def run_summarize(*, manifest_path: str | Path, pair_label: str):
@@ -1191,7 +1228,16 @@ def run_summarize(*, manifest_path: str | Path, pair_label: str):
         expected = build_summary_identity(
             manifest, configured_pair, configured_ground_identity
         )
-        require_identity(row.get("identity", {}), expected, source=path)
+        configured_grounded = _read_json(
+            manifest.output_root / label / "ground" / "result.json"
+        )
+        _require_pair_compatible_summary_identity(
+            actual=row.get("identity", {}),
+            expected=expected,
+            pair=configured_pair,
+            grounded=configured_grounded,
+            source=path,
+        )
         pairs[label] = {
             "task": row["task"],
             "section": row["section"],
@@ -1212,6 +1258,17 @@ def run_summarize(*, manifest_path: str | Path, pair_label: str):
         "missing_pairs": missing,
         "note": "Physical costs are summarized within pair only; no cross-task raw-cost average is computed.",
     }
+    if pairs and all(row["section"] == "3.4" for row in pairs.values()):
+        decisions = {row["decision"] for row in pairs.values()}
+        if {
+            "serial_reacher_floor_met",
+            "serial_pusht_signal_met",
+        } <= decisions:
+            global_summary["decision"] = "causal_prefix_supported"
+        elif "causal_prefix_not_supported" in decisions:
+            global_summary["decision"] = "causal_prefix_not_supported"
+        else:
+            global_summary["decision"] = "serial_control_mixed"
     write_atomic_json(manifest.output_root / "summary.json", global_summary)
     write_atomic_text(
         manifest.output_root / "summary.md",

@@ -9,6 +9,7 @@ import torch
 from sklearn.preprocessing import StandardScaler
 
 from stable_worldmodel.solver import CEMSolver
+from scripts.ground_stage_b_episode_failures import _reference_action_statistics
 from scripts.summarize_stage_b_episode_failures import _grounding_is_complete
 
 from source.diagnostics.stage_b_episode_failures import (
@@ -422,6 +423,22 @@ class StageBEpisodeTraceTests(unittest.TestCase):
             self.assertTrue(_grounding_is_complete(**arguments))
             grounded["slots"][0]["panels"][1]["metric"] = float("nan")
             self.assertFalse(_grounding_is_complete(**arguments))
+
+    def test_reference_statistics_ignore_shared_panel_schema(self):
+        norms, out_of_bounds = _reference_action_statistics(
+            [
+                {"kind": "shared_initial", "summary": {"regret": 0.0}},
+                {
+                    "kind": "cem",
+                    "summary": {
+                        "reference_action_norm_mean": 1.5,
+                        "reference_action_out_of_bounds_fraction_mean": 0.2,
+                    },
+                },
+            ]
+        )
+        self.assertEqual(norms, [1.5])
+        self.assertEqual(out_of_bounds, [0.2])
 
     def test_smoke_artifacts_have_complete_finite_schema(self):
         collector = CEMTraceCollector(detailed_steps={0, 1})

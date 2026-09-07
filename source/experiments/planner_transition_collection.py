@@ -81,12 +81,16 @@ class BlockTrajectoryPolicy(FixedRawSequencePolicy):
         return dict(self._initial_info)
 
     def finish(self, terminal_info: dict[str, Any]) -> torch.Tensor:
+        terminal = self._pixels(terminal_info)
         expected = self.actions.shape[1] // self.action_block
-        if len(self._block_observations) != expected:
+        if len(self._block_observations) > expected:
             raise RuntimeError(
                 f"recorded {len(self._block_observations)} block states, expected {expected}"
             )
-        sequence = [*self._block_observations, self._pixels(terminal_info)]
+        missing = expected - len(self._block_observations)
+        sequence = [*self._block_observations]
+        sequence.extend(terminal.clone() for _ in range(missing))
+        sequence.append(terminal)
         return torch.stack(sequence, dim=1)
 
 

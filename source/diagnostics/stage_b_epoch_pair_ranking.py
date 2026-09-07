@@ -42,6 +42,7 @@ PAIR_METRIC_KEYS = (
 class PairEpoch:
     label: str
     epoch: int
+    run_config: Path
     checkpoint: Path
     reference_result: Path
 
@@ -160,12 +161,19 @@ def load_epoch_pair_manifest(path: str | Path) -> EpochPairManifest:
             epoch = PairEpoch(
                 label=epoch_label,
                 epoch=int(value["epoch"]),
+                run_config=(
+                    root / str(value.get("run_config", pair_raw["run_config"]))
+                ).resolve(),
                 checkpoint=(root / str(value["checkpoint"])).resolve(),
                 reference_result=(
                     root / str(value["reference_result"])
                 ).resolve(),
             )
-            for artifact in (epoch.checkpoint, epoch.reference_result):
+            for artifact in (
+                epoch.run_config,
+                epoch.checkpoint,
+                epoch.reference_result,
+            ):
                 if not artifact.is_file():
                     raise FileNotFoundError(artifact)
             reference, success = _reference_successes(epoch.reference_result)
@@ -177,8 +185,6 @@ def load_epoch_pair_manifest(path: str | Path) -> EpochPairManifest:
             epochs[epoch_label] = epoch
             references[epoch_label] = reference
             successes[epoch_label] = success
-        if epochs["e8"].epoch != 8 or epochs["e10"].epoch != 10:
-            raise ValueError(f"{pair_label} must compare epochs 8 and 10")
         for cohort_key in ("episode_ids", "start_steps", "start_rows"):
             left = references["e8"]["parameters"][cohort_key]
             right = references["e10"]["parameters"][cohort_key]
@@ -411,6 +417,7 @@ def build_pair_identity(
         "epochs": {
             label: {
                 "epoch": epoch.epoch,
+                "config_sha256": sha256_file(epoch.run_config),
                 "checkpoint_sha256": sha256_file(epoch.checkpoint),
                 "reference_result_sha256": sha256_file(
                     epoch.reference_result
@@ -1117,6 +1124,32 @@ def _decision_from_attributions(summary: dict[str, Any]) -> str:
     return "expand_grounded_panel_before_new_training"
 
 
+def _serial_control_decision(summary: dict[str, Any]) -> str:
+    rates = summary["final_success_rate"]
+    if summary["task"] == "reacher":
+        if rates["e10"] >= 0.80:
+            return "serial_reacher_floor_met"
+        if rates["e10"] < 0.78:
+            return "causal_prefix_not_supported"
+        return "serial_control_mixed"
+    delta = summary["overall"]["e10_minus_e8"]
+    improvements = sum(
+        (
+            delta.get("predicted_physical_spearman") is not None
+            and delta["predicted_physical_spearman"] >= 0,
+            delta.get("physical_topk_recall") is not None
+            and delta["physical_topk_recall"] >= 0,
+            delta.get("physical_best_candidate_regret") is not None
+            and delta["physical_best_candidate_regret"] <= 0,
+        )
+    )
+    if rates["e10"] - rates["e8"] >= 0.04 - 1e-9 and improvements >= 2:
+        return "serial_pusht_signal_met"
+    if rates["e10"] <= 0.88 and improvements < 2:
+        return "causal_prefix_not_supported"
+    return "serial_control_mixed"
+
+
 def grounded_pair_acceptance_errors(
     pair: EpochPair,
     grounded: dict[str, Any],
@@ -1244,8 +1277,22 @@ def summarize_grounded_pair(
             for category, rows in by_category.items()
         },
         "overall": _summarize_slot_group(slots),
+        "final_success_rate": {
+            epoch: _mean_or_none(
+                [
+                    float(slot["final_success"][epoch])
+                    for slot in slots
+                    if epoch in slot.get("final_success", {})
+                ]
+            )
+            for epoch in ("e8", "e10")
+        },
     }
-    summary["decision"] = _decision_from_attributions(summary)
+    summary["decision"] = (
+        _serial_control_decision(summary)
+        if pair.section == "3.4"
+        else _decision_from_attributions(summary)
+    )
     return summary
 
 
