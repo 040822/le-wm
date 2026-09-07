@@ -1,0 +1,55 @@
+{
+  "protocol": "round3_phase1_v1",
+  "predicate_version": "round3_runtime_predicates_v1",
+  "cohort_schema_version": 1,
+  "trace_schema_version": 1,
+  "seed": 42,
+  "goal_offset_steps": 25,
+  "dev_episodes": 50,
+  "final_episodes": 200,
+  "online_pool": "all_remaining_raw_episodes",
+  "eval_budget": 50,
+  "horizon": 5,
+  "receding_horizon": 5,
+  "action_block": 5,
+  "cem": {
+    "num_samples": 300,
+    "n_steps": 30,
+    "topk": 30,
+    "var_scale": 1.0
+  },
+  "protocol_variants": [
+    "legacy",
+    "sampling_revised",
+    "tolerance_revised",
+    "round3_revised"
+  ],
+  "final_test": {
+    "variant": "round3_revised",
+    "episodes_per_task": 200,
+    "tuning_after_freeze": false
+  },
+  "matrix": {
+    "cube": {
+      "e0_lewm": ["stage_b"],
+      "e3_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"],
+      "e5_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"]
+    },
+    "pusht": {
+      "e0_lewm": ["stage_b"],
+      "e3_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"],
+      "e5_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"]
+    },
+    "reacher": {
+      "e0_lewm": ["stage_b"],
+      "e3_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"],
+      "e5_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"]
+    },
+    "tworoom": {
+      "e0_lewm": ["stage_b"],
+      "e3_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"],
+      "e5_fast": ["stage_a", "stage_a_shuffled_goal", "stage_b"]
+    }
+  },
+  "gpu_policy": "Every GPU command must set CUDA_VISIBLE_DEVICES to a subset of 0,1,2,3."
+}
