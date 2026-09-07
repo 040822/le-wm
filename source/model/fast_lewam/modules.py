@@ -21,7 +21,13 @@ def causal_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
 def stage_a_attention_mask(
     action_horizon: int, device=None, num_anchor_tokens: int = 1
 ) -> torch.Tensor:
-    """允许动作读取 latent 锚点，同时阻止锚点 query 读取噪声动作。"""
+    """
+    允许动作读取 latent 锚点，同时阻止锚点 query 读取噪声动作。
+    1100
+    1100
+    1111
+    1111
+    """
     if action_horizon < 1:
         raise ValueError("action_horizon must be positive")
     if num_anchor_tokens not in {1, 2}:
@@ -167,7 +173,52 @@ __all__ = [
     "MLP",
     "SIGReg",
     "SharedDiT",
+    "block_causal_attention_mask",
     "causal_attention_mask",
+    "stage_b_attention_mask",
     "stage_a_attention_mask",
+    "terminal_full_attention_mask",
     "timestep_embedding",
 ]
+
+
+def block_causal_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
+    """为交错的动作/查询 token 构造按 transition block 的因果掩码。
+
+    Token 顺序为 ``[z0, (a0,q1), ..., (a{H-1},qH)]``。状态锚点只能
+    读取自身；每个 transition block 可以双向读取自身，并读取状态锚点
+    和所有更早的 block。返回值使用 ``scaled_dot_product_attention`` 的
+    bool mask 约定，即 ``True`` 表示允许注意力连接。
+    """
+    if action_horizon < 1:
+        raise ValueError("action_horizon must be positive")
+    length = 1 + 2 * action_horizon
+    mask = torch.zeros(length, length, dtype=torch.bool, device=device)
+    mask[0, 0] = True
+    for block in range(action_horizon):
+        end = 1 + 2 * (block + 1)
+        mask[1 + 2 * block : end, :end] = True
+    return mask
+
+
+def terminal_full_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
+    """为终点 token 序列 ``[z0,a0,...,aH-1,qH]`` 构造全注意力掩码。"""
+    if action_horizon < 1:
+        raise ValueError("action_horizon must be positive")
+    length = action_horizon + 2
+    return torch.ones(length, length, dtype=torch.bool, device=device)
+
+
+def stage_b_attention_mask(
+    action_horizon: int, mode: str = "strict_causal", device=None
+) -> torch.Tensor:
+    """构造 Stage-B attention mode 对应的 bool mask。"""
+    if mode == "strict_causal":
+        return causal_attention_mask(action_horizon, device=device)
+    if mode == "block_causal":
+        return block_causal_attention_mask(action_horizon, device=device)
+    if mode == "terminal_full":
+        return terminal_full_attention_mask(action_horizon, device=device)
+    raise ValueError(
+        "mode must be 'strict_causal', 'block_causal', or 'terminal_full'"
+    )

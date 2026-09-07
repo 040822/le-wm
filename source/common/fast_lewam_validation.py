@@ -6,6 +6,50 @@ import torch
 from lightning.pytorch.callbacks import Callback
 
 
+_STAGE_B_ATTENTION_MODES = {"strict_causal", "block_causal", "terminal_full"}
+
+
+def _stage_b_attention_mode(model):
+    """Return the configured Stage-B attention mode with a legacy default."""
+    attention_mode = getattr(model, "stage_b_attention_mode", "strict_causal")
+    if attention_mode not in _STAGE_B_ATTENTION_MODES:
+        raise ValueError(
+            "stage_b_attention_mode must be 'strict_causal', 'block_causal', "
+            "or 'terminal_full'"
+        )
+    return attention_mode
+
+
+def _stage_b_target_latents(embeddings, action_horizon, attention_mode):
+    """Select the latent targets matching the model's Stage-B output length."""
+    if attention_mode == "terminal_full":
+        return embeddings[:, -1:]
+    return embeddings[:, 1 : action_horizon + 1]
+
+
+def _validate_stage_b_prediction_shape(
+    predicted_latents,
+    *,
+    batch_size,
+    latent_dim,
+    action_horizon,
+    attention_mode,
+    name,
+):
+    """Validate Stage-B output length before endpoint diagnostics."""
+    if predicted_latents.ndim != 3:
+        raise ValueError(
+            f"{name} must have shape [B,L,D], got {tuple(predicted_latents.shape)}"
+        )
+    expected_length = 1 if attention_mode == "terminal_full" else action_horizon
+    expected_shape = (batch_size, expected_length, latent_dim)
+    if tuple(predicted_latents.shape) != expected_shape:
+        raise ValueError(
+            f"{name} shape does not match the Stage-B attention mode; "
+            f"expected {expected_shape}, got {tuple(predicted_latents.shape)}"
+        )
+
+
 def _repeat_task_condition(task_condition, candidate_count):
     """把每个样本的 task condition 复制到它的全部候选动作。"""
     if task_condition is None:
@@ -34,11 +78,14 @@ def compute_stage_b_validation_metrics(
 
     embeddings = forward_output["emb"].detach()
     predicted_latents = forward_output["predicted_latents"].detach()
+    stage_b_attention_mode = _stage_b_attention_mode(model)
     clean_actions = torch.nan_to_num(batch["action"], 0.0)[
         :, : model.action_horizon
     ]
     z0 = embeddings[:, 0]
-    target_latents = embeddings[:, 1 : model.action_horizon + 1]
+    target_latents = _stage_b_target_latents(
+        embeddings, model.action_horizon, stage_b_attention_mode
+    )
     expected_action_shape = (
         embeddings.shape[0],
         model.action_horizon,
@@ -49,11 +96,14 @@ def compute_stage_b_validation_metrics(
             f"validation actions must have shape {expected_action_shape}, "
             f"got {tuple(clean_actions.shape)}"
         )
-    if tuple(predicted_latents.shape) != tuple(target_latents.shape):
-        raise ValueError(
-            "predicted_latents and target_latents must have the same shape; "
-            f"got {tuple(predicted_latents.shape)} and {tuple(target_latents.shape)}"
-        )
+    _validate_stage_b_prediction_shape(
+        predicted_latents,
+        batch_size=embeddings.shape[0],
+        latent_dim=target_latents.shape[-1],
+        action_horizon=model.action_horizon,
+        attention_mode=stage_b_attention_mode,
+        name="predicted_latents",
+    )
 
     generator = torch.Generator(device=clean_actions.device).manual_seed(int(seed))
     perturbed = clean_actions + noise_std * torch.randn(
@@ -92,11 +142,21 @@ def compute_stage_b_validation_metrics(
         candidate_timestep,
         mode="stage_b",
         task_condition=candidate_task_condition,
-    )["predicted_latents"].reshape(
+    )["predicted_latents"]
+    _validate_stage_b_prediction_shape(
+        candidate_latents,
+        batch_size=batch_size * candidate_count,
+        latent_dim=target_latents.shape[-1],
+        action_horizon=model.action_horizon,
+        attention_mode=stage_b_attention_mode,
+        name="candidate predicted_latents",
+    )
+    candidate_output_length = candidate_latents.shape[1]
+    candidate_latents = candidate_latents.reshape(
         batch_size,
         candidate_count,
-        model.action_horizon,
-        -1,
+        candidate_output_length,
+        target_latents.shape[-1],
     )
 
     target_terminal = target_latents[:, -1]
@@ -105,8 +165,31 @@ def compute_stage_b_validation_metrics(
     ).square().mean(dim=-1)
     expert_cost = candidate_costs[:, 0]
     negative_cost = candidate_costs[:, 1:]
+    if getattr(model, "stage_b_dynamics", "parallel_prefix") == "serial_one_step":
+        rollout_latents = model(
+            z0,
+            clean_actions,
+            torch.ones(
+                batch_size,
+                device=z0.device,
+                dtype=z0.dtype,
+            ),
+            mode="stage_b",
+            task_condition=batch.get("task_condition"),
+        )["predicted_latents"]
+        _validate_stage_b_prediction_shape(
+            rollout_latents,
+            batch_size=batch_size,
+            latent_dim=target_latents.shape[-1],
+            action_horizon=model.action_horizon,
+            attention_mode=stage_b_attention_mode,
+            name="rollout predicted_latents",
+        )
+        predicted_terminal = rollout_latents[:, -1]
+    else:
+        predicted_terminal = predicted_latents[:, -1]
     predicted_terminal_mse = (
-        predicted_latents[:, -1] - target_terminal
+        predicted_terminal - target_terminal
     ).square().mean()
 
     return {

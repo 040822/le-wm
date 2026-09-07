@@ -31,6 +31,77 @@ def solver_config():
 
 
 class FastLeWAMSolverSmokeTests(unittest.TestCase):
+    def test_cem_encodes_each_planning_observation_once_per_batch(self):
+        model = make_model().eval()
+        encoded_images = []
+
+        def count_images(_module, inputs):
+            encoded_images.append(inputs[0].shape[0])
+
+        model.encoder.register_forward_pre_hook(count_images)
+        cfg = solver_config()
+        cfg.n_steps = 3
+        policy = make_fast_lewam_policy(
+            model,
+            solver_cfg=cfg,
+            plan_config={
+                "horizon": 3,
+                "receding_horizon": 1,
+                "action_block": 2,
+                "warm_start": False,
+            },
+            process={},
+            transform={},
+            device="cpu",
+            mode="stage_b",
+        )
+        policy.set_env(FakeVectorEnv())
+        info = {
+            "pixels": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+            "goal": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+        }
+
+        policy.get_action(info)
+
+        self.assertEqual(sum(encoded_images), 4)
+
+    def test_actor_warm_start_reuses_visual_context_for_cem(self):
+        model = make_model(stage_a_goal_injection="token").eval()
+        encoded_images = []
+
+        def count_images(_module, inputs):
+            encoded_images.append(inputs[0].shape[0])
+
+        model.encoder.register_forward_pre_hook(count_images)
+        cfg = solver_config()
+        cfg.n_steps = 3
+        policy = make_fast_lewam_policy(
+            model,
+            solver_cfg=cfg,
+            plan_config={
+                "horizon": 3,
+                "receding_horizon": 1,
+                "action_block": 2,
+                "warm_start": False,
+            },
+            process={},
+            transform={},
+            device="cpu",
+            mode="stage_b",
+            actor_warm_start=True,
+            inference_steps=2,
+            seed=31,
+        )
+        policy.set_env(FakeVectorEnv())
+        info = {
+            "pixels": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+            "goal": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+        }
+
+        policy.get_action(info)
+
+        self.assertEqual(sum(encoded_images), 4)
+
     def test_existing_cem_world_policy_executes_stage_b_cost(self):
         policy = make_fast_lewam_policy(
             make_model().eval(),

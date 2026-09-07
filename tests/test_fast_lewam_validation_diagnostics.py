@@ -27,6 +27,28 @@ class ActionAsLatentModel(nn.Module):
         return {"predicted_latents": actions}
 
 
+class TerminalActionAsLatentModel(ActionAsLatentModel):
+    stage_b_attention_mode = "terminal_full"
+
+    def forward(
+        self,
+        z0,
+        actions,
+        timestep,
+        *,
+        mode,
+        task_condition=None,
+    ):
+        output = super().forward(
+            z0,
+            actions,
+            timestep,
+            mode=mode,
+            task_condition=task_condition,
+        )
+        return {"predicted_latents": output["predicted_latents"][:, -1:]}
+
+
 class FakeTrainer:
     sanity_checking = False
 
@@ -43,6 +65,40 @@ class FakePolicy:
 
 
 class FastLeWAMValidationMetricsTests(unittest.TestCase):
+    def test_terminal_predictions_are_reshaped_by_one_and_compared_at_endpoint(self):
+        clean_actions = torch.tensor(
+            [
+                [[1.0, 0.0], [2.0, 0.5]],
+                [[-1.0, 0.5], [-2.0, -0.5]],
+            ]
+        )
+        target_latents = clean_actions.clone()
+        embeddings = torch.cat(
+            [torch.zeros(2, 1, 2), target_latents], dim=1
+        )
+        forward_output = {
+            "emb": embeddings,
+            "predicted_latents": target_latents[:, -1:] + 1.0,
+        }
+
+        metrics = compute_stage_b_validation_metrics(
+            model=TerminalActionAsLatentModel(),
+            batch={"action": clean_actions},
+            forward_output=forward_output,
+            noise_std=0.25,
+            seed=7,
+        )
+
+        self.assertEqual(
+            metrics["validate/stage_b_clean_terminal_mse"].item(), 0.0
+        )
+        self.assertEqual(
+            metrics["validate/stage_b_predicted_terminal_mse"].item(), 1.0
+        )
+        self.assertEqual(
+            metrics["validate/stage_b_expert_preference_accuracy"].item(), 1.0
+        )
+
     def test_clean_and_predicted_terminal_quality_and_expert_ranking_are_separate(self):
         clean_actions = torch.tensor(
             [

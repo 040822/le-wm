@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from source.model.fast_lewam.modules import (
     SharedDiT,
+    block_causal_attention_mask,
     causal_attention_mask,
     stage_a_attention_mask,
+    terminal_full_attention_mask,
     timestep_embedding,
 )
 
 
 class FastLeWAM(nn.Module):
     """复用 LeWM 视觉编码器、并可切换 Stage A/B/AB/C 的共享 DiT 预测器。"""
+
+    STATE_TYPE = 0
+    GOAL_TYPE = 1
+    ACTION_TYPE = 2
+    QUERY_TYPE = 3
 
     def __init__(
         self,
@@ -31,6 +39,10 @@ class FastLeWAM(nn.Module):
         task_condition_dim: int | None = None,
         stage_a_goal_injection: str = "none",
         inference_steps: int = 10,
+        token_encoding: str = "legacy",
+        stage_b_dynamics: str = "parallel_prefix",
+        stage_b_attention_mode: str = "strict_causal",
+        serial_activation_checkpointing: bool = False,
     ):
         """构造视觉编码器接口、共享 DiT、动作头和 causal-prefix latent 头。"""
         super().__init__()
@@ -40,6 +52,29 @@ class FastLeWAM(nn.Module):
             )
         if stage_a_goal_injection not in {"none", "token"}:
             raise ValueError("stage_a_goal_injection must be 'none' or 'token'")
+        if token_encoding not in {"legacy", "physical_time_type"}:
+            raise ValueError("token_encoding must be 'legacy' or 'physical_time_type'")
+        if stage_b_dynamics not in {"parallel_prefix", "serial_one_step"}:
+            raise ValueError(
+                "stage_b_dynamics must be 'parallel_prefix' or 'serial_one_step'"
+            )
+        if stage_b_attention_mode not in {
+            "strict_causal",
+            "block_causal",
+            "terminal_full",
+        }:
+            raise ValueError(
+                "stage_b_attention_mode must be 'strict_causal', 'block_causal', "
+                "or 'terminal_full'"
+            )
+        if (
+            stage_b_attention_mode != "strict_causal"
+            and stage_b_dynamics != "parallel_prefix"
+        ):
+            raise ValueError(
+                "non-strict stage_b_attention_mode requires "
+                "stage_b_dynamics='parallel_prefix'"
+            )
 
         self.encoder = encoder
         self.projector = projector
@@ -50,6 +85,10 @@ class FastLeWAM(nn.Module):
         self.inference_steps = inference_steps
         self.task_condition_dim = task_condition_dim
         self.stage_a_goal_injection = stage_a_goal_injection
+        self.token_encoding = token_encoding
+        self.stage_b_dynamics = stage_b_dynamics
+        self.stage_b_attention_mode = stage_b_attention_mode
+        self.serial_activation_checkpointing = bool(serial_activation_checkpointing)
 
         self.action_input = nn.Linear(action_dim, latent_head_dim)
         self.latent_input = nn.Linear(latent_dim, latent_head_dim)
@@ -64,20 +103,37 @@ class FastLeWAM(nn.Module):
             nn.SiLU(),
             nn.Linear(latent_head_dim, latent_head_dim),
         )
-        self.action_positions = nn.Parameter(
-            torch.randn(1, action_horizon, latent_head_dim) * 0.02
-        )
-        self.goal_token_embedding = (
-            nn.Parameter(torch.zeros(1, 1, latent_head_dim))
-            if stage_a_goal_injection == "token"
-            else None
-        )
-        self.joint_positions = nn.Parameter(
-            torch.randn(1, 1 + 2 * action_horizon, latent_head_dim) * 0.02
-        )
-        self.query_tokens = nn.Parameter(
-            torch.randn(1, action_horizon, latent_head_dim) * 0.02
-        )
+        if token_encoding == "legacy":
+            self.action_positions = nn.Parameter(
+                torch.randn(1, action_horizon, latent_head_dim) * 0.02
+            )
+            self.goal_token_embedding = (
+                nn.Parameter(torch.zeros(1, 1, latent_head_dim))
+                if stage_a_goal_injection == "token"
+                else None
+            )
+            self.joint_positions = nn.Parameter(
+                torch.randn(1, 1 + 2 * action_horizon, latent_head_dim) * 0.02
+            )
+            self.query_tokens = nn.Parameter(
+                torch.randn(1, action_horizon, latent_head_dim) * 0.02
+            )
+            self.time_positions = None
+            self.type_embeddings = None
+            self.query_content = None
+        else:
+            self.action_positions = None
+            self.goal_token_embedding = None
+            self.joint_positions = None
+            self.query_tokens = None
+            self.time_positions = nn.Parameter(
+                torch.randn(1, action_horizon + 1, latent_head_dim) * 0.02
+            )
+            self.type_embeddings = nn.Embedding(4, latent_head_dim)
+            nn.init.normal_(self.type_embeddings.weight, std=0.02)
+            self.query_content = nn.Parameter(
+                torch.randn(1, 1, latent_head_dim) * 0.02
+            )
         self.predictor = SharedDiT(
             dim=latent_head_dim,
             depth=latent_head_layers,
@@ -91,6 +147,16 @@ class FastLeWAM(nn.Module):
             "causal_mask", causal_attention_mask(action_horizon), persistent=False
         )
         self.register_buffer(
+            "block_causal_mask",
+            block_causal_attention_mask(action_horizon),
+            persistent=False,
+        )
+        self.register_buffer(
+            "terminal_full_mask",
+            terminal_full_attention_mask(action_horizon),
+            persistent=False,
+        )
+        self.register_buffer(
             "stage_a_mask",
             stage_a_attention_mask(
                 action_horizon,
@@ -98,9 +164,14 @@ class FastLeWAM(nn.Module):
             ),
             persistent=False,
         )
+        
+    # ========= input processing  ============
 
     def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        """将任意前导维的 ``[...,C,H,W]`` 图像编码为 ``[...,latent_dim]``。"""
+        """
+        编码image为latent。
+        将任意前导维的 ``[...,C,H,W]`` 图像编码为 ``[...,latent_dim]``。
+        """
         if pixels.ndim < 4:
             raise ValueError(
                 f"pixels must end in [C,H,W], got shape {tuple(pixels.shape)}"
@@ -157,7 +228,7 @@ class FastLeWAM(nn.Module):
         """
         融合当前 latent、流时间步以及可选任务条件，生成 AdaLN 条件向量。
         z0: [B,latent_dim] => [B,latent_head_dim]
-        temestep: [B] => [B,latent_head_dim]
+        timestep: [B] => [B,latent_head_dim]
         condition: [B,latent_head_dim] + [B,latent_head_dim] +( [B,latent_head_dim] if task_condition is not None )=> [B,latent_head_dim]
         """
         condition = self.z_condition(z0) + self.time_mlp(
@@ -201,13 +272,40 @@ class FastLeWAM(nn.Module):
             error_msgs,
         )
 
+
+    # ========= forward ============
+
+    def _state_token(self, z0):
+        token = self.latent_input(z0).unsqueeze(1)
+        if self.token_encoding == "legacy":
+            return token
+        return (
+            token
+            + self.time_positions[:, :1]
+            + self.type_embeddings.weight[self.STATE_TYPE]
+        )
+
+    def _action_tokens(self, actions):
+        tokens = self.action_input(actions)
+        if self.token_encoding == "legacy":
+            return tokens + self.action_positions
+        return (
+            tokens
+            + self.time_positions[:, : self.action_horizon]
+            + self.type_embeddings.weight[self.ACTION_TYPE]
+        )
+
     def _stage_a(
         self, z0, noisy_actions, timestep, task_condition=None, goal_latent=None
     ):
-        """用受保护的 z0/zg 锚点和双向动作 attention 预测动作流。"""
+        """
+        用受保护的 z0/zg 锚点和双向动作 attention 预测动作流。
+        """
         condition = self._condition(z0, timestep, task_condition) # [B, latent_head_dim]
-        state_token = self.latent_input(z0).unsqueeze(1)
+        state_token = self._state_token(z0)
         anchors = [state_token]
+        
+        # goal_latent 注入方式为token时，锚点构造为 [z0+zg]
         if self.stage_a_goal_injection == "token":
             if goal_latent is None:
                 raise ValueError(
@@ -218,25 +316,190 @@ class FastLeWAM(nn.Module):
                     f"goal_latent must have shape {tuple(z0.shape)}, "
                     f"got {tuple(goal_latent.shape)}"
                 )
-            anchors.append(
-                self.latent_input(goal_latent).unsqueeze(1)
-                + self.goal_token_embedding
-            )
-        action_tokens = self.action_input(noisy_actions) + self.action_positions
-        tokens = torch.cat((*anchors, action_tokens), dim=1)
+            goal_token = self.latent_input(goal_latent).unsqueeze(1)
+            if self.token_encoding == "legacy":
+                goal_token = goal_token + self.goal_token_embedding
+            else:
+                goal_token = (
+                    goal_token
+                    + self.time_positions[
+                        :, self.action_horizon : self.action_horizon + 1
+                    ]
+                    + self.type_embeddings.weight[self.GOAL_TYPE]
+                )
+            anchors.append(goal_token)
+        
+        action_tokens = self._action_tokens(noisy_actions)
+        tokens = torch.cat((*anchors, action_tokens), dim=1) # [z0.zg.a1.a2...aH]
         hidden = self.predictor(tokens, condition, attention_mask=self.stage_a_mask)
         return self.action_head(hidden[:, len(anchors):])
 
     def _joint_hidden(self, z0, actions, timestep, task_condition=None):
-        """按 ``[z0,a1,q1,...,aH,qH]`` 排列 token，并计算严格因果隐藏状态。"""
+        """
+        stage b + stage c
+        按 ``[z0,a1,q1,...,aH,qH]`` 排列 token，并计算严格因果隐藏状态。
+        """
         condition = self._condition(z0, timestep, task_condition)
         batch = z0.shape[0]
         tokens = z0.new_empty(batch, 1 + 2 * self.action_horizon, self.model_dim)
-        tokens[:, 0] = self.latent_input(z0)
-        tokens[:, 1::2] = self.action_input(actions)
-        tokens[:, 2::2] = self.query_tokens.expand(batch, -1, -1)
-        tokens = tokens + self.joint_positions
-        return self.predictor(tokens, condition, attention_mask=self.causal_mask)
+        if self.token_encoding == "legacy":
+            tokens[:, 0] = self.latent_input(z0)
+            tokens[:, 1::2] = self.action_input(actions)
+            tokens[:, 2::2] = self.query_tokens.expand(batch, -1, -1)
+            tokens = tokens + self.joint_positions
+        else:
+            tokens[:, 0] = self._state_token(z0).squeeze(1)
+            tokens[:, 1::2] = self._action_tokens(actions)
+            tokens[:, 2::2] = (
+                self.query_content
+                + self.time_positions[:, 1 : self.action_horizon + 1]
+                + self.type_embeddings.weight[self.QUERY_TYPE]
+            )
+        if self.stage_b_attention_mode == "terminal_full":
+            raise ValueError("terminal_full uses the terminal Stage-B token path")
+        attention_mask = (
+            self.causal_mask
+            if self.stage_b_attention_mode == "strict_causal"
+            else self.block_causal_mask
+        )
+        return self.predictor(tokens, condition, attention_mask=attention_mask)
+
+    def _terminal_hidden(self, z0, actions, timestep, task_condition=None):
+        """Encode all actions and one terminal query with full attention."""
+        condition = self._condition(z0, timestep, task_condition)
+        batch = z0.shape[0]
+        state_token = self._state_token(z0)
+        if self.token_encoding == "legacy":
+            state_token = state_token + self.joint_positions[:, :1]
+            action_tokens = self.action_input(actions) + self.joint_positions[:, 1::2]
+            query_token = self.query_tokens[:, -1:].expand(batch, -1, -1)
+            query_token = query_token + self.joint_positions[:, -1:]
+        else:
+            action_tokens = self._action_tokens(actions)
+            query_token = (
+                self.query_content
+                + self.time_positions[:, self.action_horizon : self.action_horizon + 1]
+                + self.type_embeddings.weight[self.QUERY_TYPE]
+            ).expand(batch, -1, -1)
+        tokens = torch.cat((state_token, action_tokens, query_token), dim=1)
+        return self.predictor(
+            tokens, condition, attention_mask=self.terminal_full_mask
+        )
+
+    def predict_one_step(self, state, action, task_condition=None):
+        """Predict one latent transition from a true or recursively predicted state."""
+        if state.ndim != 2 or state.shape[-1] != self.latent_dim:
+            raise ValueError(
+                f"state must have shape [B,{self.latent_dim}], got {tuple(state.shape)}"
+            )
+        expected_action_shape = (state.shape[0], self.action_dim)
+        if tuple(action.shape) != expected_action_shape:
+            raise ValueError(
+                f"action must have shape {expected_action_shape}, got {tuple(action.shape)}"
+            )
+        condition = self._condition(
+            state,
+            torch.ones(state.shape[0], device=state.device, dtype=state.dtype),
+            task_condition,
+        )
+        if self.token_encoding == "legacy":
+            tokens = torch.cat(
+                (
+                    self.latent_input(state).unsqueeze(1),
+                    self.action_input(action).unsqueeze(1),
+                    self.query_tokens[:, :1].expand(state.shape[0], -1, -1),
+                ),
+                dim=1,
+            )
+            tokens = tokens + self.joint_positions[:, :3]
+        else:
+            tokens = torch.cat(
+                (
+                    self._state_token(state),
+                    (
+                        self.action_input(action).unsqueeze(1)
+                        + self.time_positions[:, :1]
+                        + self.type_embeddings.weight[self.ACTION_TYPE]
+                    ),
+                    (
+                        self.query_content
+                        + self.time_positions[:, 1:2]
+                        + self.type_embeddings.weight[self.QUERY_TYPE]
+                    ).expand(state.shape[0], -1, -1),
+                ),
+                dim=1,
+            )
+        use_checkpoint = (
+            self.serial_activation_checkpointing
+            and self.training
+            and torch.is_grad_enabled()
+        )
+        if use_checkpoint:
+            hidden = checkpoint(
+                self.predictor,
+                tokens,
+                condition,
+                use_reentrant=False,
+            )
+        else:
+            hidden = self.predictor(tokens, condition)
+        return self.latent_head(hidden[:, -1])
+
+    def rollout_latents(self, z0, actions, timestep, task_condition=None):
+        """Predict a latent trajectory with the configured Stage-B dynamics."""
+        timestep = self._validate_inputs(z0, actions, timestep)
+        if self.stage_b_dynamics == "parallel_prefix":
+            if self.stage_b_attention_mode == "terminal_full":
+                hidden = self._terminal_hidden(z0, actions, timestep, task_condition)
+                return self.latent_head(hidden[:, -1:])
+            hidden = self._joint_hidden(z0, actions, timestep, task_condition)
+            return self.latent_head(hidden[:, 2::2])
+        state = z0
+        predicted = []
+        for index in range(self.action_horizon):
+            state = self.predict_one_step(
+                state,
+                actions[:, index],
+                task_condition=task_condition,
+            )
+            predicted.append(state)
+        return torch.stack(predicted, dim=1)
+
+    def predict_training_latents(self, states, actions, task_condition=None):
+        """Predict teacher-forced transitions for Stage-B training."""
+        expected_states = (actions.shape[0], self.action_horizon, self.latent_dim)
+        expected_actions = (actions.shape[0], self.action_horizon, self.action_dim)
+        if tuple(states.shape) != expected_states:
+            raise ValueError(
+                f"states must have shape {expected_states}, got {tuple(states.shape)}"
+            )
+        if tuple(actions.shape) != expected_actions:
+            raise ValueError(
+                f"actions must have shape {expected_actions}, got {tuple(actions.shape)}"
+            )
+        if self.stage_b_dynamics == "parallel_prefix":
+            return self.rollout_latents(
+                states[:, 0],
+                actions,
+                torch.ones(
+                    actions.shape[0], device=states.device, dtype=states.dtype
+                ),
+                task_condition,
+            )
+        batch = states.shape[0]
+        flat_task_condition = None
+        if task_condition is not None:
+            flat_task_condition = (
+                task_condition[:, None]
+                .expand(-1, self.action_horizon, *task_condition.shape[1:])
+                .reshape(batch * self.action_horizon, *task_condition.shape[1:])
+            )
+        predicted = self.predict_one_step(
+            states.reshape(batch * self.action_horizon, self.latent_dim),
+            actions.reshape(batch * self.action_horizon, self.action_dim),
+            task_condition=flat_task_condition,
+        )
+        return predicted.reshape(batch, self.action_horizon, self.latent_dim)
 
     def forward(
         self,
@@ -261,8 +524,15 @@ class FastLeWAM(nn.Module):
             return {"action_velocity": velocity}
         if mode == "stage_b":
             # Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
-            hidden = self._joint_hidden(z0, actions, timestep, task_condition)
-            return {"predicted_latents": self.latent_head(hidden[:, 2::2])}
+            return {
+                "predicted_latents": self.rollout_latents(
+                    z0, actions, timestep, task_condition
+                )
+            }
+        if mode in {"stage_ab", "stage_c"} and self.stage_b_attention_mode != "strict_causal":
+            raise ValueError(
+                "stage_ab and stage_c require stage_b_attention_mode='strict_causal'"
+            )
         if mode == "stage_ab":
             # Stage A 预测动作速度，Stage B 使用 Stage A 预测动作或真值动作 进行 latent 监督。
             velocity = self._stage_a(
@@ -287,6 +557,8 @@ class FastLeWAM(nn.Module):
             f"unknown mode {mode!r}; expected stage_a, stage_b, stage_ab, or stage_c"
         )
 
+    # ========= inference ============
+        
     def _initial_noise(self, z0, noise, generator):
         """创建或校验 Euler flow 采样的初始高斯动作噪声。"""
         shape = (z0.shape[0], self.action_horizon, self.action_dim)
@@ -385,29 +657,31 @@ class FastLeWAM(nn.Module):
             raise ValueError(f"pixels must end in [C,H,W], got {tuple(pixels.shape)}")
         return pixels if pixels.ndim == 4 else pixels.select(dim=-4, index=-1)
 
-    def get_action(
+    def get_action_from_latents(
         self,
-        info,
+        z0,
+        goal_latent,
         horizon=1,
         prefix_actions=None,
         *,
         generator=None,
         num_steps=None,
     ):
-        """实现 solver warm start 使用的 Actionable 接口，并支持已有动作前缀。"""
+        """Generate an actor warm start from an encoded planning context."""
         if not 1 <= horizon <= self.action_horizon:
             raise ValueError(
                 f"horizon must be in [1,{self.action_horizon}], got {horizon}"
             )
-        z0 = self.encode_pixels(self._last_frame(info["pixels"]))
-        goal_latent = None
-        if self.stage_a_goal_injection == "token":
-            if "goal" not in info:
-                raise ValueError("goal observations are required in Stage A token mode")
-            goal_latent = self.encode_pixels(self._last_frame(info["goal"]))
         if z0.ndim != 2:
-            raise ValueError("get_action expects pixels with leading [B,T] dimensions")
+            raise ValueError("z0 must have leading batch and latent dimensions")
+        if self.stage_a_goal_injection == "token" and goal_latent is None:
+            raise ValueError("goal_latent is required in Stage A token mode")
         if prefix_actions is not None and prefix_actions.shape[1] > 0:
+            if self.stage_b_attention_mode == "terminal_full":
+                raise ValueError(
+                    "prefix_actions are unsupported when "
+                    "stage_b_attention_mode='terminal_full'"
+                )
             prefix_length = prefix_actions.shape[1]
             if prefix_length > self.action_horizon:
                 raise ValueError("prefix_actions exceed the configured action horizon")
@@ -426,6 +700,73 @@ class FastLeWAM(nn.Module):
             num_steps=num_steps,
             goal_latent=goal_latent,
         )[:, :horizon]
+
+    def get_action(
+        self,
+        info,
+        horizon=1,
+        prefix_actions=None,
+        *,
+        generator=None,
+        num_steps=None,
+    ):
+        """Implement the Actionable interface from raw current/goal images."""
+        z0 = self.encode_pixels(self._last_frame(info["pixels"]))
+        goal_latent = None
+        if self.stage_a_goal_injection == "token":
+            if "goal" not in info:
+                raise ValueError("goal observations are required in Stage A token mode")
+            goal_latent = self.encode_pixels(self._last_frame(info["goal"]))
+        return self.get_action_from_latents(
+            z0,
+            goal_latent,
+            horizon=horizon,
+            prefix_actions=prefix_actions,
+            generator=generator,
+            num_steps=num_steps,
+        )
+
+    def get_cost_from_latents(self, z0, goal_latent, action_candidates):
+        """Score candidate actions from one encoded current/goal context."""
+        if action_candidates.ndim != 4:
+            raise ValueError(
+                "action_candidates must have shape [B,S,H,A], got "
+                f"{tuple(action_candidates.shape)}"
+            )
+        batch, samples, horizon, action_dim = action_candidates.shape
+        if horizon != self.action_horizon or action_dim != self.action_dim:
+            raise ValueError(
+                "candidate shape must match configured horizon/action_dim; got "
+                f"{(horizon, action_dim)}, expected "
+                f"{(self.action_horizon, self.action_dim)}"
+            )
+        expected_context_shape = (batch, self.latent_dim)
+        if tuple(z0.shape) != expected_context_shape:
+            raise ValueError(
+                f"z0 must have shape {expected_context_shape}, got {tuple(z0.shape)}"
+            )
+        if tuple(goal_latent.shape) != expected_context_shape:
+            raise ValueError(
+                "goal_latent must have shape "
+                f"{expected_context_shape}, got {tuple(goal_latent.shape)}"
+            )
+        z0 = z0[:, None].expand(batch, samples, self.latent_dim).reshape(
+            batch * samples, self.latent_dim
+        )
+        goal_latent = goal_latent[:, None].expand(
+            batch, samples, self.latent_dim
+        ).reshape(batch * samples, self.latent_dim)
+        candidates = action_candidates.reshape(
+            batch * samples, self.action_horizon, self.action_dim
+        )
+        predicted = self(
+            z0,
+            candidates,
+            torch.ones(batch * samples, device=z0.device, dtype=z0.dtype),
+            mode="stage_b",
+        )["predicted_latents"]
+        cost = (predicted[:, -1] - goal_latent).square().mean(dim=-1)
+        return cost.reshape(batch, samples)
 
     def get_cost(self, info_dict, action_candidates):
         """用一次并行 Stage B 因果预测计算候选动作终点到目标 latent 的代价。"""

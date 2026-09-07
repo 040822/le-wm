@@ -10,6 +10,11 @@ from torch import nn
 
 from source.policy.lewm import _to_container
 
+_STAGE_B_Z0 = "_fast_lewam_stage_b_z0"
+_STAGE_B_GOAL = "_fast_lewam_stage_b_goal"
+_STAGE_B_CONTEXT_PIXELS = "_fast_lewam_stage_b_context_pixels"
+_STAGE_B_CONTEXT_GOAL = "_fast_lewam_stage_b_context_goal"
+
 
 class StageBModelView(nn.Module):
     """仅暴露 latent cost 的 Stage B 模型视图，阻止 solver 调用 actor warm start。"""
@@ -20,16 +25,67 @@ class StageBModelView(nn.Module):
         self.model = model
 
     def get_cost(self, info_dict, action_candidates):
-        """将 solver 的候选动作代价请求转发给底层 Stage B cost 接口。"""
-        return self.model.get_cost(info_dict, action_candidates)
+        """Reuse one exactly-matching visual context across CEM iterations."""
+        if action_candidates.ndim != 4:
+            return self.model.get_cost(info_dict, action_candidates)
+        batch, samples = action_candidates.shape[:2]
+        pixels = info_dict.get("pixels")
+        goal = info_dict.get("goal")
+        shared_observations = (
+            torch.is_tensor(pixels)
+            and torch.is_tensor(goal)
+            and pixels.ndim >= 5
+            and goal.ndim >= 5
+            and pixels.shape[:2] == (batch, samples)
+            and goal.shape[:2] == (batch, samples)
+            and pixels.stride(1) == 0
+            and goal.stride(1) == 0
+        )
+        if not shared_observations:
+            return self.model.get_cost(info_dict, action_candidates)
+
+        current = self.model._last_frame(pixels[:, 0])
+        goal_frame = self.model._last_frame(goal[:, 0])
+        cached_current = info_dict.get(_STAGE_B_CONTEXT_PIXELS)
+        cached_goal = info_dict.get(_STAGE_B_CONTEXT_GOAL)
+        if torch.is_tensor(cached_current) and cached_current.ndim == current.ndim + 1:
+            cached_current = cached_current[:, 0]
+        if torch.is_tensor(cached_goal) and cached_goal.ndim == goal_frame.ndim + 1:
+            cached_goal = cached_goal[:, 0]
+        valid_cache = (
+            _STAGE_B_Z0 in info_dict
+            and _STAGE_B_GOAL in info_dict
+            and torch.is_tensor(cached_current)
+            and torch.is_tensor(cached_goal)
+            and torch.equal(cached_current, current)
+            and torch.equal(cached_goal, goal_frame)
+        )
+        if valid_cache:
+            z0 = info_dict[_STAGE_B_Z0]
+            goal_latent = info_dict[_STAGE_B_GOAL]
+            if z0.ndim == 3:
+                z0 = z0[:, 0]
+            if goal_latent.ndim == 3:
+                goal_latent = goal_latent[:, 0]
+            return self.model.get_cost_from_latents(
+                z0, goal_latent, action_candidates
+            )
+
+        z0 = self.model.encode_pixels(current)
+        goal_latent = self.model.encode_pixels(goal_frame)
+
+        info_dict[_STAGE_B_Z0] = z0
+        info_dict[_STAGE_B_GOAL] = goal_latent
+        info_dict[_STAGE_B_CONTEXT_PIXELS] = current.detach().clone()
+        info_dict[_STAGE_B_CONTEXT_GOAL] = goal_frame.detach().clone()
+        return self.model.get_cost_from_latents(z0, goal_latent, action_candidates)
 
 
-class ActorWarmStartModelView(nn.Module):
+class ActorWarmStartModelView(StageBModelView):
     """为 Stage B planner 同时暴露 latent cost 和确定性的 Stage A 初始化。"""
 
     def __init__(self, model, *, seed=0, inference_steps=None):
-        super().__init__()
-        self.model = model
+        super().__init__(model)
         self.seed = int(seed)
         self.inference_steps = inference_steps
         self._generators = {}
@@ -44,20 +100,28 @@ class ActorWarmStartModelView(nn.Module):
 
     def get_action(self, info, horizon=1, prefix_actions=None):
         device = next(self.model.parameters()).device
-        info = {
+        device_info = {
             key: value.to(device) if torch.is_tensor(value) else value
             for key, value in info.items()
         }
-        return self.model.get_action(
-            info,
+        current = self.model._last_frame(device_info["pixels"])
+        goal = self.model._last_frame(device_info["goal"])
+        z0 = self.model.encode_pixels(current)
+        goal_latent = self.model.encode_pixels(goal)
+
+        info[_STAGE_B_Z0] = z0
+        info[_STAGE_B_GOAL] = goal_latent
+        info[_STAGE_B_CONTEXT_PIXELS] = current.detach().clone()
+        info[_STAGE_B_CONTEXT_GOAL] = goal.detach().clone()
+        return self.model.get_action_from_latents(
+            z0,
+            goal_latent,
             horizon=horizon,
             prefix_actions=prefix_actions,
             generator=self._generator(device),
             num_steps=self.inference_steps,
         )
 
-    def get_cost(self, info_dict, action_candidates):
-        return self.model.get_cost(info_dict, action_candidates)
 
 
 def _validate_action_dim(model, env, action_block):
@@ -177,14 +241,13 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         """为动作队列已空的环境批量规划，并从每个存活环境队列弹出一步动作。"""
         if self._action_buffer is None:
             raise RuntimeError("set_env must be called before get_action")
-        info = self._prepare_info(info_dict)
-        needs_flush = info.pop("_needs_flush", None)
+        needs_flush = info_dict.get("_needs_flush")
         if needs_flush is not None:
             for index, flush in enumerate(needs_flush):
                 if flush:
                     self._action_buffer[index].clear()
 
-        terminated = info.get("terminated")
+        terminated = info_dict.get("terminated")
         dead = (
             np.asarray(terminated, dtype=bool)
             if terminated is not None
@@ -196,28 +259,29 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             if not dead[index] and not self._action_buffer[index]
         ]
         if replan:
-            selected = self._slice_info(info, replan)
+            selected_raw = self._slice_info(info_dict, replan)
+            token_goal = (
+                self.mode == "stage_a"
+                and self.model.stage_a_goal_injection == "token"
+            )
+            if token_goal:
+                if "goal" not in info_dict:
+                    raise ValueError(
+                        "goal observations are required for Stage A token mode"
+                    )
+                goal_indices = self._goal_indices[np.asarray(replan)]
+                selected_raw["goal"] = self._slice_info(
+                    info_dict, goal_indices
+                )["goal"]
+            selected = self._prepare_info(selected_raw)
             device = next(self.model.parameters()).device
             for key, value in selected.items():
                 if torch.is_tensor(value):
                     selected[key] = value.to(device)
             current_frames = self.model._last_frame(selected["pixels"])
             goal_latent = None
-            if (
-                self.mode == "stage_a"
-                and self.model.stage_a_goal_injection == "token"
-            ):
-                if "goal" not in info:
-                    raise ValueError(
-                        "goal observations are required for Stage A token mode"
-                    )
-                goal_indices = self._goal_indices[np.asarray(replan)]
-                goal_info = self._slice_info(info, goal_indices)
-                goal_frames = self.model._last_frame(
-                    goal_info["goal"]
-                )
-                if torch.is_tensor(goal_frames):
-                    goal_frames = goal_frames.to(device)
+            if token_goal:
+                goal_frames = self.model._last_frame(selected["goal"])
                 encoded = self.model.encode_pixels(
                     torch.cat((current_frames, goal_frames))
                 )

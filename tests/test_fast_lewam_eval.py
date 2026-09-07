@@ -19,7 +19,133 @@ class FakeVectorEnv:
     action_space = gym.spaces.Box(-1.0, 1.0, shape=(2, 2))
 
 
+class CountingImageTransform:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, image):
+        self.calls += 1
+        return image.as_subclass(torch.Tensor).float()
+
+
 class FastLeWAMEvalTests(unittest.TestCase):
+    def test_stage_a_buffered_action_skips_observation_preprocessing(self):
+        transform = CountingImageTransform()
+        policy = FastLeWAMChunkPolicy(
+            make_model().eval(),
+            mode="stage_a",
+            action_block=2,
+            receding_horizon_blocks=1,
+            inference_steps=1,
+            transform={"pixels": transform},
+        )
+        policy.set_env(FakeVectorEnv())
+        info = {"pixels": np.random.randn(2, 1, 8, 8, 3).astype(np.float32)}
+
+        first = policy.get_action(info)
+        second = policy.get_action(info)
+
+        self.assertTrue(np.isfinite(first).all())
+        self.assertTrue(np.isfinite(second).all())
+        self.assertEqual(transform.calls, 2)
+
+    def test_partial_replan_preprocesses_only_flushed_environments(self):
+        transform = CountingImageTransform()
+        policy = FastLeWAMChunkPolicy(
+            make_model().eval(),
+            mode="stage_a",
+            action_block=2,
+            receding_horizon_blocks=1,
+            inference_steps=1,
+            transform={"pixels": transform},
+        )
+        policy.set_env(FakeVectorEnv())
+        pixels = np.random.randn(2, 1, 8, 8, 3).astype(np.float32)
+        policy.get_action({"pixels": pixels})
+
+        action = policy.get_action(
+            {"pixels": pixels, "_needs_flush": np.array([True, False])}
+        )
+
+        self.assertTrue(np.isfinite(action).all())
+        self.assertEqual(transform.calls, 3)
+
+    def test_stage_c_buffered_action_skips_observation_preprocessing(self):
+        transform = CountingImageTransform()
+        policy = FastLeWAMChunkPolicy(
+            make_model().eval(),
+            mode="stage_c",
+            action_block=2,
+            receding_horizon_blocks=1,
+            inference_steps=1,
+            transform={"pixels": transform},
+        )
+        policy.set_env(FakeVectorEnv())
+        info = {"pixels": np.random.randn(2, 1, 8, 8, 3).astype(np.float32)}
+
+        first = policy.get_action(info)
+        second = policy.get_action(info)
+
+        self.assertTrue(np.isfinite(first).all())
+        self.assertTrue(np.isfinite(second).all())
+        self.assertEqual(transform.calls, 2)
+
+    def test_terminated_environment_does_not_replan_or_consume_buffer(self):
+        transform = CountingImageTransform()
+        policy = FastLeWAMChunkPolicy(
+            make_model().eval(),
+            mode="stage_a",
+            action_block=2,
+            receding_horizon_blocks=1,
+            inference_steps=1,
+            transform={"pixels": transform},
+        )
+        policy.set_env(FakeVectorEnv())
+        pixels = np.random.randn(2, 1, 8, 8, 3).astype(np.float32)
+        policy.get_action({"pixels": pixels})
+
+        action = policy.get_action(
+            {"pixels": pixels, "terminated": np.array([True, False])}
+        )
+
+        self.assertTrue(np.isnan(action[0]).all())
+        self.assertTrue(np.isfinite(action[1]).all())
+        self.assertEqual(transform.calls, 2)
+        self.assertEqual(len(policy._action_buffer[0]), 1)
+
+    def test_partial_replan_uses_cyclically_shifted_goal(self):
+        model = make_model(stage_a_goal_injection="token").eval()
+        encoded = []
+        model.encoder.register_forward_pre_hook(
+            lambda _module, inputs: encoded.append(inputs[0].detach().clone())
+        )
+        policy = FastLeWAMChunkPolicy(
+            model,
+            mode="stage_a",
+            action_block=2,
+            receding_horizon_blocks=1,
+            inference_steps=1,
+            goal_mode="cyclic_shift",
+        )
+        policy.set_env(FakeVectorEnv())
+        pixels = np.zeros((2, 1, 3, 8, 8), dtype=np.float32)
+        goal = np.stack(
+            [np.ones((1, 3, 8, 8)), np.full((1, 3, 8, 8), 2.0)]
+        ).astype(np.float32)
+        policy.get_action({"pixels": pixels, "goal": goal})
+        encoded.clear()
+
+        policy.get_action(
+            {
+                "pixels": pixels,
+                "goal": goal,
+                "_needs_flush": np.array([True, False]),
+            }
+        )
+
+        self.assertEqual(encoded[-1].shape[0], 2)
+        self.assertAlmostEqual(encoded[-1][1].mean().item(), 2.0)
+
     def test_stage_a_policy_buffers_one_complete_action_block(self):
         model = make_model().eval()
         policy = FastLeWAMChunkPolicy(
@@ -114,6 +240,92 @@ class FastLeWAMEvalTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "model action_dim=4"):
             policy.set_env(WrongActionVectorEnv())
+
+
+    def test_stage_b_cached_cost_matches_candidate_expanded_cost(self):
+        model = make_model().eval()
+        view = StageBModelView(model)
+        batch, samples = 2, 4
+        base_pixels = torch.randn(batch, 2, 3, 8, 8)
+        base_goal = torch.randn(batch, 2, 3, 8, 8)
+        shared_info = {
+            "pixels": base_pixels[:, None].expand(-1, samples, -1, -1, -1, -1),
+            "goal": base_goal[:, None].expand(-1, samples, -1, -1, -1, -1),
+        }
+        legacy_info = {
+            key: value.clone() for key, value in shared_info.items()
+        }
+        candidates = torch.randn(batch, samples, 3, 4)
+
+        expected = model.get_cost(legacy_info, candidates)
+        actual = view.get_cost(shared_info, candidates)
+
+        torch.testing.assert_close(actual, expected)
+
+    def test_stage_b_view_preserves_candidate_specific_observations(self):
+        model = make_model().eval()
+        view = StageBModelView(model)
+        batch, samples = 2, 4
+        info = {
+            "pixels": torch.randn(batch, samples, 2, 3, 8, 8),
+            "goal": torch.randn(batch, samples, 2, 3, 8, 8),
+        }
+        reference = {key: value.clone() for key, value in info.items()}
+        candidates = torch.randn(batch, samples, 3, 4)
+
+        expected = model.get_cost(reference, candidates)
+        actual = view.get_cost(info, candidates)
+
+        torch.testing.assert_close(actual, expected)
+
+
+    def test_stage_b_cached_cost_preserves_mixed_image_dtypes(self):
+        model = make_model().eval()
+        view = StageBModelView(model)
+        batch, samples = 2, 4
+        info = {
+            "pixels": torch.randint(
+                0, 256, (batch, 1, 2, 3, 8, 8), dtype=torch.uint8
+            ).expand(-1, samples, -1, -1, -1, -1),
+            "goal": torch.randn(batch, 1, 2, 3, 8, 8).expand(
+                -1, samples, -1, -1, -1, -1
+            ),
+        }
+        candidates = torch.randn(batch, samples, 3, 4)
+
+        actual = view.get_cost(info, candidates)
+        expected = model.get_cost(
+            {"pixels": info["pixels"], "goal": info["goal"]}, candidates
+        )
+
+        torch.testing.assert_close(actual, expected)
+
+
+    def test_stage_b_cache_is_invalidated_when_observations_are_replaced(self):
+        model = make_model().eval()
+        view = StageBModelView(model)
+        batch, samples = 2, 4
+        info = {
+            "pixels": torch.randn(batch, 1, 2, 3, 8, 8).expand(
+                -1, samples, -1, -1, -1, -1
+            ),
+            "goal": torch.randn(batch, 1, 2, 3, 8, 8).expand(
+                -1, samples, -1, -1, -1, -1
+            ),
+        }
+        candidates = torch.randn(batch, samples, 3, 4)
+        view.get_cost(info, candidates)
+        replacement_pixels = torch.randn(batch, 1, 2, 3, 8, 8).expand(
+            -1, samples, -1, -1, -1, -1
+        )
+        info["pixels"] = replacement_pixels
+
+        actual = view.get_cost(info, candidates)
+        expected = model.get_cost(
+            {"pixels": replacement_pixels, "goal": info["goal"]}, candidates
+        )
+
+        torch.testing.assert_close(actual, expected)
 
 
     def test_token_stage_a_cyclic_shift_uses_a_goal_derangement(self):

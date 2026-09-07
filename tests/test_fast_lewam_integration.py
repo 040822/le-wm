@@ -132,6 +132,56 @@ class FastLeWAMIntegrationTests(unittest.TestCase):
         self.assertEqual(fast_policy.model.action_horizon, 5)
         self.assertEqual(legacy_policy.model.action_encoder.patch_embed.in_channels, 10)
 
+    def test_hydra_instantiates_isolated_timestep_and_token_experiments(self):
+        with initialize_config_dir(
+            config_dir=str(ROOT / "config" / "train"), version_base=None
+        ):
+            timestep_cfg = compose(
+                config_name="fast_lewam",
+                overrides=[
+                    "data=cube",
+                    "policy.model.action_dim=25",
+                    "stage_b_timestep_mode=clean_action",
+                    "token_encoding=legacy",
+                ],
+            )
+            token_cfg = compose(
+                config_name="fast_lewam",
+                overrides=[
+                    "data=reacher",
+                    "policy.model.action_dim=10",
+                    "stage_b_timestep_mode=legacy",
+                    "token_encoding=physical_time_type",
+                ],
+            )
+            timestep_policy = instantiate(timestep_cfg.policy)
+            token_policy = instantiate(token_cfg.policy)
+
+        self.assertEqual(timestep_policy.stage_b_timestep_mode, "clean_action")
+        self.assertEqual(timestep_policy.model.token_encoding, "legacy")
+        self.assertEqual(token_policy.stage_b_timestep_mode, "legacy")
+        self.assertEqual(token_policy.model.token_encoding, "physical_time_type")
+        self.assertIsNotNone(token_policy.model.time_positions)
+        self.assertIsNone(token_policy.model.action_positions)
+
+    def test_hydra_instantiates_serial_stage_b_control(self):
+        with initialize_config_dir(
+            config_dir=str(ROOT / "config" / "train"), version_base=None
+        ):
+            cfg = compose(
+                config_name="fast_lewam",
+                overrides=[
+                    "data=reacher",
+                    "train_mode=stage_b",
+                    "stage_b_dynamics=serial_one_step",
+                    "policy.model.action_dim=10",
+                ],
+            )
+            policy = instantiate(cfg.policy)
+
+        self.assertEqual(policy.train_mode, "stage_b")
+        self.assertEqual(policy.model.stage_b_dynamics, "serial_one_step")
+
     def test_stage_b_policy_freezes_only_stage_a_parameters(self):
         with initialize_config_dir(
             config_dir=str(ROOT / "config" / "train"), version_base=None
