@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python eval_fast_lewam.py outputs/fast_lewam/cube/0715_goal/checkpoints --epochs 10

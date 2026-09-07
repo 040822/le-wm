@@ -28,6 +28,12 @@ run_time=$(date +"%m%d")
 id_name="${run_time}_${info}"
 output_dir="./outputs/${config_name}/${data_name}/${id_name}"
 
+if [[ $# -ge 4 ]]; then
+    shift 4
+    extra_args=("$@")
+fi
+
+
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=${gpu_id}
 
@@ -35,4 +41,4 @@ export STABLEWM_HOME="${STABLEWM_HOME:-$PWD/data}"
 
 # python -u train.py data=${data_name}
 
-python -u train.py --config-name=${config_name} data=${data_name} hydra.run.dir=${output_dir} info=${info} 2>&1 | tee "Temp/${config_name}_${data_name}_${info}.out"
+python -u train.py --config-name=${config_name} data=${data_name} hydra.run.dir=${output_dir} info=${info} "${extra_args[@]}" 2>&1 | tee "Temp/${config_name}_${data_name}_${info}.out"

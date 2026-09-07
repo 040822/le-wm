@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Print structural and episode-level information for HDF5 datasets."""
+"""
+Print structural and episode-level information for HDF5 datasets.
+
+python3 scripts/inspect_h5_dataset.py
+"""
 
 from __future__ import annotations
 
@@ -121,8 +125,8 @@ def _print_episode_summary(lengths: np.ndarray, summary_only: bool) -> None:
         indices = list(range(10)) + list(range(count - 10, count))
     else:
         indices = range(count)
-    for index in indices:
-        print(f"  episode {index:>6}: {int(lengths[index]):,}")
+    # for index in indices:
+    #     print(f"  episode {index:>6}: {int(lengths[index]):,}")
     if summary_only and count > 20:
         print(
             f"  ... {count - 20:,} episodes omitted; "
