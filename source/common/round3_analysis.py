@@ -94,7 +94,7 @@ def analyze_protocol_files(
     round3 = values["round3_revised"].get("episodes", [])
     return {
         "task": task,
-        "summaries": {name: summarize_episodes(value) for name, value in values.items()},
+        "summaries": {name: summarize_episodes(value.get("episodes", [])) for name, value in values.items()},
         "sensitivity": protocol_sensitivity(legacy, sampling, tolerance, round3),
         "relabel_status": {
             "legacy_to_tolerance_revised": [
