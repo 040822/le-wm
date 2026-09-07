@@ -25,6 +25,7 @@ from source.experiments.planner_transition_collection import (
     BlockTrajectoryPolicy,
     _slot_candidate_panel,
 )
+from scripts.run_fast_lewam_parallel_pilots import _parse_pmon_processes
 from tests.test_fast_lewam_model import make_model
 
 
@@ -33,6 +34,18 @@ MANIFEST = ROOT / "config" / "experiments" / "fast_lewam_parallel_pilots.yaml"
 
 
 class FastLeWAMParallelPilotTests(unittest.TestCase):
+    def test_pmon_parser_is_strictly_scoped_to_the_requested_gpu(self):
+        output = """\
+# gpu pid type sm mem enc dec jpg ofa command
+    2 1234 C 10 5 - - - - python
+"""
+        self.assertEqual(
+            _parse_pmon_processes(output, 2),
+            ["pid=1234 type=C command=python"],
+        )
+        with self.assertRaisesRegex(RuntimeError, "GPU1 was requested"):
+            _parse_pmon_processes(output, 1)
+
     def test_manifest_exposes_the_approved_four_way_schedule(self):
         manifest = load_pilot_manifest(MANIFEST)
 
@@ -192,6 +205,25 @@ class FastLeWAMParallelPilotTests(unittest.TestCase):
         history_policy.get_action({"pixels": history})
         history_trajectory = history_policy.finish({"pixels": history})
         self.assertEqual(tuple(history_trajectory.shape), (1, 2, 2, 2, 3))
+
+
+    def test_trajectory_policy_pads_early_termination_with_terminal_state(self):
+        policy = BlockTrajectoryPolicy(
+            torch.zeros(2, 25, 3).numpy(), action_block=5
+        )
+        for step in range(20):
+            policy.get_action(
+                {"pixels": torch.full((2, 3, 2, 2), step, dtype=torch.uint8)}
+            )
+        terminal = torch.full((2, 3, 2, 2), 20, dtype=torch.uint8)
+
+        trajectory = policy.finish({"pixels": terminal})
+
+        self.assertEqual(tuple(trajectory.shape), (2, 6, 3, 2, 2))
+        self.assertEqual(trajectory[:, -2:, 0, 0, 0].tolist(), [
+            [20, 20],
+            [20, 20],
+        ])
 
 
     def test_replay_hash_covers_every_grounded_field(self):

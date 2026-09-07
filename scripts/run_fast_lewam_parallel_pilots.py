@@ -39,15 +39,30 @@ def _pid_matches(pid, command):
 
 def _gpu_compute_processes(gpu, environment):
     result = subprocess.run(
-        [
-            "nvidia-smi", "-i", str(gpu),
-            "--query-compute-apps=pid,process_name,used_memory",
-            "--format=csv,noheader,nounits",
-        ],
-        check=True, text=True, capture_output=True,
+        ["nvidia-smi", "pmon", "-i", str(gpu), "-c", "1"],
+        check=True,
+        text=True,
+        capture_output=True,
         env={**os.environ, **environment},
     )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return _parse_pmon_processes(result.stdout, gpu)
+
+
+def _parse_pmon_processes(output, gpu):
+    rows = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        fields = stripped.split()
+        if len(fields) < 3 or fields[0] == "-":
+            continue
+        if int(fields[0]) != int(gpu):
+            raise RuntimeError(
+                f"nvidia-smi pmon returned GPU{fields[0]} while GPU{gpu} was requested"
+            )
+        rows.append(f"pid={fields[1]} type={fields[2]} command={fields[-1]}")
+    return rows
 
 
 def _valid_summary(path, manifest, pilot, level):
@@ -74,7 +89,7 @@ def _free_memory(gpu, environment):
     return int(result.stdout.strip())
 
 
-def _preflight(manifest, specs):
+def _preflight(manifest, specs, *, allow_existing_compute=False):
     errors = []
     selected = {spec.pilot for spec in specs}
     for pilot in manifest.pilots.values():
@@ -89,7 +104,7 @@ def _preflight(manifest, specs):
     memory = {}
     for spec in specs:
         processes = _gpu_compute_processes(spec.gpu, spec.environment)
-        if processes:
+        if processes and not allow_existing_compute:
             raise RuntimeError(
                 f"GPU{spec.gpu} already has compute processes: {processes}"
             )
@@ -130,6 +145,11 @@ def main(argv=None):
     parser.add_argument(
         "--phase", choices=("dry-run", "preflight", "launch", "status"), required=True
     )
+    parser.add_argument(
+        "--allow-existing-compute",
+        action="store_true",
+        help="permit unrelated GPU processes when the 12000 MiB free-memory guard passes",
+    )
     args = parser.parse_args(argv)
     manifest = load_pilot_manifest(args.manifest)
     specs = build_launch_specs(manifest, level=args.level)
@@ -154,7 +174,11 @@ def main(argv=None):
     if args.phase == "status":
         print(json.dumps(_status(manifest, args.level), indent=2))
         return
-    memory = _preflight(manifest, specs)
+    memory = _preflight(
+        manifest,
+        specs,
+        allow_existing_compute=args.allow_existing_compute,
+    )
     if args.phase == "preflight":
         print(json.dumps({"status": "ok", "free_memory_mib": memory}, indent=2))
         return
