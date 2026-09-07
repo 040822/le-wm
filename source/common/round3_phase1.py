@@ -571,19 +571,26 @@ def _legacy_cohort_rows(
     episode_column = _episode_column(dataset)
     episodes = _column(dataset, episode_column)
     steps = _column(dataset, "step_idx")
-    unique_episodes = np.unique(episodes)
-    limits: dict[str, int] = {}
-    for episode in unique_episodes:
-        values = steps[np.asarray([_same_value(item, episode) for item in episodes])]
-        limits[_episode_key(episode)] = int(np.max(values)) - int(goal_offset_steps)
-    valid_indices = np.asarray(
-        [
-            index
-            for index, (episode, step) in enumerate(zip(episodes, steps))
-            if int(step) <= limits[_episode_key(episode)]
-        ],
-        dtype=np.int64,
-    )
+    unique_episodes, inverse = np.unique(episodes, return_inverse=True)
+    try:
+        step_values = np.asarray(steps, dtype=np.int64)
+        max_steps = np.full(len(unique_episodes), np.iinfo(np.int64).min, dtype=np.int64)
+        np.maximum.at(max_steps, inverse, step_values)
+        per_row_limit = max_steps[inverse] - int(goal_offset_steps)
+        valid_indices = np.flatnonzero(step_values <= per_row_limit).astype(np.int64)
+    except (TypeError, ValueError):
+        limits: dict[str, int] = {}
+        for episode in unique_episodes:
+            values = steps[np.asarray([_same_value(item, episode) for item in episodes])]
+            limits[_episode_key(episode)] = int(np.max(values)) - int(goal_offset_steps)
+        valid_indices = np.asarray(
+            [
+                index
+                for index, (episode, step) in enumerate(zip(episodes, steps))
+                if int(step) <= limits[_episode_key(episode)]
+            ],
+            dtype=np.int64,
+        )
     candidate_count = len(valid_indices) - 1
     if candidate_count < int(num_eval):
         raise ValueError(
