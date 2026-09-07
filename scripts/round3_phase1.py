@@ -189,17 +189,20 @@ def command_evaluate(args: argparse.Namespace) -> None:
     from source.common.checkpoint import load_policy_or_model
     from source.common.eval import EvaluationIdentity
     from source.common.round3_eval import run_round3_evaluation
-    from source.common.eval import compose_eval_config
-
-    overrides = [
-        f"eval.num_eval={len(manifest.entries)}",
-        f"eval.dataset_name={args.dataset_name}" if args.dataset_name else "",
-        f"solver.device={args.device}",
-        "output.save_video=false",
-    ]
-    overrides = [item for item in overrides if item]
-    cfg = compose_eval_config(args.task, overrides=overrides)
-    cfg = OmegaConf.merge(cfg, {"world": {"num_envs": len(manifest.entries)}})
+    cfg, dataset = _load_dataset(
+        args.task,
+        args.dataset_name,
+        None,
+        len(manifest.entries),
+    )
+    cfg = OmegaConf.merge(
+        cfg,
+        {
+            "solver": {"device": args.device},
+            "output": {"save_video": False},
+            "world": {"num_envs": len(manifest.entries)},
+        },
+    )
     policy_or_model, checkpoint = load_policy_or_model(args.checkpoint)
     identity = EvaluationIdentity(
         entrypoint="round3_phase1",
@@ -215,6 +218,7 @@ def command_evaluate(args: argparse.Namespace) -> None:
         policy_or_model=policy_or_model,
         identity=identity,
         manifest=manifest,
+        dataset=dataset,
         output_dir=output_dir,
         device=args.device,
         trace=True,

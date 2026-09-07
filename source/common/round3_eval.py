@@ -96,6 +96,7 @@ def run_round3_evaluation(
     identity: Any,
     manifest: CohortManifest,
     output_dir: str | Path,
+    dataset: Any | None = None,
     device: str | None = None,
     trace: bool = True,
 ) -> dict[str, Any]:
@@ -113,6 +114,7 @@ def run_round3_evaluation(
     session = DatasetEvaluationSession(
         cfg,
         task=task,
+        dataset=dataset,
         cohort=manifest.to_evaluation_cohort(),
     )
     policy = session._build_policy(policy_or_model, identity, device)
