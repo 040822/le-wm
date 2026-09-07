@@ -7,6 +7,7 @@ lambda_sigreg: ${loss.sigreg.weight}
 detach_clean_action: ${detach_clean_action}
 latent_loss_noise_threshold: ${latent_loss_noise_threshold}
 latent_action_mix_epochs: ${latent_action_mix_epochs}
+stage_b_timestep_mode: ${stage_b_timestep_mode}
 optimizer: ${optimizer}
 
 sigreg:
@@ -27,6 +28,10 @@ model:
   task_condition_dim: null
   stage_a_goal_injection: ${stage_a_goal_injection}
   inference_steps: ${inference_steps}
+  token_encoding: ${token_encoding}
+  stage_b_dynamics: ${stage_b_dynamics}
+  stage_b_attention_mode: ${stage_b_attention_mode}
+  serial_activation_checkpointing: ${serial_activation_checkpointing}
 
   encoder:
     _target_: stable_pretraining.backbone.utils.vit_hf

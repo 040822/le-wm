@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Fast-LeWAM: smoke train",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "program": "${workspaceFolder}/train.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "CUDA_VISIBLE_DEVICES": "0",
+        "HYDRA_FULL_ERROR": "1",
+        "STABLEWM_HOME": "${workspaceFolder}/data"
+      },
+      "args": [
+        "--config-name=fast_lewam",
+        "data=pusht",
+        "+trainer.fast_dev_run=true",
+        "trainer.devices=1",
+        "trainer.accelerator=gpu",
+        "trainer.strategy=auto",
+        "trainer.precision=32",
+        "loader.batch_size=2",
+        "loader.num_workers=0",
+        "loader.persistent_workers=false",
+        "~loader.prefetch_factor",
+        "latent_head_layers=1",
+        "latent_head_dim=48",
+        "loss.sigreg.kwargs.num_proj=8",
+        "wandb.enabled=false",
+        "epoch_eval.enabled=false",
+        "+policy.scheduler.type=ConstantLR",
+        "+policy.scheduler.factor=1.0",
+        "+policy.scheduler.total_iters=1"
+      ]
+    }
+  ]
+}

@@ -6,6 +6,7 @@ defaults:
 
 output_model_name: fast_lewam
 subdir: null
+resume_ckpt: null
 num_workers: 8
 train_split: 0.9
 seed: 3072
@@ -22,6 +23,11 @@ latent_head_layers: 6
 latent_head_dim: 192
 latent_action_mix_epochs: 10
 detach_clean_action: false
+stage_b_timestep_mode: legacy
+token_encoding: legacy
+stage_b_dynamics: parallel_prefix
+stage_b_attention_mode: strict_causal
+serial_activation_checkpointing: false
 latent_loss_noise_threshold: 0.2
 inference_steps: 10
 
@@ -32,11 +38,12 @@ validation_diagnostics:
   seed: ${seed}
 
 epoch_eval:
-  enabled: true
+  # 默认关闭训练时 eval：一次 4-stage epoch eval 需 50-120 分钟，整轮 5 个窗口
+  enabled: false
   # null 时自动使用当前 Hydra data 组名（cube/pusht/reacher/tworoom）。
   config_name: null
   stages: [stage_a, stage_a_shuffled_goal, stage_b, stage_c]
-  every_n_epochs: 5
+  every_n_epochs: 2
   eval_overrides: []
 
 data_pipeline:
@@ -56,10 +63,10 @@ trainer:
   use_distributed_sampler: false
 
 loader:
-  batch_size: 200
+  batch_size: 128
   num_workers: ${num_workers}
   persistent_workers: true
-  prefetch_factor: 1
+  prefetch_factor: 3
   pin_memory: true
 
 optimizer:

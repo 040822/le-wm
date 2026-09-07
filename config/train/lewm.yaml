@@ -16,14 +16,14 @@ history_size: 3
 checkpoint_interval_minutes: 30
 
 trainer:
-  max_epochs: 100
+  max_epochs: 10
   devices: 1
   accelerator: gpu
   precision: bf16
   gradient_clip_val: 1.0
 
 loader:
-  batch_size: 128
+  batch_size: 200
   num_workers: ${num_workers}
   persistent_workers: True
   prefetch_factor: 1
