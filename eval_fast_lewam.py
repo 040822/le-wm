@@ -11,6 +11,11 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
+if __name__ == "__main__":
+    from source.common.gpu_environment import configure_mujoco_egl_device
+
+    configure_mujoco_egl_device()
+
 import hydra
 import torch
 from omegaconf import OmegaConf
