@@ -98,6 +98,7 @@ def command_registry(args: argparse.Namespace) -> None:
 
 def _load_dataset(task: str, dataset_name: str | None, cache_dir: str | None, num_eval: int):
     from source.common.eval import compose_eval_config, get_dataset
+    from stable_worldmodel.data.formats.hdf5 import HDF5Dataset
     from omegaconf import OmegaConf
 
     overrides = [f"eval.num_eval={int(num_eval)}"]
@@ -107,7 +108,12 @@ def _load_dataset(task: str, dataset_name: str | None, cache_dir: str | None, nu
         overrides.append(f"cache_dir={cache_dir}")
     cfg = compose_eval_config(task, overrides=overrides)
     cfg = OmegaConf.merge(cfg, {"output": {"save_video": False}})
-    return cfg, get_dataset(cfg, cfg.eval.dataset_name)
+    dataset_path = Path(str(cfg.eval.dataset_name))
+    if dataset_name and dataset_path.is_file():
+        dataset = HDF5Dataset(path=dataset_path, keys_to_cache=list(cfg.dataset.keys_to_cache))
+    else:
+        dataset = get_dataset(cfg, cfg.eval.dataset_name)
+    return cfg, dataset
 
 
 def command_cohort(args: argparse.Namespace) -> None:
