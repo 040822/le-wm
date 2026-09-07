@@ -257,20 +257,83 @@ def select_eval_cohort(dataset, *, goal_offset_steps, num_eval, seed):
     )
 
 
+def validate_evaluation_cohort(dataset, cohort, *, num_eval):
+    "Validate and normalize a caller-supplied evaluation cohort."
+    if not isinstance(cohort, EvaluationCohort):
+        raise TypeError("cohort must be an EvaluationCohort")
+    expected = int(num_eval)
+    if expected < 1:
+        raise ValueError("num_eval must be positive")
+    rows = np.asarray(cohort.row_indices)
+    episodes = np.asarray(cohort.episode_ids)
+    starts = np.asarray(cohort.start_steps)
+    for name, value in (("row_indices", rows), ("episode_ids", episodes), ("start_steps", starts)):
+        if value.ndim != 1:
+            raise ValueError(f"cohort.{name} must be one-dimensional")
+        if len(value) != expected:
+            raise ValueError(f"cohort.{name} has length {len(value)}; expected {expected}")
+    if not np.issubdtype(rows.dtype, np.integer):
+        if not np.all(np.isfinite(rows)) or not np.equal(rows, np.floor(rows)).all():
+            raise ValueError("cohort.row_indices must contain integers")
+        rows = rows.astype(np.int64)
+    else:
+        rows = rows.astype(np.int64, copy=True)
+    if len(np.unique(rows)) != len(rows):
+        raise ValueError("cohort.row_indices must not contain duplicates")
+    try:
+        column_names = tuple(dataset.column_names)
+    except AttributeError as exc:
+        raise TypeError("dataset must expose column_names") from exc
+    episode_column = "episode_idx" if "episode_idx" in column_names else "ep_idx"
+    if episode_column not in column_names or "step_idx" not in column_names:
+        raise ValueError("dataset must expose episode_idx/ep_idx and step_idx")
+    dataset_episodes = np.asarray(dataset.get_col_data(episode_column))
+    dataset_steps = np.asarray(dataset.get_col_data("step_idx"))
+    if dataset_episodes.ndim != 1 or dataset_steps.ndim != 1:
+        raise ValueError("dataset episode and step columns must be one-dimensional")
+    if len(dataset_episodes) != len(dataset_steps):
+        raise ValueError("dataset episode and step columns have different lengths")
+    if np.any(rows < 0) or np.any(rows >= len(dataset_steps)):
+        raise ValueError("cohort.row_indices contain rows outside the dataset")
+    if not np.array_equal(dataset_episodes[rows], episodes):
+        raise ValueError("cohort.episode_ids do not match cohort.row_indices")
+    if not np.array_equal(dataset_steps[rows], starts):
+        raise ValueError("cohort.start_steps do not match cohort.row_indices")
+    return EvaluationCohort(
+        row_indices=rows,
+        episode_ids=np.array(episodes, copy=True),
+        start_steps=np.array(starts, copy=True),
+    )
+
+
 class DatasetEvaluationSession:
     """Cache one LeWM-compatible dataset cohort and evaluate policies against it."""
 
-    def __init__(self, cfg, *, task, dataset=None, world_factory=None):
+    def __init__(
+        self,
+        cfg,
+        *,
+        task,
+        dataset=None,
+        world_factory=None,
+        cohort: EvaluationCohort | None = None,
+    ):
         _validate_eval_config(cfg)
         self.cfg = cfg
         self.task = str(task)
         self.dataset = dataset or get_dataset(cfg, cfg.eval.dataset_name)
         self.world_factory = world_factory or swm.World
-        self.cohort = select_eval_cohort(
-            self.dataset,
-            goal_offset_steps=cfg.eval.goal_offset_steps,
-            num_eval=cfg.eval.num_eval,
-            seed=cfg.seed,
+        self.cohort = (
+            validate_evaluation_cohort(
+                self.dataset, cohort, num_eval=cfg.eval.num_eval
+            )
+            if cohort is not None
+            else select_eval_cohort(
+                self.dataset,
+                goal_offset_steps=cfg.eval.goal_offset_steps,
+                num_eval=cfg.eval.num_eval,
+                seed=cfg.seed,
+            )
         )
         self.process = fit_eval_processors(
             self.dataset,
