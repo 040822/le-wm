@@ -1,4 +1,4 @@
-"""Derive tolerance/joint Phase 1 results from immutable development traces."""
+"""Derive the tolerance Phase 1 result from immutable development traces."""
 
 from __future__ import annotations
 
@@ -37,7 +37,6 @@ def main(argv=None) -> None:
     derived = {}
     mappings = {
         "tolerance_revised": "legacy",
-        "round3_revised": "sampling_revised",
     }
     for variant, source_variant in mappings.items():
         source_manifest = CohortManifest.load(

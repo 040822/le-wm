@@ -1,4 +1,4 @@
-"""Complete the four-protocol development result set from immutable traces."""
+"""Complete sampling and tolerance development results from immutable traces."""
 
 from __future__ import annotations
 
@@ -75,7 +75,6 @@ def main(argv=None) -> None:
     derived = {}
     mappings = {
         "tolerance_revised": "legacy",
-        "round3_revised": "sampling_revised",
     }
     for variant, source_variant in mappings.items():
         source_manifest = CohortManifest.load(
