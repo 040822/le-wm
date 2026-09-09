@@ -21,10 +21,21 @@ from .round3_phase1 import (
     Round3TraceCollector,
     _PolicyTap,
     enrich_result_payload,
+    summarize_episodes,
     write_round3_result,
 )
-from .round3_protocol import ROUND3_EVAL_DEFAULTS
-from .round3_validation import validate_cohort_manifest, validate_result_payload
+from .round3_protocol import ROUND3_EVAL_DEFAULTS, ROUND3_PROTOCOL
+from .round3_validation import (
+    RESULT_SCHEMA_VERSION,
+    trace_content_sha256,
+    trace_summary_sha256,
+    validate_cohort_manifest,
+    validate_result_payload,
+)
+from .round3_runtime_audit import (
+    run_independent_cpu_neutral_hold,
+    validate_neutral_hold_diagnostic,
+)
 
 
 def validate_gpu_visibility(device: str) -> None:
@@ -88,6 +99,29 @@ def _parameters(cfg: Any, manifest: CohortManifest, *, save_video: bool) -> dict
     }
 
 
+def _bind_episode_identity(
+    records: list[dict[str, Any]], manifest: CohortManifest
+) -> list[dict[str, Any]]:
+    """Fill identity fields omitted by the runtime collector without masking errors."""
+    bound: list[dict[str, Any]] = []
+    for index, (record, entry) in enumerate(zip(records, manifest.entries)):
+        item = dict(record)
+        item.setdefault("slot", index)
+        item.setdefault("episode_id", entry.episode_id)
+        item.setdefault("dataset_episode", entry.episode_id)
+        item.setdefault("start_step", entry.start_step)
+        item.setdefault("row_index", entry.row_index)
+        item.setdefault("goal_row_index", entry.goal_row_index)
+        if entry.goal_step is not None:
+            item.setdefault("goal_step", entry.goal_step)
+        if entry.goal_state is not None:
+            item.setdefault("goal_state", list(entry.goal_state))
+        bound.append(item)
+    if len(bound) != len(manifest.entries):
+        raise ValueError("episode records and manifest entries have different lengths")
+    return bound
+
+
 def run_round3_evaluation(
     cfg: Any,
     *,
@@ -105,10 +139,41 @@ def run_round3_evaluation(
     device = str(device or cfg.solver.get("device", "cuda"))
     validate_gpu_visibility(device)
     validate_round3_config(cfg)
-    if int(cfg.eval.num_eval) != len(manifest.entries):
-        raise ValueError("cfg.eval.num_eval must equal the manifest entry count")
+    expected_count = int(cfg.eval.num_eval)
+    validate_cohort_manifest(manifest, task=task, expected_count=expected_count)
     if int(cfg.eval.goal_offset_steps) != int(manifest.goal_offset_steps):
         raise ValueError("evaluation goal offset differs from the frozen cohort")
+    if int(cfg.seed) != int(manifest.seed):
+        raise ValueError("evaluation seed differs from the frozen cohort")
+
+    policy_identity = {
+        "entrypoint": identity.entrypoint,
+        "policy_kind": identity.policy_kind,
+        "checkpoint": identity.checkpoint,
+        "epoch": identity.epoch,
+        "stage": identity.stage,
+    }
+    neutral_hold_diagnostic = run_independent_cpu_neutral_hold(
+        task,
+        seed=int(manifest.seed),
+        protocol=ROUND3_PROTOCOL,
+        protocol_variant=manifest.protocol_variant,
+        stage=identity.stage,
+        cohort_id=manifest.cohort_id,
+        cohort_sha256=manifest.computed_sha256,
+        policy_identity=policy_identity,
+    )
+    validate_neutral_hold_diagnostic(
+        neutral_hold_diagnostic,
+        task=task,
+        expected_policy_identity=policy_identity,
+        expected_protocol=ROUND3_PROTOCOL,
+        expected_protocol_variant=manifest.protocol_variant,
+        expected_stage=identity.stage,
+        expected_cohort_id=manifest.cohort_id,
+        expected_cohort_sha256=manifest.computed_sha256,
+        expected_seed=int(manifest.seed),
+    )
 
     from .eval import DatasetEvaluationSession, evaluate_from_dataset_compat
 
@@ -179,11 +244,25 @@ def run_round3_evaluation(
     successes = np.asarray(metrics["episode_successes"], dtype=bool).reshape(-1)
     if len(successes) != len(manifest.entries):
         raise ValueError("environment returned a success vector with the wrong length")
-    trace_records = (
+    raw_trace_records = (
         collector.finalize(successes.tolist(), eval_budget=int(cfg.eval.eval_budget))
         if collector is not None
         else None
     )
+    episode_records = raw_trace_records
+    if episode_records is None:
+        episode_records = [
+            {
+                "slot": index,
+                "episode_id": entry.episode_id,
+                "start_step": entry.start_step,
+                "row_index": entry.row_index,
+                "success": bool(successes[index]),
+            }
+            for index, entry in enumerate(manifest.entries)
+        ]
+    episode_records = _bind_episode_identity(episode_records, manifest)
+    trace_records = episode_records if raw_trace_records is not None else None
     base = {
         "task": task,
         "local_dataset": str(cfg.eval.dataset_name),
@@ -197,16 +276,7 @@ def run_round3_evaluation(
         "evaluation_seconds": float(elapsed),
         "success_rate": float(successes.mean()),
         "runtime_success_rate_percent": float(metrics["success_rate"]),
-        "episodes": trace_records or [
-            {
-                "slot": index,
-                "episode_id": entry.episode_id,
-                "start_step": entry.start_step,
-                "row_index": entry.row_index,
-                "success": bool(successes[index]),
-            }
-            for index, entry in enumerate(manifest.entries)
-        ],
+        "episodes": episode_records,
     }
     payload = enrich_result_payload(
         base,
@@ -214,9 +284,23 @@ def run_round3_evaluation(
         protocol_variant=manifest.protocol_variant,
         trace_records=trace_records,
     )
+    payload["neutral_hold_diagnostic"] = neutral_hold_diagnostic
     payload.setdefault("status", "ok")
-    validate_cohort_manifest(manifest, expected_count=len(manifest.entries))
-    validate_result_payload(payload, expected_count=len(manifest.entries))
+    payload["schema_version"] = RESULT_SCHEMA_VERSION
+    payload["cohort_kind"] = manifest.cohort_kind
+    if trace_records is None:
+        payload["summary"] = summarize_episodes(payload["episodes"])
+        payload["success_rate"] = payload["summary"]["success_rate"]
+    else:
+        payload["trace_content_sha256"] = trace_content_sha256(trace_records)
+        payload["trace_sha256"] = payload["trace_content_sha256"]
+        payload["trace_summary_sha256"] = trace_summary_sha256(payload["summary"])
+    validate_result_payload(
+        payload,
+        manifest=manifest,
+        expected_count=expected_count,
+        trace_records=trace_records,
+    )
     return write_round3_result(
         payload,
         target,

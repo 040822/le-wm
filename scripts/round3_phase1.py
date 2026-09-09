@@ -19,6 +19,8 @@ from source.common.round3_phase1 import (
     build_artifact_registry,
     build_legacy_manifest,
     build_revised_cohorts,
+    canonical_result_path,
+    canonical_trace_path,
     enrich_result_payload,
     load_result,
     run_synthetic_goal_refresh_checks,
@@ -26,6 +28,7 @@ from source.common.round3_phase1 import (
     write_phase1_matrix,
     write_phase1_report,
     write_round3_result,
+    write_stage_b_reuse_decision,
 )
 from source.common.round3_runtime_audit import run_runtime_goal_refresh_audit
 from source.common.round3_variants import build_development_protocol_manifests
@@ -79,6 +82,11 @@ def command_audit(args: argparse.Namespace) -> None:
             for task in TASKS
         }
     payloads = audit_all_predicates(goal_refresh=refresh)
+    if args.runtime_refresh:
+        for task, payload in payloads.items():
+            diagnostic = refresh[task].get("neutral_hold_diagnostic")
+            payload["neutral_hold_diagnostic"] = diagnostic
+            payload["neutral_hold"] = diagnostic
     for task, payload in payloads.items():
         _write_json(output / "predicate_audit" / f"{task}.json", payload)
     print(json.dumps({task: value["status"] for task, value in payloads.items()}, sort_keys=True))
@@ -170,6 +178,22 @@ def command_analyze(args: argparse.Namespace) -> None:
     print(f"matrix_rows={len(rows)}")
 
 
+def command_stage_b_reuse_decision(args: argparse.Namespace) -> None:
+    """Write only the authorized deterministic Stage B decision artifact."""
+    output = Path(args.output)
+    artifact = (
+        Path(args.artifact)
+        if args.artifact is not None
+        else output / "stage_b_reuse_decision.json"
+    )
+    payload = write_stage_b_reuse_decision(
+        output,
+        artifact,
+        registry_path=args.registry,
+    )
+    print(json.dumps({"artifact": str(artifact), "rows": len(payload["entries"])}, sort_keys=True))
+
+
 def command_evaluate(args: argparse.Namespace) -> None:
     _validate_gpu_visibility(args.device)
     if args.task not in TASKS:
@@ -211,7 +235,24 @@ def command_evaluate(args: argparse.Namespace) -> None:
         epoch=args.epoch,
         stage=None if args.method == "e0_lewm" else args.stage,
     )
-    output_dir = Path(args.output) / "results" / args.task / args.method / args.protocol_variant / args.stage
+    result_path = canonical_result_path(
+        args.output,
+        task=args.task,
+        method=args.method,
+        protocol_variant=args.protocol_variant,
+        stage=args.stage,
+        cohort_kind=manifest.cohort_kind,
+        cohort_sha256=manifest.computed_sha256,
+    )
+    trace_path = canonical_trace_path(
+        args.output,
+        task=args.task,
+        method=args.method,
+        protocol_variant=args.protocol_variant,
+        stage=args.stage,
+        cohort_kind=manifest.cohort_kind,
+        cohort_sha256=manifest.computed_sha256,
+    )
     result = run_round3_evaluation(
         cfg,
         task=args.task,
@@ -219,8 +260,8 @@ def command_evaluate(args: argparse.Namespace) -> None:
         identity=identity,
         manifest=manifest,
         dataset=dataset,
-        output_dir=output_dir,
-        trace_output_dir=Path(args.output) / "traces" / args.task / args.method / args.protocol_variant / args.stage,
+        output_dir=result_path.parent,
+        trace_output_dir=trace_path.parent,
         device=args.device,
         trace=True,
     )
@@ -275,6 +316,18 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser("analyze")
     analyze.add_argument("--output", default=str(DEFAULT_OUTPUT))
     analyze.set_defaults(function=command_analyze)
+
+    decision = subparsers.add_parser("stage-b-reuse-decision")
+    decision.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    decision.add_argument("--artifact")
+    decision.add_argument("--registry")
+    decision.set_defaults(function=command_stage_b_reuse_decision)
+    decision_alias = subparsers.add_parser("stage-b-decision")
+    decision_alias.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    decision_alias.add_argument("--artifact")
+    decision_alias.add_argument("--registry")
+    decision_alias.set_defaults(function=command_stage_b_reuse_decision)
+
 
     evaluate = subparsers.add_parser("evaluate")
     evaluate.add_argument("task", choices=TASKS)

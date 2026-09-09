@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -31,7 +32,17 @@ class TraceTests(unittest.TestCase):
             entries=(entry,),
             episode_split={"dev": (7,), "final": (), "online": ()},
         )
-        collector = Round3TraceCollector("cube", manifest, action_block=5, neutral_action=[0.25, 0.0])
+        action_space = SimpleNamespace(
+            low=np.asarray([-1.0, -1.0]),
+            high=np.asarray([1.0, 1.0]),
+        )
+        collector = Round3TraceCollector(
+            "cube",
+            manifest,
+            action_block=5,
+            action_space=action_space,
+            neutral_action=[0.25, 0.0],
+        )
         for step in range(5):
             collector.record_step(
                 np.asarray([[0.25, 0.0]]),

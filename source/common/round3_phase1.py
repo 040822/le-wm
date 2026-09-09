@@ -37,6 +37,7 @@ from .round3_protocol import (
     TRACE_SCHEMA_VERSION,
     evaluate_success,
     physical_distance,
+    physical_distance_components,
     resolve_task_field,
 )
 
@@ -296,6 +297,8 @@ class CohortManifest:
     def from_dict(cls, value: Mapping[str, Any], *, verify_hash: bool = True) -> "CohortManifest":
         if value.get("protocol") != ROUND3_PROTOCOL:
             raise ValueError("cohort does not use the Round 3 Phase 1 protocol")
+        if verify_hash and ("cohort_sha256" not in value or value.get("cohort_sha256") is None):
+            raise ValueError("cohort_sha256 is required for a persisted cohort")
         entries = tuple(CohortEntry.from_dict(item) for item in value.get("entries", ()))
         split = {
             str(key): tuple(items) for key, items in value.get("episode_split", {}).items()
@@ -750,6 +753,7 @@ def run_goal_refresh_checks(
     set_goal,
     read_goal,
     read_success,
+    reset_case=None,
 ) -> dict[str, Any]:
     """Check goal field refresh and new-goal success through a runtime adapter.
 
@@ -759,6 +763,8 @@ def run_goal_refresh_checks(
     """
     checks = []
     for index, case in enumerate(cases):
+        if reset_case is not None:
+            reset_case(index, case)
         old_goal = np.asarray(case["old_goal"], dtype=np.float64)
         new_goal = np.asarray(case["new_goal"], dtype=np.float64)
         current = np.asarray(case["current"], dtype=np.float64)
@@ -770,11 +776,12 @@ def run_goal_refresh_checks(
         new_success = bool(np.asarray(read_success()).all())
         expected_old = bool(evaluate_success(task, current, old_goal))
         expected_new = bool(evaluate_success(task, current, new_goal))
+        readback_atol = 1e-5 if task.lower().replace("push-t", "pusht").replace("two_room", "tworoom") == "tworoom" else 0.0
         checks.append(
             {
                 "case": int(case.get("case", index)),
-                "goal_field_refreshed": bool(np.array_equal(new_observed, new_goal)),
-                "old_goal_readback": bool(np.array_equal(old_observed, old_goal)),
+                "goal_field_refreshed": bool(new_observed.shape == new_goal.shape and np.allclose(new_observed, new_goal, rtol=0.0, atol=readback_atol)),
+                "old_goal_readback": bool(old_observed.shape == old_goal.shape and np.allclose(old_observed, old_goal, rtol=0.0, atol=readback_atol)),
                 "old_success_matches_predicate": old_success == expected_old,
                 "new_success_matches_predicate": new_success == expected_new,
                 "success_uses_new_goal": new_success == expected_new,
@@ -1063,22 +1070,95 @@ def _boolean_info(value: Any) -> bool | None:
 
 
 
-def action_is_legal(action: Any, action_space: Any = None) -> bool | None:
+def action_legality(action: Any, action_space: Any = None) -> dict[str, Any]:
+    """Describe action legality without treating unavailable bounds as legal."""
     if action is None:
-        return None
-    array = np.asarray(action, dtype=np.float64)
+        return {
+            "legal": None,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": None,
+            "reason": "action was not observed",
+        }
+    try:
+        array = np.asarray(action, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return {
+            "legal": False,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": None,
+            "reason": "action could not be converted to a finite vector",
+        }
     if array.size == 0 or not np.all(np.isfinite(array)):
-        return False
+        return {
+            "legal": False,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": None,
+            "reason": "action is empty or non-finite",
+        }
     if action_space is None:
-        return True
+        return {
+            "legal": None,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": None,
+            "reason": "environment action bounds were unavailable",
+        }
     low = getattr(action_space, "low", None)
     high = getattr(action_space, "high", None)
     if low is None or high is None:
-        return True
+        return {
+            "legal": None,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": None,
+            "reason": "environment action bounds were unavailable",
+        }
     try:
-        return bool(np.all(array >= np.asarray(low)) and np.all(array <= np.asarray(high)))
+        low_array = np.asarray(low, dtype=np.float64).reshape(-1)
+        high_array = np.asarray(high, dtype=np.float64).reshape(-1)
     except (TypeError, ValueError):
-        return None
+        return {
+            "legal": None,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": None,
+            "reason": "environment action bounds were not numeric",
+        }
+    bounds = {"low": _jsonable(low_array), "high": _jsonable(high_array)}
+    if (
+        low_array.size == 0
+        or high_array.shape != low_array.shape
+        or low_array.shape != array.shape
+        or not np.all(np.isfinite(low_array))
+        or not np.all(np.isfinite(high_array))
+        or np.any(low_array > high_array)
+    ):
+        return {
+            "legal": None,
+            "source": "unavailable",
+            "bounds_source": "unavailable",
+            "bounds": bounds,
+            "reason": "environment action bounds were invalid or mismatched",
+        }
+    legal = bool(np.all(array >= low_array) and np.all(array <= high_array))
+    return {
+        "legal": legal,
+        "source": "action_space_bounds",
+        "bounds_source": "action_space",
+        "bounds": bounds,
+        "reason": (
+            "action is within the environment action-space bounds"
+            if legal
+            else "action is outside the environment action-space bounds"
+        ),
+    }
+
+
+def action_is_legal(action: Any, action_space: Any = None) -> bool | None:
+    return action_legality(action, action_space)["legal"]
 
 
 class Round3TraceCollector:
@@ -1119,32 +1199,73 @@ class Round3TraceCollector:
             current_array = None if current is None else np.asarray(current, dtype=np.float64).reshape(-1)
             goal_array = None if goal is None else np.asarray(goal, dtype=np.float64).reshape(-1)
             distance = None
+            distance_components = None
             predicate_success = None
             if current_array is not None and goal_array is not None:
                 try:
                     distance = float(physical_distance(self.task, current_array, goal_array))
+                    distance_components = physical_distance_components(
+                        self.task, current_array, goal_array
+                    )
                     predicate_success = bool(evaluate_success(self.task, current_array, goal_array))
                 except (TypeError, ValueError):
                     distance = None
+                    distance_components = None
             env_success = (
                 _boolean_info(success_info)
                 if success_info is not None
                 else predicate_success
             )
+            legality = action_legality(action, self.action_space)
+            neutral = bool(
+                action is not None
+                and np.allclose(
+                    action, 0.0 if self.neutral_action is None else self.neutral_action
+                )
+            )
+            terminated_value = _boolean_info(terminated)
+            truncated_value = _boolean_info(truncated)
+            declared_reason = _info_value(infos, ("termination_reason",), slot)
+            if isinstance(declared_reason, np.ndarray) and declared_reason.size == 1:
+                declared_reason = declared_reason.reshape(-1)[0].item()
+            if isinstance(declared_reason, str) and declared_reason:
+                termination_reason = declared_reason
+                termination_reason_source = "environment_info"
+            elif truncated_value is True:
+                termination_reason = "time_limit"
+                termination_reason_source = "derived_from_truncation"
+            elif terminated_value is True:
+                termination_reason = "success" if predicate_success is True or env_success is True else "terminated"
+                termination_reason_source = "derived_from_termination"
+            else:
+                termination_reason = "running"
+                termination_reason_source = "derived_from_step_flags"
             self._steps[slot].append(
                 {
                     "raw_env_step": step_value,
                     "current": _jsonable(current_array),
                     "goal": _jsonable(goal_array),
                     "distance": distance,
+                    "distance_components": _jsonable(distance_components),
+                    "distance_unit": definition.unit,
+                    "distance_aggregation": "named task components; success uses frozen predicate",
+                    "distance_source": "round3_protocol.physical_distance_components",
                     "predicate_success": predicate_success,
                     "env_success": env_success,
                     "action": _jsonable(action),
-                    "action_legal": action_is_legal(action, self.action_space),
+                    "action_legal": legality.get("legal"),
+                    "action_legality": legality,
+                    "action_source": legality.get("source"),
+                    "action_bounds_source": legality.get("bounds_source"),
+                    "action_bounds": legality.get("bounds"),
+                    "action_reason": legality.get("reason"),
                     "neutral_action": bool(action is not None and np.allclose(action, 0.0 if self.neutral_action is None else self.neutral_action)),
                     "neutral_action_source": "zero" if self.neutral_action is None else "declared",
-                    "terminated": _boolean_info(terminated) or False,
-                    "truncated": _boolean_info(truncated) or False,
+                    "terminated": terminated_value if terminated_value is not None else False,
+                    "truncated": truncated_value if truncated_value is not None else False,
+                    "termination_reason": termination_reason,
+                    "termination_reason_source": termination_reason_source,
+                    "hold_evidence_source": "policy_rollout_auxiliary",
                 }
             )
 
@@ -1190,6 +1311,8 @@ class Round3TraceCollector:
                     "terminal_distance": terminal_distance,
                     "first_success_step": min(success_steps) if success_steps else None,
                     "hold_success": bool(any(item["success"] for item in valid_hold_windows)),
+                    "hold_evidence_source": "policy_rollout_auxiliary",
+                    "hold_normative": False,
                     "hold_windows": valid_hold_windows,
                     "rollout_failed": len(steps) == 0,
                     "missing_field_count": int(missing_fields),
@@ -1224,14 +1347,127 @@ class _PolicyTap:
         return getattr(self.policy, name)
 
 
+def _trace_jsonl_bytes(records: Sequence[Mapping[str, Any]]) -> bytes:
+    """Serialize trace rows exactly once for hashing and publication."""
+    lines: list[bytes] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, Mapping):
+            raise ValueError(f"trace row {index} must be a mapping")
+        try:
+            line = json.dumps(
+                _jsonable(record),
+                ensure_ascii=False,
+                sort_keys=True,
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"trace row {index} is not JSON-compatible") from exc
+        lines.append(line + b"\n")
+    return b"".join(lines)
+
+
+def _result_directory(path: str | Path) -> Path:
+    value = Path(path)
+    if value.name == "result.json" or value.suffix == ".json":
+        return value.parent
+    return value
+
+
+def _trace_directory(path: str | Path) -> Path:
+    value = Path(path)
+    if value.name == "episodes.jsonl" or value.suffix == ".jsonl":
+        return value.parent
+    return value
+
+
+def _publish_targets(
+    output_dir: str | Path,
+    *,
+    trace_records: Sequence[Mapping[str, Any]] | None,
+    trace_output_dir: str | Path | None,
+) -> tuple[Path, Path, Path | None]:
+    result_dir = _result_directory(output_dir)
+    trace_dir = (
+        _trace_directory(trace_output_dir)
+        if trace_output_dir is not None
+        else result_dir
+    )
+    result_path = result_dir / "result.json"
+    metrics_path = result_dir / "metrics.txt"
+    trace_path = trace_dir / "episodes.jsonl" if trace_records is not None else None
+    return result_path, metrics_path, trace_path
+
+
+def preflight_round3_publish(
+    payload: Mapping[str, Any],
+    output_dir: str | Path,
+    *,
+    trace_records: Sequence[Mapping[str, Any]] | None = None,
+    trace_output_dir: str | Path | None = None,
+    source_paths: Sequence[str | Path] = (),
+) -> tuple[Path, Path, Path | None]:
+    """Check every publication target and source collision before any write."""
+    result_path, metrics_path, trace_path = _publish_targets(
+        output_dir,
+        trace_records=trace_records,
+        trace_output_dir=trace_output_dir,
+    )
+    targets = [result_path, metrics_path]
+    if trace_path is not None:
+        targets.append(trace_path)
+    target_keys = [path.resolve() for path in targets]
+    if len(target_keys) != len(set(target_keys)):
+        raise ValueError("Round 3 publication targets collide")
+
+    derived = payload.get("derived_from")
+    provenance_sources = (derived,) if isinstance(derived, Mapping) else ()
+    provenance_sources += (payload,)
+    for source in provenance_sources:
+        for name in ("source_result_path", "source_trace_path", "source_metrics_path"):
+            value = source.get(name)
+            if value not in (None, ""):
+                source_paths = (*source_paths, str(value))
+                if name == "source_result_path":
+                    source_paths = (
+                        *source_paths,
+                        str(Path(str(value)).parent / "metrics.txt"),
+                    )
+    source_keys = {Path(path).resolve() for path in source_paths if path not in (None, "")}
+    collisions = [path for path in targets if path.resolve() in source_keys]
+    if collisions:
+        raise ValueError(
+            "Round 3 publication target collides with immutable source: "
+            + ", ".join(str(path) for path in collisions)
+        )
+
+    existing = [path for path in targets if path.exists()]
+    temporary = [path.with_suffix(path.suffix + ".tmp") for path in targets]
+    existing_temporary = [path for path in temporary if path.exists()]
+    if existing or existing_temporary:
+        conflict = existing + existing_temporary
+        raise FileExistsError(
+            "refusing to overwrite Round 3 artifacts: "
+            + ", ".join(str(path) for path in conflict)
+        )
+    return result_path, metrics_path, trace_path
+
+
 def write_trace_jsonl(records: Sequence[Mapping[str, Any]], path: str | Path) -> Path:
+    """Atomically write one trace, refusing an existing target."""
     target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        raise FileExistsError(f"refusing to overwrite trace: {target}")
     temporary = target.with_suffix(target.suffix + ".tmp")
-    with temporary.open("w", encoding="utf-8") as file:
-        for record in records:
-            file.write(json.dumps(_jsonable(record), ensure_ascii=False, sort_keys=True) + "\n")
-    temporary.replace(target)
+    if temporary.exists():
+        raise FileExistsError(f"temporary trace target already exists: {temporary}")
+    data = _trace_jsonl_bytes(records)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        temporary.write_bytes(data)
+        temporary.replace(target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
     return target
 
 
@@ -1255,31 +1491,109 @@ def write_round3_result(
     trace_records: Sequence[Mapping[str, Any]] | None = None,
     trace_output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Write the Phase 1 result schema, preserving an optional trace file."""
-    target_dir = Path(output_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
+    """Validate and publish result, metrics, and optional trace as one seam."""
     result = dict(_jsonable(payload))
     result.setdefault("schema_version", 2)
     result.setdefault("protocol", ROUND3_PROTOCOL)
     result.setdefault("status", "ok")
+    records: list[dict[str, Any]] | None = None
+    trace_bytes: bytes | None = None
+    result_path, metrics_path, trace_path = _publish_targets(
+        output_dir,
+        trace_records=trace_records,
+        trace_output_dir=trace_output_dir,
+    )
     if trace_records is not None:
-        trace_dir = Path(trace_output_dir) if trace_output_dir is not None else target_dir
-        trace_path = trace_dir / "episodes.jsonl"
-        write_trace_jsonl(trace_records, trace_path)
+        records = [dict(_jsonable(record)) for record in trace_records]
+        if "episodes" in result and _canonical_json(result["episodes"]) != _canonical_json(records):
+            raise ValueError("payload episodes differ from the trace records to be published")
+        validate_trace_contract(records)
+        result["episodes"] = records
+        result["summary"] = summarize_episodes(records)
+        result["success_rate"] = result["summary"]["success_rate"]
+        trace_bytes = _trace_jsonl_bytes(records)
+        declared_trace_path = result.get("trace_path")
+        if declared_trace_path not in (None, "") and Path(str(declared_trace_path)).resolve() != trace_path.resolve():
+            raise ValueError("payload trace_path differs from the publication trace target")
         result["trace_path"] = str(trace_path)
         result["trace_schema_version"] = TRACE_SCHEMA_VERSION
-    temporary = target_dir / "result.json.tmp"
-    temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.replace(target_dir / "result.json")
+        result["trace_content_sha256"] = hashlib.sha256(trace_bytes).hexdigest()
+        result["trace_sha256"] = result["trace_content_sha256"]
+        result["trace_summary_sha256"] = sha256_json(result["summary"])
+    elif isinstance(result.get("episodes"), list) and "summary" not in result:
+        result["summary"] = summarize_episodes(result["episodes"])
+        result["success_rate"] = result["summary"]["success_rate"]
+
+    if isinstance(result.get("summary"), Mapping):
+        summary = result["summary"]
+        result["success_vector_sha256"] = sha256_json(summary["success_vector"])
+        result["summary_sha256"] = sha256_json(summary)
+
+    # Check all final/temp targets before doing any validation or filesystem
+    # operation that could create a parent directory.
+    preflight_round3_publish(
+        result,
+        output_dir,
+        trace_records=records,
+        trace_output_dir=trace_output_dir,
+    )
+
+    manifest_value = result.get("cohort")
+    if manifest_value is not None or records is not None:
+        from .round3_validation import validate_result_payload
+
+        validate_result_payload(
+            result,
+            manifest=manifest_value,
+            expected_count=len(records) if records is not None else None,
+            trace_path=trace_path,
+            trace_records=records,
+            require_integrity_hashes=records is not None,
+        )
+    result_bytes = (
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
     summary = result.get("summary", {})
-    lines = [
-        f"protocol: {result.get('protocol')}",
-        f"protocol_variant: {result.get('protocol_variant')}",
-        f"status: {result.get('status')}",
-        f"success_rate: {summary.get('success_rate', result.get('success_rate'))}",
-        f"cohort_sha256: {result.get('cohort_sha256')}",
-    ]
-    (target_dir / "metrics.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    metrics_bytes = (
+        "\n".join(
+            [
+                f"protocol: {result.get('protocol')}",
+                f"protocol_variant: {result.get('protocol_variant')}",
+                f"status: {result.get('status')}",
+                f"success_rate: {summary.get('success_rate', result.get('success_rate'))}",
+                f"cohort_sha256: {result.get('cohort_sha256')}",
+            ]
+        )
+        + "\n"
+    ).encode("utf-8")
+    targets = [(result_path, result_bytes), (metrics_path, metrics_bytes)]
+    if trace_path is not None and trace_bytes is not None:
+        targets.append((trace_path, trace_bytes))
+    temporary_paths = [path.with_suffix(path.suffix + ".tmp") for path, _ in targets]
+    for path, _ in targets:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    committed: list[Path] = []
+    try:
+        for temporary, (_, data) in zip(temporary_paths, targets):
+            temporary.write_bytes(data)
+        for temporary, (target, _) in zip(temporary_paths, targets):
+            temporary.replace(target)
+            committed.append(target)
+    except Exception:
+        for temporary in temporary_paths:
+            if temporary.exists():
+                temporary.unlink()
+        for target in committed:
+            if target.exists():
+                target.unlink()
+        raise
     return result
 
 
@@ -1303,9 +1617,12 @@ def enrich_result_payload(
         raise TypeError("base_result must be a mapping or dataclass result")
     payload.update(
         {
+            "schema_version": 2,
             "protocol": ROUND3_PROTOCOL,
             "protocol_variant": str(protocol_variant),
+            "cohort_kind": manifest.cohort_kind,
             "cohort_id": manifest.cohort_id,
+            "cohort_kind": manifest.cohort_kind,
             "cohort_sha256": manifest.computed_sha256,
             "predicate_version": predicate_version,
             "code_commit": _code_commit(repo_root),
@@ -1318,6 +1635,11 @@ def enrich_result_payload(
         payload["episodes"] = list(trace_records)
         payload["summary"] = summarize_episodes(trace_records)
         payload["success_rate"] = payload["summary"]["success_rate"]
+    if isinstance(payload.get("summary"), Mapping):
+        payload["success_vector_sha256"] = sha256_json(
+            payload["summary"]["success_vector"]
+        )
+        payload["summary_sha256"] = sha256_json(payload["summary"])
     return _jsonable(payload)
 
 
@@ -1482,6 +1804,816 @@ def load_result(path: str | Path) -> dict[str, Any]:
         raise ValueError(f"result at {path} is not a JSON object")
     return value
 
+_SHA256_COMPONENT_RE = re.compile(r"[0-9a-f]{64}")
+_CANONICAL_ARTIFACT_KINDS = {"results", "traces"}
+_CANONICAL_FILENAMES = {
+    "results": {"result.json", "metrics.txt"},
+    "traces": {"episodes.jsonl"},
+}
+_STRICT_TERMINATION_REASONS = {"running", "success", "terminated", "time_limit"}
+_CANONICAL_COHORT_KINDS = {"dev", "final", "online", "custom"}
+
+
+def _canonical_root(root: str | Path, kind: str) -> Path:
+    """Return the requested canonical artifact root."""
+    if kind not in _CANONICAL_ARTIFACT_KINDS:
+        raise ValueError(f"unsupported canonical artifact kind {kind!r}")
+    value = Path(root)
+    if value.name == kind:
+        return value
+    if value.name in _CANONICAL_ARTIFACT_KINDS:
+        return value.parent / kind
+    return value / kind
+
+
+def _safe_path_component(value: Any, *, field: str) -> str:
+    text = str(value)
+    if not text or text in {".", ".."} or Path(text).name != text:
+        raise ValueError(f"{field} must be a single non-empty path component")
+    return text
+
+
+def canonical_artifact_path(
+    root: str | Path,
+    *,
+    kind: str,
+    task: str,
+    method: str,
+    protocol_variant: str,
+    stage: str,
+    cohort_kind: str,
+    cohort_sha256: str,
+    filename: str,
+) -> Path:
+    """Build one path in the immutable Phase 1 artifact layout."""
+    if kind not in _CANONICAL_ARTIFACT_KINDS:
+        raise ValueError(f"unsupported canonical artifact kind {kind!r}")
+    if filename not in _CANONICAL_FILENAMES[kind]:
+        raise ValueError(f"unsupported {kind} artifact filename {filename!r}")
+    if not isinstance(cohort_sha256, str) or _SHA256_COMPONENT_RE.fullmatch(cohort_sha256) is None:
+        raise ValueError("cohort_sha256 must be a lowercase 64-character SHA256")
+    root_path = _canonical_root(root, kind)
+    for field, value in (
+        ("task", task),
+        ("method", method),
+        ("protocol_variant", protocol_variant),
+        ("stage", stage),
+        ("cohort_kind", cohort_kind),
+    ):
+        root_path /= _safe_path_component(value, field=field)
+    if cohort_kind not in _CANONICAL_COHORT_KINDS:
+        raise ValueError(f"unsupported canonical cohort kind {cohort_kind!r}")
+    return root_path / cohort_sha256 / filename
+
+
+def canonical_result_path(
+    root: str | Path,
+    *,
+    task: str,
+    method: str,
+    protocol_variant: str,
+    stage: str,
+    cohort_kind: str,
+    cohort_sha256: str,
+) -> Path:
+    return canonical_artifact_path(
+        root,
+        kind="results",
+        task=task,
+        method=method,
+        protocol_variant=protocol_variant,
+        stage=stage,
+        cohort_kind=cohort_kind,
+        cohort_sha256=cohort_sha256,
+        filename="result.json",
+    )
+
+
+def canonical_metrics_path(
+    root: str | Path,
+    *,
+    task: str,
+    method: str,
+    protocol_variant: str,
+    stage: str,
+    cohort_kind: str,
+    cohort_sha256: str,
+) -> Path:
+    return canonical_artifact_path(
+        root,
+        kind="results",
+        task=task,
+        method=method,
+        protocol_variant=protocol_variant,
+        stage=stage,
+        cohort_kind=cohort_kind,
+        cohort_sha256=cohort_sha256,
+        filename="metrics.txt",
+    )
+
+
+def canonical_trace_path(
+    root: str | Path,
+    *,
+    task: str,
+    method: str,
+    protocol_variant: str,
+    stage: str,
+    cohort_kind: str,
+    cohort_sha256: str,
+) -> Path:
+    return canonical_artifact_path(
+        root,
+        kind="traces",
+        task=task,
+        method=method,
+        protocol_variant=protocol_variant,
+        stage=stage,
+        cohort_kind=cohort_kind,
+        cohort_sha256=cohort_sha256,
+        filename="episodes.jsonl",
+    )
+
+
+def validate_trace_contract(
+    records: Sequence[Mapping[str, Any]], *, require_nonempty: bool = True
+) -> None:
+    """Validate raw environment provenance copied by derivation."""
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("trace records must be a sequence")
+    for episode_index, episode in enumerate(records):
+        if not isinstance(episode, Mapping):
+            raise ValueError(f"trace episode {episode_index} must be a mapping")
+        steps = episode.get("steps")
+        if not isinstance(steps, list):
+            raise ValueError(f"trace episode {episode_index} steps must be a list")
+        if require_nonempty and not steps:
+            raise ValueError(f"trace episode {episode_index} has no raw steps")
+        previous_raw_step: int | None = None
+        terminal_seen = False
+        for step_index, step in enumerate(steps):
+            if not isinstance(step, Mapping):
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} must be a mapping"
+                )
+            for field in ("raw_env_step", "terminated", "truncated", "termination_reason"):
+                if field not in step:
+                    raise ValueError(
+                        f"trace episode {episode_index} step {step_index} is missing {field}"
+                    )
+            raw_step = step["raw_env_step"]
+            if isinstance(raw_step, bool) or not isinstance(raw_step, (int, np.integer)):
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} raw_env_step is not an integer"
+                )
+            raw_step = int(raw_step)
+            if previous_raw_step is not None and raw_step <= previous_raw_step:
+                raise ValueError(
+                    f"trace episode {episode_index} raw_env_step values are not increasing"
+                )
+            if terminal_seen:
+                raise ValueError(
+                    f"trace episode {episode_index} contains steps after termination"
+                )
+            previous_raw_step = raw_step
+            terminated = step["terminated"]
+            truncated = step["truncated"]
+            if type(terminated) is not bool or type(truncated) is not bool:
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} termination flags must be bool"
+                )
+            reason = step["termination_reason"]
+            if not isinstance(reason, str) or reason not in _STRICT_TERMINATION_REASONS:
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} has unknown termination_reason"
+                )
+            if terminated and truncated:
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} is both terminated and truncated"
+                )
+            if truncated and reason != "time_limit":
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} truncation reason conflicts"
+                )
+            if terminated and reason not in {"success", "terminated"}:
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} termination reason conflicts"
+                )
+            if not terminated and not truncated and reason != "running":
+                raise ValueError(
+                    f"trace episode {episode_index} step {step_index} running reason conflicts"
+                )
+            terminal_seen = terminated or truncated
+
+
+def classify_result_status(
+    *,
+    registry_available: bool,
+    result_exists: bool,
+    result_valid: bool | None,
+) -> dict[str, Any]:
+    """Apply the frozen registry/result status precedence."""
+    if not registry_available:
+        return {
+            "status": "missing_weight",
+            "decision": "unavailable",
+            "reason_codes": ["missing_weight"],
+            "status_reason": "registered weight is unavailable",
+        }
+    if not result_exists:
+        return {
+            "status": "not_run",
+            "decision": "rerun",
+            "reason_codes": ["result_not_found"],
+            "status_reason": "registered weight is available but result is absent",
+        }
+    if result_valid is not True:
+        return {
+            "status": "invalid",
+            "decision": "rerun",
+            "reason_codes": ["result_invalid"],
+            "status_reason": "result exists but strict frozen validation failed",
+        }
+    return {
+        "status": "ok",
+        "decision": "reuse",
+        "reason_codes": ["result_valid"],
+        "status_reason": "result passed strict frozen validation",
+    }
+
+
+
+def _registry_entry_for(
+    registry: Mapping[str, Any] | None, *, task: str, method: str, stage: str
+) -> Mapping[str, Any] | None:
+    if not isinstance(registry, Mapping):
+        return None
+    matches = [
+        value
+        for value in registry.get("entries", ())
+        if isinstance(value, Mapping)
+        and value.get("task") == task
+        and value.get("method") == method
+        and value.get("stage") == stage
+    ]
+    if len(matches) > 1:
+        raise ValueError(f"artifact registry has duplicate entry for {task}/{method}/{stage}")
+    return matches[0] if matches else None
+
+
+def _registry_weight_available(entry: Mapping[str, Any] | None) -> bool:
+    if entry is None:
+        return False
+    if entry.get("weights_available") is not None:
+        return bool(entry["weights_available"])
+    if entry.get("status") not in {"ok", "available"}:
+        return False
+    if entry.get("participates") is False:
+        return False
+    checkpoint = entry.get("checkpoint")
+    return checkpoint not in (None, "") and Path(str(checkpoint)).is_file()
+
+
+def _manifest_path(output_root: Path, task: str, variant: str) -> Path:
+    return output_root / "cohorts" / task / f"dev_{variant}.json"
+
+
+def _load_dev_manifest(
+    output_root: Path, task: str, variant: str
+) -> tuple[CohortManifest | None, Path]:
+    path = _manifest_path(output_root, task, variant)
+    if not path.is_file():
+        return None, path
+    try:
+        return CohortManifest.load(path), path
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None, path
+
+
+def _result_and_trace_paths(
+    output_root: Path,
+    *,
+    task: str,
+    method: str,
+    variant: str,
+    stage: str,
+    manifest: CohortManifest | None,
+) -> tuple[Path, Path, Path]:
+    if manifest is None:
+        # A missing manifest cannot produce a real cohort identity.  Keep a
+        # deterministic, explicitly non-semantic hash in the path so every
+        # decision row remains in the canonical layout; the row is marked
+        # invalid/not_run and must never be treated as an evaluation result.
+        missing_hash = sha256_json(
+            {
+                "cohort_kind": "dev",
+                "protocol": ROUND3_PROTOCOL,
+                "protocol_variant": variant,
+                "task": task,
+                "unavailable": "cohort_manifest",
+            }
+        )
+        result = canonical_result_path(
+            output_root / "results",
+            task=task,
+            method=method,
+            protocol_variant=variant,
+            stage=stage,
+            cohort_kind="dev",
+            cohort_sha256=missing_hash,
+        )
+        trace = canonical_trace_path(
+            output_root / "traces",
+            task=task,
+            method=method,
+            protocol_variant=variant,
+            stage=stage,
+            cohort_kind="dev",
+            cohort_sha256=missing_hash,
+        )
+        return result, result.parent / "metrics.txt", trace
+    result = canonical_result_path(
+        output_root / "results",
+        task=task,
+        method=method,
+        protocol_variant=variant,
+        stage=stage,
+        cohort_kind=manifest.cohort_kind,
+        cohort_sha256=manifest.computed_sha256,
+    )
+    trace = canonical_trace_path(
+        output_root / "traces",
+        task=task,
+        method=method,
+        protocol_variant=variant,
+        stage=stage,
+        cohort_kind=manifest.cohort_kind,
+        cohort_sha256=manifest.computed_sha256,
+    )
+    return result, result.parent / "metrics.txt", trace
+
+
+def _resolve_result_trace_path(
+    payload: Mapping[str, Any], result_path: Path, fallback: Path
+) -> Path:
+    declared = payload.get("trace_path")
+    if declared is None:
+        return fallback
+    declared_path = Path(str(declared))
+    if declared_path.is_absolute():
+        return declared_path
+    candidates = (declared_path, result_path.parent / declared_path)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return declared_path
+
+
+def _validate_metrics_file(
+    metrics_path: Path,
+    *,
+    payload: Mapping[str, Any],
+    manifest: CohortManifest,
+) -> tuple[bool, str | None]:
+    """Validate the small metrics sidecar emitted by the central writer."""
+    if not metrics_path.is_file():
+        return False, "metrics file is absent"
+    try:
+        lines = metrics_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        return False, f"metrics file cannot be read: {exc}"
+    expected = {
+        "protocol": str(payload.get("protocol")),
+        "protocol_variant": str(payload.get("protocol_variant")),
+        "status": str(payload.get("status")),
+        "success_rate": str(payload.get("summary", {}).get("success_rate")),
+        "cohort_sha256": manifest.computed_sha256,
+    }
+    observed: dict[str, str] = {}
+    for line in lines:
+        if ": " not in line:
+            return False, "metrics file contains a malformed line"
+        key, value = line.split(": ", 1)
+        observed[key] = value
+    for key, value in expected.items():
+        if observed.get(key) != value:
+            return False, f"metrics {key} does not match the validated result"
+    return True, None
+
+
+def _strict_result_check(
+    result_path: Path,
+    *,
+    trace_fallback: Path,
+    manifest: CohortManifest | None,
+    task: str,
+    variant: str,
+    metrics_path: Path | None = None,
+) -> tuple[bool, dict[str, Any] | None, Path, str | None]:
+    if not result_path.is_file():
+        return False, None, trace_fallback, "result file is absent"
+    if manifest is None:
+        return False, None, trace_fallback, "development cohort manifest is absent or invalid"
+    try:
+        value = load_result(result_path)
+        if value.get("task") != task or value.get("protocol_variant") != variant:
+            raise ValueError("result task or protocol variant does not match target")
+        trace_path = _resolve_result_trace_path(value, result_path, trace_fallback)
+        if trace_path.resolve() != trace_fallback.resolve():
+            raise ValueError("result trace path is not the canonical trace target")
+        from .round3_validation import validate_result_payload
+
+        validate_result_payload(
+            value,
+            manifest=manifest,
+            expected_count=len(manifest.entries),
+            trace_path=trace_path,
+            require_integrity_hashes=True,
+        )
+        validate_trace_contract(value["episodes"])
+        if metrics_path is not None:
+            metrics_valid, metrics_reason = _validate_metrics_file(
+                metrics_path,
+                payload=value,
+                manifest=manifest,
+            )
+            if not metrics_valid:
+                raise ValueError(metrics_reason or "metrics sidecar is invalid")
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        return False, None, trace_fallback, f"{type(exc).__name__}: {exc}"
+    return True, value, trace_path, None
+
+
+def _candidate_record(
+    output_root: Path,
+    *,
+    task: str,
+    method: str,
+    variant: str,
+    stage: str,
+    manifest: CohortManifest | None,
+    registry_available: bool = True,
+) -> dict[str, Any]:
+    result_path, metrics_path, trace_path = _result_and_trace_paths(
+        output_root,
+        task=task,
+        method=method,
+        variant=variant,
+        stage=stage,
+        manifest=manifest,
+    )
+    valid, payload, actual_trace, reason = _strict_result_check(
+        result_path,
+        trace_fallback=trace_path,
+        manifest=manifest,
+        task=task,
+        variant=variant,
+        metrics_path=metrics_path,
+    )
+    result_exists = result_path.exists()
+    if not registry_available:
+        status = "missing_weight"
+    elif not result_exists:
+        status = "not_run"
+    else:
+        status = "ok" if valid else "invalid"
+    reason_codes = {
+        "ok": ["source_result_valid", "source_metrics_valid", "source_trace_valid"],
+        "invalid": ["source_result_invalid"],
+        "not_run": ["source_result_not_run"],
+        "missing_weight": ["missing_weight"],
+    }[status]
+    candidate = {
+        "protocol_variant": variant,
+        "result_path": str(result_path.resolve()),
+        "metrics_path": str(metrics_path.resolve()),
+        "trace_path": str(actual_trace.resolve()),
+        "status": status,
+        "reason_codes": reason_codes,
+        "status_reason": reason,
+        "cohort_kind": manifest.cohort_kind if manifest is not None else "dev",
+        "cohort_sha256": manifest.computed_sha256 if manifest is not None else None,
+    }
+    candidate["result_sha256"] = sha256_file(result_path) if result_exists else None
+    candidate["metrics_sha256"] = sha256_file(metrics_path) if metrics_path.is_file() else None
+    candidate["trace_sha256"] = sha256_file(actual_trace) if actual_trace.is_file() else None
+    if valid and payload is not None and manifest is not None:
+        candidate.update(
+            {
+                "source_result_path": str(result_path.resolve()),
+                "source_result_sha256": candidate["result_sha256"],
+                "source_metrics_path": str(metrics_path.resolve()),
+                "source_metrics_sha256": candidate["metrics_sha256"],
+                "source_trace_path": str(actual_trace.resolve()),
+                "source_trace_sha256": candidate["trace_sha256"],
+                "source_cohort_identity": {
+                    "task": manifest.task,
+                    "cohort_id": manifest.cohort_id,
+                    "cohort_kind": manifest.cohort_kind,
+                    "cohort_sha256": manifest.computed_sha256,
+                },
+                "source_success_vector_sha256": payload.get("success_vector_sha256"),
+                "source_summary_sha256": payload.get("summary_sha256"),
+            }
+        )
+    return candidate
+
+
+_STAGE_B_DERIVATION_SOURCES = {
+    "tolerance_revised": "legacy",
+    "sampling_revised": "round3_revised",
+    "round3_revised": "sampling_revised",
+}
+
+
+def build_stage_b_reuse_decision(
+    output_root: str | Path,
+    *,
+    registry_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Read the fixed Stage B matrix and produce a deterministic decision."""
+    root = Path(output_root)
+    registry_file = (
+        Path(registry_path)
+        if registry_path is not None
+        else root / "artifact_registry.json"
+    )
+    registry: Mapping[str, Any] | None = None
+    registry_reason: str | None = None
+    registry_reason_code: str | None = None
+    if registry_file.is_file():
+        try:
+            registry = load_result(registry_file)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            registry_reason = (
+                f"artifact registry is invalid: {type(exc).__name__}: {exc}"
+            )
+            registry_reason_code = "registry_invalid"
+    else:
+        registry_reason = "artifact registry is absent"
+        registry_reason_code = "registry_absent"
+
+    entries: list[dict[str, Any]] = []
+    for task in TASKS:
+        for method in METHODS:
+            registry_entry = _registry_entry_for(
+                registry, task=task, method=method, stage="stage_b"
+            )
+            weight_available = _registry_weight_available(registry_entry)
+            if registry_reason is not None:
+                weight_available = False
+            for variant in PROTOCOL_VARIANTS:
+                manifest, manifest_file = _load_dev_manifest(root, task, variant)
+                result_path, metrics_path, trace_path = _result_and_trace_paths(
+                    root,
+                    task=task,
+                    method=method,
+                    variant=variant,
+                    stage="stage_b",
+                    manifest=manifest,
+                )
+                result_exists = result_path.exists()
+                result_valid = False
+                target_payload: dict[str, Any] | None = None
+                actual_trace = trace_path
+                target_reason = "result file is absent"
+                if result_exists and manifest is not None:
+                    result_valid, target_payload, actual_trace, target_reason = _strict_result_check(
+                        result_path,
+                        trace_fallback=trace_path,
+                        manifest=manifest,
+                        task=task,
+                        variant=variant,
+                        metrics_path=metrics_path,
+                    )
+                elif result_exists:
+                    target_reason = "development cohort manifest is absent or invalid"
+                status = classify_result_status(
+                    registry_available=weight_available,
+                    result_exists=result_exists,
+                    result_valid=result_valid,
+                )
+                reason_codes = list(status["reason_codes"])
+                if registry_reason_code is not None and registry_reason_code not in reason_codes:
+                    reason_codes.append(registry_reason_code)
+                if manifest is None and "cohort_manifest_invalid" not in reason_codes:
+                    reason_codes.append("cohort_manifest_invalid")
+                if result_exists and not result_valid and "result_invalid" not in reason_codes:
+                    reason_codes.append("result_invalid")
+
+                source_candidates: list[dict[str, Any]] = []
+                source_variant = _STAGE_B_DERIVATION_SOURCES.get(variant)
+                if source_variant is not None:
+                    source_manifest, _source_manifest_file = _load_dev_manifest(
+                        root, task, source_variant
+                    )
+                    source_candidates.append(
+                        _candidate_record(
+                            root,
+                            task=task,
+                            method=method,
+                            variant=source_variant,
+                            stage="stage_b",
+                            manifest=source_manifest,
+                            registry_available=weight_available,
+                        )
+                    )
+                valid_source = next(
+                    (
+                        candidate
+                        for candidate in source_candidates
+                        if candidate["status"] == "ok"
+                    ),
+                    None,
+                )
+
+                decision = status["decision"]
+                decision_reason = target_reason if result_exists else status["status_reason"]
+                if registry_reason is not None:
+                    decision_reason = registry_reason
+                if manifest is None and weight_available:
+                    decision_reason = "development cohort manifest is absent or invalid"
+                if (
+                    weight_available
+                    and not result_exists
+                    and valid_source is not None
+                    and manifest is not None
+                ):
+                    decision = "relabel"
+                    reason_codes = [
+                        "target_not_run",
+                        "supported_derivation_mapping",
+                        "source_result_valid",
+                        "source_metrics_valid",
+                        "source_trace_valid",
+                    ]
+                    decision_reason = (
+                        f"target absent; valid {source_variant} source can be deterministically derived"
+                    )
+                elif decision == "reuse":
+                    reason_codes = [
+                        "target_result_valid",
+                        "target_metrics_valid",
+                        "target_trace_valid",
+                    ]
+                    decision_reason = "validated canonical Stage B result can be reused"
+                elif decision == "rerun":
+                    if result_exists:
+                        reason_codes = ["result_invalid"]
+                        decision_reason = target_reason or "canonical result failed strict validation"
+                    else:
+                        reason_codes = ["target_not_run"]
+                        decision_reason = "canonical Stage B result is absent"
+                        if source_candidates and valid_source is None:
+                            reason_codes.append("no_valid_derivation_source")
+                        elif source_variant is None:
+                            reason_codes.append("no_derivation_mapping")
+                    if manifest is None:
+                        reason_codes.append("cohort_manifest_invalid")
+                elif decision == "unavailable":
+                    reason_codes = ["missing_weight"]
+                    decision_reason = registry_reason or "registered final weight is unavailable"
+                    if registry_reason_code is not None:
+                        reason_codes.append(registry_reason_code)
+                    elif registry_entry is None:
+                        reason_codes.append("registry_entry_missing")
+                    if manifest is None:
+                        reason_codes.append("cohort_manifest_invalid")
+
+                target_cohort_hash = (
+                    manifest.computed_sha256
+                    if manifest is not None
+                    else result_path.parent.name
+                )
+                target_evidence = {
+                    "result_path": str(result_path.resolve()),
+                    "result_sha256": sha256_file(result_path) if result_path.is_file() else None,
+                    "metrics_path": str(metrics_path.resolve()),
+                    "metrics_sha256": sha256_file(metrics_path) if metrics_path.is_file() else None,
+                    "trace_path": str(trace_path.resolve()),
+                    "trace_sha256": sha256_file(trace_path) if trace_path.is_file() else None,
+                    "cohort_kind": manifest.cohort_kind if manifest is not None else "dev",
+                    "cohort_sha256": target_cohort_hash,
+                }
+                if target_payload is not None and result_valid:
+                    target_evidence.update(
+                        {
+                            "success_vector_sha256": target_payload.get("success_vector_sha256"),
+                            "summary_sha256": target_payload.get("summary_sha256"),
+                            "trace_content_sha256": target_payload.get("trace_content_sha256"),
+                        }
+                    )
+                reuse_evidence = target_evidence if decision == "reuse" else None
+                relabel_evidence = None
+                if decision == "relabel" and valid_source is not None:
+                    relabel_evidence = {
+                        "mapping": {
+                            "source_protocol_variant": source_variant,
+                            "target_protocol_variant": variant,
+                        },
+                        "source_result_path": valid_source.get("source_result_path"),
+                        "source_result_sha256": valid_source.get("source_result_sha256"),
+                        "source_metrics_path": valid_source.get("source_metrics_path"),
+                        "source_metrics_sha256": valid_source.get("source_metrics_sha256"),
+                        "source_trace_path": valid_source.get("source_trace_path"),
+                        "source_trace_sha256": valid_source.get("source_trace_sha256"),
+                        "source_cohort_identity": valid_source.get("source_cohort_identity"),
+                        "source_success_vector_sha256": valid_source.get(
+                            "source_success_vector_sha256"
+                        ),
+                        "source_summary_sha256": valid_source.get("source_summary_sha256"),
+                    }
+                entries.append(
+                    {
+                        "task": task,
+                        "method": method,
+                        "stage": "stage_b",
+                        "protocol_variant": variant,
+                        "cohort_kind": manifest.cohort_kind if manifest is not None else "dev",
+                        "cohort_sha256": target_cohort_hash,
+                        "result_path": target_evidence["result_path"],
+                        "metrics_path": target_evidence["metrics_path"],
+                        "trace_path": target_evidence["trace_path"],
+                        "source_candidates": source_candidates,
+                        "status": status["status"],
+                        "result_status": status["status"],
+                        "decision": decision,
+                        "reason_codes": reason_codes,
+                        "reason": decision_reason,
+                        "status_reason": decision_reason,
+                        "rerun_reason": decision_reason if decision == "rerun" else None,
+                        "target_evidence": target_evidence,
+                        "reuse_hashes": (
+                            {
+                                "result_sha256": target_evidence["result_sha256"],
+                                "metrics_sha256": target_evidence["metrics_sha256"],
+                                "trace_sha256": target_evidence["trace_sha256"],
+                            }
+                            if reuse_evidence is not None
+                            else None
+                        ),
+                        "reuse_evidence": reuse_evidence,
+                        "relabel_hashes": (
+                            {
+                                "result_sha256": relabel_evidence["source_result_sha256"],
+                                "metrics_sha256": relabel_evidence["source_metrics_sha256"],
+                                "trace_sha256": relabel_evidence["source_trace_sha256"],
+                            }
+                            if relabel_evidence is not None
+                            else None
+                        ),
+                        "relabel_evidence": relabel_evidence,
+                        "registry_entry_status": (
+                            registry_entry.get("status") if registry_entry else None
+                        ),
+                        "registry_entry": dict(registry_entry) if registry_entry is not None else None,
+                        "registry_path": str(registry_file.resolve()),
+                        "cohort_manifest_path": str(manifest_file.resolve()),
+                    }
+                )
+    expected_count = len(TASKS) * len(METHODS) * len(PROTOCOL_VARIANTS)
+    if len(entries) != expected_count:
+        raise AssertionError("Stage B decision matrix is not 48 entries")
+    return {
+        "schema_version": 1,
+        "protocol": ROUND3_PROTOCOL,
+        "stage": "stage_b",
+        "matrix": "stage_b_reuse",
+        "target_count": len(entries),
+        "entries": entries,
+    }
+
+
+def write_stage_b_reuse_decision(
+    output_root: str | Path,
+    artifact_path: str | Path,
+    *,
+    registry_path: str | Path | None = None,
+) -> dict[str, Any]:
+    payload = build_stage_b_reuse_decision(output_root, registry_path=registry_path)
+    target = Path(artifact_path)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    data = (
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if temporary.exists():
+        raise FileExistsError(f"temporary decision artifact already exists: {temporary}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        temporary.write_bytes(data)
+        temporary.replace(target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return payload
+
 
 PHASE1_MATRIX: dict[str, dict[str, tuple[str, ...]]] = {
     "cube": {"e0_lewm": ("stage_b",), "e3_fast": FAST_STAGES, "e5_fast": FAST_STAGES},
@@ -1498,45 +2630,123 @@ def iter_phase1_matrix() -> Iterable[tuple[str, str, str]]:
                 yield task, method, stage
 
 
-def write_phase1_matrix(results_root: str | Path, output_csv: str | Path) -> list[dict[str, Any]]:
+def write_phase1_matrix(
+    results_root: str | Path,
+    output_csv: str | Path,
+    *,
+    registry: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Write the fixed matrix with strict result status provenance."""
     root = Path(results_root)
+    output_root = root.parent if root.name == "results" else root
     rows = []
     for task, method, stage in iter_phase1_matrix():
+        registry_entry = _registry_entry_for(
+            registry, task=task, method=method, stage=stage
+        )
+        registry_available = _registry_weight_available(registry_entry)
         for variant in PROTOCOL_VARIANTS:
-            path = root / task / method / variant / stage / "result.json"
-            if not path.is_file():
-                value = {"status": "missing"}
-            else:
-                try:
-                    value = load_result(path)
-                except (OSError, json.JSONDecodeError, ValueError):
-                    value = {"status": "invalid"}
-            status = str(value.get("status", "ok"))
-            if status not in {"ok", "missing", "invalid"}:
-                status = "invalid"
+            manifest, _manifest_file = _load_dev_manifest(output_root, task, variant)
+            path, metrics_path, trace_path = _result_and_trace_paths(
+                output_root,
+                task=task,
+                method=method,
+                variant=variant,
+                stage=stage,
+                manifest=manifest,
+            )
+            exists = path.is_file()
+            value: dict[str, Any] = {}
+            valid = False
+            actual_trace = trace_path
+            status_reason = "result file is absent"
+            if exists:
+                valid, candidate, actual_trace, status_reason = _strict_result_check(
+                    path,
+                    trace_fallback=trace_path,
+                    manifest=manifest,
+                    task=task,
+                    variant=variant,
+                    metrics_path=metrics_path,
+                )
+                value = candidate or {}
+            status = classify_result_status(
+                registry_available=registry_available,
+                result_exists=exists,
+                result_valid=valid,
+            )
+            if exists and not valid:
+                status["status_reason"] = status_reason
+            if manifest is None:
+                status["reason_codes"] = list(status["reason_codes"]) + [
+                    "cohort_manifest_invalid"
+                ]
+            matrix_status = status["status"]
+            # ``write_phase1_matrix`` predates the decision taxonomy and its
+            # no-registry report uses the historical ``missing`` label.  The
+            # Stage B decision artifact below always exposes ``missing_weight``.
+            if registry is None and matrix_status == "missing_weight":
+                matrix_status = "missing"
             summary = value.get("summary", {})
             if not isinstance(summary, Mapping):
                 summary = {}
+            wilson = summary.get("wilson_95", {})
+            if not isinstance(wilson, Mapping):
+                wilson = {}
             rows.append(
                 {
                     "task": task,
                     "method": method,
                     "stage": stage,
                     "protocol_variant": variant,
-                    "status": status,
-                    "num_episodes": summary.get("num_episodes", len(value.get("episodes", []))) if status == "ok" else None,
-                    "success_rate": summary.get("success_rate", value.get("success_rate")) if status == "ok" else None,
-                    "wilson_low": summary.get("wilson_95", {}).get("low") if status == "ok" else None,
-                    "wilson_high": summary.get("wilson_95", {}).get("high") if status == "ok" else None,
-                    "cohort_sha256": value.get("cohort_sha256"),
+                    "status": matrix_status,
+                    "status_taxonomy": status["status"],
+                    "status_reason": status["status_reason"],
+                    "source_path": str(path),
+                    "num_episodes": (
+                        summary.get("num_episodes", len(value.get("episodes", [])))
+                        if status["status"] == "ok"
+                        else None
+                    ),
+                    "success_rate": (
+                        summary.get("success_rate", value.get("success_rate"))
+                        if status["status"] == "ok"
+                        else None
+                    ),
+                    "wilson_low": (
+                        wilson.get("low") if status["status"] == "ok" else None
+                    ),
+                    "wilson_high": (
+                        wilson.get("high") if status["status"] == "ok" else None
+                    ),
+                    "cohort_sha256": value.get(
+                        "cohort_sha256",
+                        manifest.computed_sha256 if manifest else None,
+                    ),
                     "predicate_version": value.get("predicate_version"),
+                    "trace_path": str(actual_trace),
+                    "reason_codes": ",".join(status["reason_codes"]),
                 }
             )
     target = Path(output_csv)
     target.parent.mkdir(parents=True, exist_ok=True)
     fields = [
-        "task", "method", "stage", "protocol_variant", "status", "num_episodes",
-        "success_rate", "wilson_low", "wilson_high", "cohort_sha256", "predicate_version",
+        "task",
+        "method",
+        "stage",
+        "protocol_variant",
+        "status",
+        "status_taxonomy",
+        "status_reason",
+        "source_path",
+        "num_episodes",
+        "success_rate",
+        "wilson_low",
+        "wilson_high",
+        "cohort_sha256",
+        "predicate_version",
+        "trace_path",
+        "reason_codes",
     ]
     temporary = target.with_suffix(target.suffix + ".tmp")
     with temporary.open("w", newline="", encoding="utf-8") as file:
@@ -1590,16 +2800,23 @@ __all__ = [
     "PHASE1_FINAL_EPISODES",
     "PHASE1_MATRIX",
     "Round3TraceCollector",
+    "action_legality",
     "action_is_legal",
     "build_artifact_registry",
+    "build_stage_b_reuse_decision",
     "build_legacy_manifest",
     "build_revised_cohorts",
+    "canonical_artifact_path",
+    "canonical_metrics_path",
+    "canonical_result_path",
+    "canonical_trace_path",
     "enrich_result_payload",
     "fixed_strata_boundaries",
     "iter_phase1_matrix",
     "load_result",
     "make_goal_refresh_cases",
     "paired_comparison",
+    "preflight_round3_publish",
     "protocol_sensitivity",
     "run_goal_refresh_checks",
     "run_synthetic_goal_refresh_checks",
@@ -1609,6 +2826,7 @@ __all__ = [
     "summarize_episodes",
     "wilson_interval",
     "write_artifact_registry",
+    "write_stage_b_reuse_decision",
     "write_phase1_matrix",
     "write_phase1_report",
     "write_round3_result",

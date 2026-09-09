@@ -7,6 +7,11 @@ import json
 from pathlib import Path
 
 from source.common.round3_sampling_identity import derive_sampling_identity_result_file
+from source.common.round3_phase1 import (
+    CohortManifest,
+    canonical_result_path,
+    canonical_trace_path,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,15 +32,42 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
     output = Path(args.output)
-    result_root = output / "results" / args.task / args.method
-    source = result_root / "round3_revised" / args.stage / "result.json"
-    target = result_root / "sampling_revised" / args.stage
+    cohort_root = output / "cohorts" / args.task
+    source_manifest = CohortManifest.load(cohort_root / "dev_round3_revised.json")
+    target_manifest = CohortManifest.load(cohort_root / "dev_sampling_revised.json")
+    source = canonical_result_path(
+        output,
+        task=args.task,
+        method=args.method,
+        protocol_variant="round3_revised",
+        stage=args.stage,
+        cohort_kind=source_manifest.cohort_kind,
+        cohort_sha256=source_manifest.computed_sha256,
+    )
+    target = canonical_result_path(
+        output,
+        task=args.task,
+        method=args.method,
+        protocol_variant="sampling_revised",
+        stage=args.stage,
+        cohort_kind=target_manifest.cohort_kind,
+        cohort_sha256=target_manifest.computed_sha256,
+    )
+    target_trace = canonical_trace_path(
+        output,
+        task=args.task,
+        method=args.method,
+        protocol_variant="sampling_revised",
+        stage=args.stage,
+        cohort_kind=target_manifest.cohort_kind,
+        cohort_sha256=target_manifest.computed_sha256,
+    )
     payload = derive_sampling_identity_result_file(
         source,
         target,
         manifest_path=output / "cohorts" / args.task / "dev_sampling_revised.json",
         task=args.task,
-        trace_output_dir=output / "traces" / args.task / args.method / "sampling_revised" / args.stage,
+        trace_output_dir=target_trace.parent,
     )
     print(json.dumps({"cohort_sha256": payload.get("cohort_sha256")}, sort_keys=True))
 
