@@ -19,6 +19,7 @@ from source.common.eval import (
     write_evaluation_failure,
 )
 from source.model.fast_lewam.jepa import FastLeWAM
+from source.model.leflow.latent_planner import LatentPlannerRuntime
 
 
 def validate_generic_eval_policy(policy_or_model):
@@ -48,7 +49,11 @@ def run(cfg: DictConfig):
             eval_path, _ = get_policy_eval_paths(
                 policy_name, ckpt_path=checkpoint
             )
-            policy_kind = "lewm"
+            policy_kind = (
+                "leflow"
+                if isinstance(getattr(policy_or_model, "model", policy_or_model), LatentPlannerRuntime)
+                else "lewm"
+            )
 
         task = str(cfg.eval.task_name)
         session = DatasetEvaluationSession(cfg, task=task)

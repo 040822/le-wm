@@ -349,10 +349,33 @@ class DatasetEvaluationSession:
             return policy_or_model
 
         from source.model.fast_lewam.jepa import FastLeWAM
+        from source.model.leflow.latent_planner import LatentPlannerRuntime
         from source.policy.dispatch import make_world_policy
         from source.policy.fast_lewam_eval import make_fast_lewam_policy
+        from source.policy.leflow import make_leflow_policy
 
         model = getattr(policy_or_model, "model", policy_or_model)
+        if isinstance(model, LatentPlannerRuntime):
+            solver_cfg = self.cfg.solver
+            target = str(OmegaConf.select(solver_cfg, "_target_", default=""))
+            if not target.endswith("LearnedLatentPathSolver"):
+                solver_cfg = OmegaConf.load(
+                    _ROOT / "config" / "eval" / "solver" / "latent_flow.yaml"
+                )
+            solver_cfg.device = str(device)
+            solver_cfg.seed = int(self.cfg.seed)
+            # The runtime is already loaded, so an unresolved `${policy}` in
+            # the standalone solver config must not be evaluated here.
+            solver_cfg.checkpoint = None
+            self.cfg.solver = solver_cfg
+            return make_leflow_policy(
+                model,
+                solver_cfg=solver_cfg,
+                plan_config=self.cfg.plan_config,
+                process=self.process,
+                transform=self.transform,
+                device=device,
+            )
         if isinstance(model, FastLeWAM):
             if identity.stage not in _FAST_LEWAM_STAGES:
                 raise ValueError(

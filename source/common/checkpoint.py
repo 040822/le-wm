@@ -117,7 +117,53 @@ def _is_training_epoch_weights(path):
     return bool(prefix and marker and epoch.isdigit())
 
 
+def _leflow_checkpoint_candidates(policy_name, cache_dir=None):
+    """Return direct and stable-worldmodel-cache candidates for LeFlow payloads."""
+    raw = Path(policy_name).expanduser()
+    if raw.is_absolute():
+        roots = (Path("/"),)
+    else:
+        cache_root = Path(cache_dir if cache_dir is not None else _get_swm_cache_dir())
+        roots = (cache_root / CHECKPOINTS_DIRNAME, cache_root)
+
+    candidates = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        for root in roots:
+            candidates.append(root / raw)
+            if raw.suffix != ".pt":
+                candidates.append(root / f"{raw}.pt")
+
+    deduped = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+
+def _load_leflow_runtime(policy_name, cache_dir=None):
+    """Load a LeFlow runtime when ``policy_name`` names its payload format."""
+    name_text = str(policy_name).lower()
+    if "leflow" not in name_text and Path(policy_name).name != "latent_planner.pt":
+        return None
+
+    from source.model.leflow.latent_planner import (
+        LatentPlannerRuntime,
+        is_leflow_checkpoint,
+    )
+
+    for candidate in _leflow_checkpoint_candidates(policy_name, cache_dir=cache_dir):
+        if candidate.is_file() and is_leflow_checkpoint(candidate):
+            return LatentPlannerRuntime.from_checkpoint(candidate, device="cpu"), candidate
+    return None
+
+
 def load_policy_or_model(policy_name, cache_dir=None):
+    leflow = _load_leflow_runtime(policy_name, cache_dir=cache_dir)
+    if leflow is not None:
+        return leflow
+
     if _is_training_epoch_weights(policy_name):
         path = Path(policy_name).expanduser()
         epoch_candidates = [path]
