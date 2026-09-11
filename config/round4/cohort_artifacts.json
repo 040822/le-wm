@@ -1,0 +1,23 @@
+{
+  "protocol": "round3_revised",
+  "seed": 42,
+  "goal_offset_steps": 25,
+  "tasks": {
+    "cube": {
+      "dev": {"path": "../../outputs/round3/phase1/cohorts/cube/dev_round3_revised.json", "episodes": 50, "sha256": "34a5fb7894c41009b005b6c11a83704af1dc29e038cdc7643aecb03dcd0297d0"},
+      "final": {"path": "../../outputs/round3/phase1/cohorts/cube/final.json", "episodes": 200, "sha256": "f6e0ec2038cc8274bf2aa92b454bb4b17016d50051d5feb32575c2a6d2426feb"}
+    },
+    "pusht": {
+      "dev": {"path": "../../outputs/round3/phase1/cohorts/pusht/dev_round3_revised.json", "episodes": 50, "sha256": "b6f930cee2b3065d82e54d007922cd9d8792a820a25c26afd7c53a8b9c33c074"},
+      "final": {"path": "../../outputs/round3/phase1/cohorts/pusht/final.json", "episodes": 200, "sha256": "0e0659f41bd9339d44ee560c2e46fef464a6277f54798ffb501701e46048eca6"}
+    },
+    "reacher": {
+      "dev": {"path": "../../outputs/round3/phase1/cohorts/reacher/dev_round3_revised.json", "episodes": 50, "sha256": "f981ceb61dc5bb154c97781bc246a8a39dbf145d35ddd29222a20fb6874cc2f6"},
+      "final": {"path": "../../outputs/round3/phase1/cohorts/reacher/final.json", "episodes": 200, "sha256": "244c6ac96c3188c1450348cb1d17e3be1c92ec7f019b6461b8ff9674e5f115a6"}
+    },
+    "tworoom": {
+      "dev": {"path": "../../outputs/round3/phase1/cohorts/tworoom/dev_round3_revised.json", "episodes": 50, "sha256": "e6027e5214ee3b934c0ef58df65011ab4a5164359e93f51ce44b21423b5686fa"},
+      "final": {"path": "../../outputs/round3/phase1/cohorts/tworoom/final.json", "episodes": 200, "sha256": "1320bd476722b120749de2db1706edbfab0a4bd02f078c63c0046e1515c9d3ec"}
+    }
+  }
+}

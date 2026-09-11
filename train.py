@@ -2,6 +2,8 @@
 
 import os
 from datetime import timedelta
+from pathlib import Path
+import subprocess
 
 import hydra
 from hydra.core.hydra_config import HydraConfig
@@ -20,6 +22,37 @@ from source.common.checkpoint import (
 from source.common.data import get_column_normalizer, get_img_preprocessor, load_dataset
 from source.common.logging import get_run_dir, tee_output_to_file
 from source.common.sampling import DistributedChunkLocalSampler
+
+
+def _validate_round4_gpu_visibility(cfg):
+    """Require the Round 4 single-card training contract before CUDA starts."""
+    if str(cfg.get("train_mode", "")) != "stage_abde":
+        return
+    accelerator = str(cfg.get("trainer", {}).get("accelerator", "auto"))
+    if accelerator not in {"gpu", "cuda"}:
+        return
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is None or not visible.strip():
+        raise RuntimeError(
+            "Round 4 GPU training requires CUDA_VISIBLE_DEVICES set to one of GPU0-3"
+        )
+    values = [item.strip() for item in visible.split(",") if item.strip()]
+    if len(values) != 1 or not values[0].isdigit() or int(values[0]) not in range(4):
+        raise RuntimeError(
+            "Round 4 training requires exactly one permitted physical GPU0-3; "
+            f"got {visible!r}"
+        )
+
+
+def _round4_git_commit() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def _data_pipeline_options(cfg):
@@ -70,6 +103,18 @@ def _make_dataloaders(cfg, train_set, val_set, rnd_gen, chunk_size):
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
 def run(cfg):
     """解析训练配置，构造数据、policy、日志与 checkpoint，并启动 Lightning fit。"""
+    _validate_round4_gpu_visibility(cfg)
+    if str(cfg.get("train_mode", "")) == "stage_abde":
+        with open_dict(cfg):
+            cfg.round4_metadata = {
+                "data_version": "full_original_dataset_window_split_v1",
+                "split_mode": "window_level_random_split",
+                "split_seed": int(cfg.seed),
+                "train_split": float(cfg.train_split),
+                "normalizer_source": "full_original_dataset",
+                "online_transition_source": "excluded",
+                "code_commit": _round4_git_commit(),
+            }
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop("name")
     run_dir, run_id = get_run_dir(cfg, dataset_name)
@@ -180,6 +225,15 @@ def run(cfg):
         from source.common.epoch_eval import FastLeWAMEpochEvalCallback
 
         callbacks.append(FastLeWAMEpochEvalCallback(**callback_kwargs))
+    round4_diagnostics_cfg = cfg.get("round4_diagnostics", {})
+    if round4_diagnostics_cfg.get("enabled", False):
+        from source.common.round4_diagnostics import Round4DiagnosticsCallback
+
+        callback_kwargs = OmegaConf.to_container(
+            round4_diagnostics_cfg, resolve=True
+        )
+        callback_kwargs.pop("enabled", None)
+        callbacks.append(Round4DiagnosticsCallback(**callback_kwargs))
 
     trainer = pl.Trainer(
         **cfg.trainer,

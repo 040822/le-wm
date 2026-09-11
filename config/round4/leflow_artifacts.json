@@ -1,0 +1,44 @@
+{
+  "protocol": "round3_revised",
+  "action_normalization": "dataset_standard_normalized_action_blocks",
+  "path_contract": "z_start_and_z_goal_fixed_at_every_euler_step",
+  "reranking_contract": "world_model_rollout_final_latent_mse_after_idm_decode",
+  "tasks": {
+    "cube": {
+      "planner_checkpoint": "../../data/checkpoints/leflow/cube/latent_planner.pt",
+      "planner_checkpoint_sha256": "8a60b1ecf36274980a3ead74c6f8c81492beea5f4995a9e80adb46bff4d12505",
+      "lewm_checkpoint": "../../data/checkpoints/quentinll/lewm-cube/weights.pt",
+      "lewm_checkpoint_sha256": "2839a907362f403f9136383016e91774373a295d958ae75121791f22a9fddf89",
+      "config": "../../data/checkpoints/leflow/cube/latent_planner_config.yaml",
+      "config_sha256": "32b990b1acd9939bf9ee69e6a12cbf5d3ca4ff7d85edafc4a8a47ad4eeca8199",
+      "lewm_reference": "cube/lewm"
+    },
+    "pusht": {
+      "planner_checkpoint": "../../data/checkpoints/leflow/pusht/latent_planner.pt",
+      "planner_checkpoint_sha256": "c32c21815c20484a765e14cf6fc8777245b09559dcd3701e937aec217c7b392c",
+      "lewm_checkpoint": "../../data/checkpoints/quentinll/lewm-pusht/weights.pt",
+      "lewm_checkpoint_sha256": "48938400ae3464c9680731287f583a9cb516f55a8ec64ea13a91be47fb15b607",
+      "config": "../../data/checkpoints/leflow/pusht/latent_planner_config.yaml",
+      "config_sha256": "c4a99bfe0c5eb841f05ed37e8174d1b208dea6c0b535f4675fb3e9afe91408c2",
+      "lewm_reference": "pusht/lewm"
+    },
+    "reacher": {
+      "planner_checkpoint": "../../data/checkpoints/leflow/reacher/latent_planner.pt",
+      "planner_checkpoint_sha256": "b591caa70ffde7b88b72f00066e9db9e0d91bbf63046ea87d5ec8c338e425106",
+      "lewm_checkpoint": "../../data/checkpoints/quentinll/lewm-reacher/weights.pt",
+      "lewm_checkpoint_sha256": "eb70b1fd5409f8f81875d62f5ee5a20dd220a3128a477de66b5760f475f0f469",
+      "config": "../../data/checkpoints/leflow/reacher/latent_planner_config.yaml",
+      "config_sha256": "c86f55476e5b63f31ac2ecd02b42bc257af879b193f6f5173ed3b05dadb75277",
+      "lewm_reference": "reacher/lewm"
+    },
+    "tworoom": {
+      "planner_checkpoint": "../../data/checkpoints/leflow/tworoom/latent_planner.pt",
+      "planner_checkpoint_sha256": "e229b22689f521675fdb7ef0d4a1f03b7e082d839eb0fe205e0b18ac9cf17d4d",
+      "lewm_checkpoint": "../../data/checkpoints/quentinll/lewm-tworooms/weights.pt",
+      "lewm_checkpoint_sha256": "566f223624ea4bfb39dbfe6ae731198dd6ea73b7b8919fed6b1ecafca810f7dd",
+      "config": "../../data/checkpoints/leflow/tworoom/latent_planner_config.yaml",
+      "config_sha256": "54fd4565459cb6c2dab8f70452e24108256d91ff76d0d8caa60c9de622e1a3ac",
+      "lewm_reference": "tworoom/lewm"
+    }
+  }
+}

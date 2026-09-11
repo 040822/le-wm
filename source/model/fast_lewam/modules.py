@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from source.model.lewm.modules import MLP, SIGReg
 
@@ -158,11 +159,23 @@ class SharedDiT(nn.Module):
             [DiTBlock(dim, heads, mlp_dim, dropout) for _ in range(depth)]
         )
         self.norm = nn.LayerNorm(dim)
+        # Runtime switch: changing memory behavior must not change checkpoint
+        # parameter schemas.
+        self.activation_checkpointing = False
 
     def forward(self, tokens, condition, attention_mask=None):
         """依次执行所有共享 block，并对最终 token 做归一化。"""
         for layer in self.layers:
-            tokens = layer(tokens, condition, attention_mask=attention_mask)
+            if self.activation_checkpointing and self.training and torch.is_grad_enabled():
+                tokens = checkpoint(
+                    layer,
+                    tokens,
+                    condition,
+                    attention_mask,
+                    use_reentrant=False,
+                )
+            else:
+                tokens = layer(tokens, condition, attention_mask=attention_mask)
         return self.norm(tokens)
 
 
@@ -175,6 +188,8 @@ __all__ = [
     "SharedDiT",
     "block_causal_attention_mask",
     "causal_attention_mask",
+    "inverse_dynamics_attention_mask",
+    "latent_path_attention_mask",
     "stage_b_attention_mask",
     "stage_a_attention_mask",
     "terminal_full_attention_mask",
@@ -207,6 +222,37 @@ def terminal_full_attention_mask(action_horizon: int, device=None) -> torch.Tens
         raise ValueError("action_horizon must be positive")
     length = action_horizon + 2
     return torch.ones(length, length, dtype=torch.bool, device=device)
+
+
+def latent_path_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
+    """Mask for Stage D tokens ``[z0, zg, x1, ..., x{H-1}]``.
+
+    Endpoint anchors can read each other but cannot read interior tokens;
+    every interior token can read the complete sequence.
+    """
+    if action_horizon < 2:
+        raise ValueError("action_horizon must be at least two")
+    length = action_horizon + 1
+    mask = torch.ones(length, length, dtype=torch.bool, device=device)
+    mask[:2, 2:] = False
+    return mask
+
+
+def inverse_dynamics_attention_mask(action_horizon: int, device=None) -> torch.Tensor:
+    """Mask for Stage E tokens ``[z0, ..., zH, q0, ..., q{H-1}]``."""
+    if action_horizon < 1:
+        raise ValueError("action_horizon must be positive")
+    state_count = action_horizon + 1
+    query_count = action_horizon
+    mask = torch.zeros(
+        state_count + query_count,
+        state_count + query_count,
+        dtype=torch.bool,
+        device=device,
+    )
+    mask[:state_count, :state_count] = True
+    mask[state_count:, :] = True
+    return mask
 
 
 def stage_b_attention_mask(
