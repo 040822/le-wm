@@ -31,6 +31,23 @@ class Round4ProtocolTests(unittest.TestCase):
         self.assertEqual(parsed.mode, "P4")
         train = build_parser().parse_args(["train", "cube", "--gpu", "2", "--dry-run"])
         self.assertEqual(train.gpu, "2")
+        continuation = build_parser().parse_args(
+            [
+                "train",
+                "cube",
+                "--gpu",
+                "0",
+                "--init-weights",
+                "/tmp/epoch_9.pt",
+                "--initial-epoch",
+                "9",
+                "--run-dir",
+                "/tmp/r4-cube",
+                "--disable-wandb",
+            ]
+        )
+        self.assertEqual(continuation.initial_epoch, 9)
+        self.assertTrue(continuation.disable_wandb)
 
     def test_expansion_gate_requires_two_five_point_tasks_and_no_large_regression(self):
         rows = {

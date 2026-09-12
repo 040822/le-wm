@@ -22,6 +22,20 @@ class Round3CliTests(unittest.TestCase):
         for arguments in cases.values():
             self.assertIsNotNone(parser.parse_args(arguments))
 
+        parsed = parser.parse_args(
+            [
+                "evaluate",
+                "cube",
+                "leflow",
+                "stage_b",
+                "--cohort",
+                "c",
+                "--checkpoint",
+                "p",
+            ]
+        )
+        self.assertEqual(parsed.method, "leflow")
+
     def test_synthetic_refresh_is_deterministic_and_complete(self):
         first = run_synthetic_goal_refresh_checks("reacher", count=10, seed=42)
         second = run_synthetic_goal_refresh_checks("reacher", count=10, seed=42)

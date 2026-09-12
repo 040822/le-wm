@@ -17,6 +17,7 @@ from omegaconf import OmegaConf, open_dict
 from source.common.checkpoint import (
     CHECKPOINTS_DIRNAME,
     SaveCkptCallback,
+    load_initial_model_state,
     resolve_training_resume_checkpoint,
 )
 from source.common.data import get_column_normalizer, get_img_preprocessor, load_dataset
@@ -53,6 +54,23 @@ def _round4_git_commit() -> str | None:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _initialize_from_weights(policy, checkpoint_path):
+    """Initialize a policy from a model-only snapshot.
+
+    This is intentionally separate from Lightning's ``ckpt_path`` resume:
+    optimizer and loop state are unavailable in epoch weight snapshots.
+    """
+    state_dict = load_initial_model_state(checkpoint_path)
+    model = getattr(policy, "model", policy)
+    incompatible = model.load_state_dict(state_dict, strict=True)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        raise RuntimeError(
+            "Initial weight snapshot did not load strictly: "
+            f"missing={incompatible.missing_keys}, "
+            f"unexpected={incompatible.unexpected_keys}"
+        )
 
 
 def _data_pipeline_options(cfg):
@@ -166,6 +184,24 @@ def run(cfg):
 
     policy = hydra.utils.instantiate(cfg.policy)
 
+    initial_epoch = int(cfg.get("initial_epoch", 0))
+    if initial_epoch < 0:
+        raise ValueError("initial_epoch must be non-negative")
+    initial_weights = cfg.get("init_weights", None)
+    if initial_weights:
+        _initialize_from_weights(policy, initial_weights)
+        print(
+            "Initialized model weights from "
+            f"{initial_weights}; optimizer state was not restored"
+        )
+        if str(cfg.get("train_mode", "")) == "stage_abde":
+            with open_dict(cfg):
+                cfg.round4_metadata["resume_from_weights"] = str(initial_weights)
+                cfg.round4_metadata["optimizer_state_restored"] = False
+                cfg.round4_metadata["initial_epoch"] = initial_epoch
+    if initial_epoch:
+        policy._round4_epoch_offset = initial_epoch
+
     with open_dict(cfg):
         cfg.subdir = run_id
         cfg.trainer.default_root_dir = str(run_dir)
@@ -193,6 +229,7 @@ def run(cfg):
         cfg=cfg.policy,
         epoch_interval=1,
         output_dir=run_dir / CHECKPOINTS_DIRNAME,
+        epoch_offset=initial_epoch,
     )
     latest_checkpoint_callback = ModelCheckpoint(
         dirpath=run_dir / CHECKPOINTS_DIRNAME,
@@ -233,6 +270,7 @@ def run(cfg):
             round4_diagnostics_cfg, resolve=True
         )
         callback_kwargs.pop("enabled", None)
+        callback_kwargs.setdefault("epoch_offset", initial_epoch)
         callbacks.append(Round4DiagnosticsCallback(**callback_kwargs))
 
     trainer = pl.Trainer(

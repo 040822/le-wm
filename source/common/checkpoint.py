@@ -19,6 +19,36 @@ def torch_load_compat(path, map_location="cpu"):
         return torch.load(path, map_location=map_location)
 
 
+def load_initial_model_state(path):
+    """Load model weights for an explicit weight-only training continuation.
+
+    A Lightning ``last.ckpt`` restores optimizer and loop state.  Epoch
+    snapshots only contain model weights, but are still useful after an
+    interrupted run.  Callers should record that this fallback does not
+    restore optimizer state.
+    """
+    payload = torch_load_compat(path, map_location="cpu")
+    if isinstance(payload, dict):
+        state_dict = payload.get("state_dict", payload)
+        if not isinstance(state_dict, dict):
+            raise TypeError(
+                f"Expected a state dict in {path}, got {type(state_dict).__name__}"
+            )
+        if state_dict and all(str(key).startswith("model.") for key in state_dict):
+            state_dict = {
+                str(key)[len("model.") :]: value
+                for key, value in state_dict.items()
+            }
+        return state_dict
+
+    model = getattr(payload, "model", None)
+    if model is not None and hasattr(model, "state_dict"):
+        return model.state_dict()
+    if hasattr(payload, "state_dict"):
+        return payload.state_dict()
+    raise TypeError(f"Expected model weights in {path}, got {type(payload).__name__}")
+
+
 def _get_swm_cache_dir():
     import stable_worldmodel as swm
 
@@ -121,7 +151,7 @@ def _leflow_checkpoint_candidates(policy_name, cache_dir=None):
     """Return direct and stable-worldmodel-cache candidates for LeFlow payloads."""
     raw = Path(policy_name).expanduser()
     if raw.is_absolute():
-        roots = (Path("/"),)
+        roots = ()
     else:
         cache_root = Path(cache_dir if cache_dir is not None else _get_swm_cache_dir())
         roots = (cache_root / CHECKPOINTS_DIRNAME, cache_root)
@@ -130,6 +160,10 @@ def _leflow_checkpoint_candidates(policy_name, cache_dir=None):
     if raw.is_absolute():
         candidates.append(raw)
     else:
+        # CLI documentation and experiment manifests commonly pass paths such
+        # as ``data/checkpoints/leflow/pusht/latent_planner.pt``.  Keep the
+        # caller's direct relative path ahead of the SWM cache fallbacks.
+        candidates.append(raw)
         for root in roots:
             candidates.append(root / raw)
             if raw.suffix != ".pt":
@@ -238,22 +272,36 @@ def resolve_training_resume_checkpoint(resume_ckpt, run_dir, output_model_name):
 class SaveCkptCallback(Callback):
     """Save both the Lightning policy object and the bare JEPA model."""
 
-    def __init__(self, run_name, cfg=None, epoch_interval: int = 1, output_dir=None):
+    def __init__(
+        self,
+        run_name,
+        cfg=None,
+        epoch_interval: int = 1,
+        output_dir=None,
+        epoch_offset: int = 0,
+    ):
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
         self.epoch_interval = epoch_interval
         self.output_dir = Path(output_dir) if output_dir is not None else None
+        self.epoch_offset = int(epoch_offset)
 
     def on_train_epoch_end(self, trainer, pl_module):
         super().on_train_epoch_end(trainer, pl_module)
 
         if trainer.is_global_zero:
             if (trainer.current_epoch + 1) % self.epoch_interval == 0:
-                self._save(pl_module, trainer.current_epoch + 1)
+                self._save(
+                    pl_module,
+                    trainer.current_epoch + 1 + self.epoch_offset,
+                )
 
             if (trainer.current_epoch + 1) == trainer.max_epochs:
-                self._save(pl_module, trainer.current_epoch + 1)
+                self._save(
+                    pl_module,
+                    trainer.current_epoch + 1 + self.epoch_offset,
+                )
 
     def _save(self, pl_module, epoch):
         if self.output_dir is None:

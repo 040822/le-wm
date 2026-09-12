@@ -7,6 +7,8 @@ defaults:
 output_model_name: r4_abde
 subdir: null
 resume_ckpt: null
+init_weights: null
+initial_epoch: 0
 num_workers: 8
 train_split: 0.9
 seed: 3072

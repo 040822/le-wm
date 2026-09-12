@@ -60,7 +60,9 @@ def _predicted_action_probability(module, stage, mix_epochs):
 
     if stage != "fit" or mix_epochs <= 0:
         return 1.0
-    return min(float(module.current_epoch) / float(mix_epochs), max_probability)
+    epoch_offset = getattr(module, "_round4_epoch_offset", 0)
+    effective_epoch = float(module.current_epoch) + float(epoch_offset)
+    return min(effective_epoch / float(mix_epochs), max_probability)
 
 
 def round4_abde_forward(

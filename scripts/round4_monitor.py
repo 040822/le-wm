@@ -39,6 +39,13 @@ def _parse_run(value: str) -> tuple[str, Path]:
     return name, Path(path).expanduser()
 
 
+def _parse_pid(value: str) -> tuple[str, int]:
+    name, separator, pid = value.partition("=")
+    if not separator or not name or not pid.isdigit():
+        raise argparse.ArgumentTypeError("pid must have the form task=PID")
+    return name, int(pid)
+
+
 def _read_tail(path: Path, limit: int = 128 * 1024) -> str:
     try:
         with path.open("rb") as stream:
@@ -50,7 +57,7 @@ def _read_tail(path: Path, limit: int = 128 * 1024) -> str:
         return ""
 
 
-def _run_snapshot(name: str, run_dir: Path) -> dict[str, Any]:
+def _run_snapshot(name: str, run_dir: Path, pid: int | None = None) -> dict[str, Any]:
     log_candidates = [
         run_dir / f"{name}_single.log",
         run_dir / f"{name}.log",
@@ -85,8 +92,32 @@ def _run_snapshot(name: str, run_dir: Path) -> dict[str, Any]:
                     }
                 )
     errors = [marker for marker in _ERROR_MARKERS if marker in tail]
+    completed = bool(
+        (progress is not None and progress["epoch"] >= progress["epochs"])
+        or any(
+            re.search(r"_weights_epoch_(\d+)\.pt$", item["name"])
+            and int(re.search(r"_weights_epoch_(\d+)\.pt$", item["name"]).group(1))
+            >= 10
+            for item in checkpoints
+        )
+    )
+    process_alive = None
+    if pid is not None:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            process_alive = False
+        except PermissionError:
+            process_alive = True
+        else:
+            process_alive = True
+        if process_alive is False and not completed:
+            errors.append("training_process_not_alive")
     return {
         "task": name,
+        "pid": pid,
+        "process_alive": process_alive,
+        "completed": completed,
         "run_dir": str(run_dir),
         "log": str(log_path) if log_path else None,
         "log_mtime": (
@@ -167,10 +198,15 @@ def _result_snapshot(result_root: Path) -> list[dict[str, Any]]:
     return results
 
 
-def snapshot(runs: list[tuple[str, Path]], result_root: Path) -> dict[str, Any]:
+def snapshot(
+    runs: list[tuple[str, Path]],
+    result_root: Path,
+    pids: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    pids = pids or {}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "runs": [_run_snapshot(name, path) for name, path in runs],
+        "runs": [_run_snapshot(name, path, pids.get(name)) for name, path in runs],
         "gpu": _gpu_snapshot(),
         "results": _result_snapshot(result_root),
     }
@@ -184,6 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_run,
         required=True,
         help="training run mapping, e.g. cube=/path/to/run_dir; repeat per task",
+    )
+    parser.add_argument(
+        "--pid",
+        action="append",
+        type=_parse_pid,
+        help="optional training process mapping, e.g. cube=1234; repeat per task",
     )
     parser.add_argument("--result-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -200,8 +242,9 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("--interval must be positive")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     latest = args.output.with_suffix(".latest.json")
+    pids = dict(args.pid or [])
     while True:
-        payload = snapshot(runs, args.result_root)
+        payload = snapshot(runs, args.result_root, pids=pids)
         line = json.dumps(payload, sort_keys=True)
         with args.output.open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")

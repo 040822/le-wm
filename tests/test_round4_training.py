@@ -4,7 +4,11 @@ import torch
 
 from source.model.fast_lewam.modules import SIGReg
 from source.common.round4_diagnostics import compute_idm_diagnostics
-from source.policy.fast_lewam import FastLeWAMPolicy, fast_lewam_forward
+from source.policy.fast_lewam import (
+    FastLeWAMPolicy,
+    _predicted_action_probability,
+    fast_lewam_forward,
+)
 from tests.test_round4_model import make_round4_model
 
 
@@ -20,6 +24,15 @@ class FakeTrainingModule:
 
 
 class Round4TrainingTests(unittest.TestCase):
+    def test_weight_only_continuation_keeps_round4_epoch_schedule(self):
+        module = FakeTrainingModule()
+        module.current_epoch = 0
+        module._round4_epoch_offset = 9
+        self.assertEqual(
+            _predicted_action_probability(module, "fit", mix_epochs=10),
+            0.5,
+        )
+
     def test_abde_forward_uses_one_encoder_call_and_returns_all_losses(self):
         module = FakeTrainingModule()
         calls = []

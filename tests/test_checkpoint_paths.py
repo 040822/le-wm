@@ -8,6 +8,7 @@ from omegaconf import OmegaConf
 from source.common.checkpoint import (
     CHECKPOINTS_DIRNAME,
     LAST_CHECKPOINT_FILENAME,
+    _leflow_checkpoint_candidates,
     get_policy_eval_paths,
     get_policy_results_path,
     load_policy_or_model,
@@ -82,6 +83,16 @@ class CheckpointPathTests(unittest.TestCase):
 
         self.assertTrue(torch.equal(loaded.weight, expected.weight))
         self.assertEqual(resolved_checkpoint, checkpoint)
+
+    def test_leflow_candidates_prefer_direct_relative_path(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            checkpoint = Path(tmpdir) / "latent_planner.pt"
+            checkpoint.write_bytes(b"fixture")
+            candidates = _leflow_checkpoint_candidates(
+                checkpoint.relative_to(Path.cwd()), cache_dir=Path("/cache")
+            )
+
+        self.assertEqual(candidates[0], checkpoint.relative_to(Path.cwd()))
 
     def test_policy_prefix_checks_old_and_nested_checkpoint_layouts(self):
         run_dir = Path("/tmp/lewm_run")

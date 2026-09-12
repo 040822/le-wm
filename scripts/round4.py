@@ -91,6 +91,14 @@ def command_train(args: argparse.Namespace) -> None:
         command.append(f"trainer.max_epochs={int(args.max_epochs)}")
     if args.output_model_name:
         command.append(f"output_model_name={args.output_model_name}")
+    if args.init_weights:
+        command.append(f"init_weights={args.init_weights}")
+    if args.initial_epoch:
+        command.append(f"initial_epoch={int(args.initial_epoch)}")
+    if args.run_dir:
+        command.append(f"hydra.run.dir={args.run_dir}")
+    if args.disable_wandb:
+        command.append("wandb.enabled=false")
     print("CUDA_VISIBLE_DEVICES=" + gpu)
     print(" ".join(command))
     if not args.dry_run:
@@ -273,6 +281,14 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--seed", type=int, default=3072)
     train.add_argument("--max-epochs", type=int)
     train.add_argument("--output-model-name")
+    train.add_argument("--init-weights")
+    train.add_argument("--initial-epoch", type=int, default=0)
+    train.add_argument("--run-dir", help="Hydra output directory for a continuation run")
+    train.add_argument(
+        "--disable-wandb",
+        action="store_true",
+        help="disable W&B when the runtime cannot start its local service",
+    )
     train.add_argument("--dry-run", action="store_true")
     train.set_defaults(function=command_train)
 

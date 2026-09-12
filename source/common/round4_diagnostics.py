@@ -13,9 +13,14 @@ import torch.nn.functional as F
 class Round4DiagnosticsCallback(Callback):
     """Persist epoch 0, 5, and 10 branch diagnostics beside a run."""
 
-    def __init__(self, output_name: str = "round4_diagnostics.jsonl"):
+    def __init__(
+        self,
+        output_name: str = "round4_diagnostics.jsonl",
+        epoch_offset: int = 0,
+    ):
         super().__init__()
         self.output_name = output_name
+        self.epoch_offset = int(epoch_offset)
 
     def _write(self, trainer, pl_module, epoch: int) -> None:
         metrics = dict(getattr(pl_module, "_round4_last_metrics", {}))
@@ -29,10 +34,10 @@ class Round4DiagnosticsCallback(Callback):
             stream.write(json.dumps(payload, sort_keys=True) + "\n")
 
     def on_train_start(self, trainer, pl_module) -> None:
-        self._write(trainer, pl_module, 0)
+        self._write(trainer, pl_module, self.epoch_offset)
 
     def on_train_epoch_end(self, trainer, pl_module) -> None:
-        epoch = int(trainer.current_epoch) + 1
+        epoch = int(trainer.current_epoch) + 1 + self.epoch_offset
         if epoch in {5, 10}:
             self._write(trainer, pl_module, epoch)
 
