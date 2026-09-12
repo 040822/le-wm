@@ -35,6 +35,78 @@ from .round4_protocol import (
 from .gpu_environment import configure_mujoco_egl_device
 
 
+def _sync_solver_device(solver: Any) -> None:
+    """Synchronize a CUDA CEM solver before wall-clock measurements."""
+    device = getattr(solver, "device", None)
+    if device is None or not str(device).startswith("cuda"):
+        return
+    import torch
+
+    torch.cuda.synchronize(device)
+
+
+class _TimedSolver:
+    """Delegate to a frozen solver while recording one event per CEM solve."""
+
+    def __init__(self, solver: Any):
+        self._solver = solver
+        self.events: list[dict[str, Any]] = []
+
+    def __getattr__(self, name: str):
+        return getattr(self._solver, name)
+
+    def _run(self, call, *args, **kwargs):
+        info_dict = kwargs.get("info_dict")
+        if info_dict is None and args:
+            info_dict = args[0]
+        try:
+            first_value = next(iter(info_dict.values()))
+            environment_batch_size = len(first_value)
+        except (AttributeError, StopIteration, TypeError):
+            environment_batch_size = 0
+        batch_size = max(1, int(getattr(self._solver, "batch_size", 1)))
+        n_steps = max(1, int(getattr(self._solver, "n_steps", 1)))
+        _sync_solver_device(self._solver)
+        started = time.perf_counter()
+        result = call(*args, **kwargs)
+        _sync_solver_device(self._solver)
+        elapsed = time.perf_counter() - started
+        self.events.append(
+            {
+                "encode_seconds": 0.0,
+                "proposal_seconds": float(elapsed),
+                "verify_seconds": 0.0,
+                "flow_seconds": 0.0,
+                "idm_seconds": 0.0,
+                "planning_seconds": float(elapsed),
+                "environment_batch_size": int(environment_batch_size),
+                "forward_count": int(
+                    n_steps
+                    * ((environment_batch_size + batch_size - 1) // batch_size)
+                ),
+            }
+        )
+        return result
+
+    def __call__(self, *args, **kwargs):
+        return self._run(self._solver, *args, **kwargs)
+
+    def solve(self, *args, **kwargs):
+        return self._run(self._solver.solve, *args, **kwargs)
+
+
+def _time_cem_policy(policy: Any, mode: str) -> None:
+    """Install timing only for Round 4's P1/P2 CEM policies."""
+    if mode not in {"P1", "P2"}:
+        return
+    solver = getattr(policy, "solver", None)
+    if solver is None or not hasattr(solver, "solve"):
+        return
+    timed_solver = _TimedSolver(solver)
+    policy.solver = timed_solver
+    policy.planning_events = timed_solver.events
+
+
 def validate_gpu_visibility(device: str) -> None:
     """Require one permitted physical GPU and bind MuJoCo/EGL to it."""
     if not str(device).startswith("cuda"):
@@ -180,6 +252,7 @@ def run_round4_evaluation(
         solver_batch_size=solver_batch_size,
         candidate_batch_size=candidate_batch_size,
     )
+    _time_cem_policy(policy, mode)
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
     world_cfg["max_episode_steps"] = 2 * int(cfg.eval.eval_budget)
     save_video = bool(cfg.get("output", {}).get("save_video", False))

@@ -11,11 +11,26 @@ from source.common.round4_artifacts import (
     validate_artifact_manifest,
     validate_leflow_manifest,
 )
-from source.common.round4_eval import validate_gpu_visibility
+from source.common.round4_eval import _TimedSolver, validate_gpu_visibility
 from source.common.round4_protocol import mode_spec, should_expand_seed
 
 
 class Round4ProtocolTests(unittest.TestCase):
+    def test_cem_solver_timing_records_planning_and_forward_counts(self):
+        class FakeSolver:
+            batch_size = 1
+            n_steps = 30
+            device = "cpu"
+
+            def solve(self, info_dict, init_action=None):
+                return {"actions": []}
+
+        timed = _TimedSolver(FakeSolver())
+        self.assertEqual(timed.solve({"pixels": [0, 1]})["actions"], [])
+        self.assertEqual(len(timed.events), 1)
+        self.assertEqual(timed.events[0]["forward_count"], 60)
+        self.assertGreaterEqual(timed.events[0]["planning_seconds"], 0.0)
+
     def test_cuda_evaluation_binds_one_permitted_gpu_to_mujoco_egl(self):
         with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "2"}, clear=True):
             validate_gpu_visibility("cuda")
