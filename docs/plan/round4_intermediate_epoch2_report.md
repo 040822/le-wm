@@ -24,6 +24,15 @@ P3/P4 均使用 64 candidates、16 flow steps、`solver_batch_size=1`；为避�
 
 所有上述 `result.json` 的状态为 `ok`，并包含 cohort-bound trace。对应 checkpoint 为各任务 run 目录下的 `checkpoints/r4_abde_seed3072_weights_epoch_2.pt`。
 
+epoch2 checkpoint SHA256：
+
+```text
+cube    f0b1caad63ec239e2f57392dff71cd411283507126d4303e8b61fab1fd471afa
+pusht   e1a87d2741c1aa234caf5017865ed4234738ca6df033f37d3da5bb8747104f0c
+reacher 485b5438c33a23be00b49683c9c7968107ba794554b2f7c1421d995821fb8e3b
+tworoom e48d16df8c1a532df38642e0c0378e7cfb61e5d71ec4782184d17804c03869da
+```
+
 ## 解释边界
 
 - 这些结果只说明 epoch2 闭环和 P4 实现已经可运行；不能替代 epoch10 的正式 dev/final 矩阵。
