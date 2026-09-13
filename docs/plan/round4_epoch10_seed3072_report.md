@@ -5,9 +5,10 @@
 - Tasks: Cube, Push-T, Reacher, TwoRoom.
 - Training: `stage_abde`, seed `3072`, nominal epoch 10, Shared DiT with A/B/D/E.
 - Evaluation protocol: `round3_revised`, seed 42, dev 50 episodes, final 200 episodes, goal offset 25, budget 50, horizon 5, receding horizon 5, action block 5.
-- Main result root: `outputs/round4/epoch10_seed3072`.
+- Base result root: `outputs/round4/epoch10_seed3072` (P0/P1/P2 and the original P3/P4 run).
+- Protocol-correct best-of-N root: `outputs/round4/epoch10_seed3072_batch64` (P3/P4/P4-first with candidate batch 64).
 - CEM timing sidecar: `outputs/round4/epoch10_seed3072_timed`.
-- Code commits: `419c704` (R4 implementation), `245ad56` (weight-only continuation), `96b254d` (CEM timing metadata).
+- Code commits: `419c704` (R4 implementation), `245ad56` (weight-only continuation), `96b254d` (CEM timing metadata), plus the final report/diagnostic commits.
 
 The final cohort is fixed and reproducible, but it is not a strict held-out generalization set: it is drawn from the complete original dataset under the existing window-level split protocol. These results are exploratory and do not establish a causal improvement of A/B from adding D/E.
 
@@ -15,7 +16,7 @@ The first Cube/Push-T/Reacher runs were interrupted. Cube and Push-T were contin
 
 ## Formal R4 success rates (%)
 
-The main table below uses the non-overwritten formal result root. P0-shuf and P4-first are dev-only diagnostics.
+The main table below uses the base root for P0/P1/P2 and the protocol-correct batch64 root for P3/P4/P4-first. P0-shuf and P4-first are dev-only diagnostics. An earlier candidate-batch-8 run is retained only as an audit trail and is not used as the canonical best-of-N result.
 
 ### Dev
 
@@ -35,26 +36,26 @@ The main table below uses the non-overwritten formal result root. P0-shuf and P4
 | Reacher | 74 | 86.5 | 68.5 | 85 | 78 |
 | TwoRoom | 94.5 | 97 | 98.5 | 99 | 99.5 |
 
-Episode-paired comparisons are in `analysis.json`. On final, P4 vs P3 is 0.0 pp / -7.0 pp / -7.0 pp / +0.5 pp for Cube / Push-T / Reacher / TwoRoom. P4 vs P2 is +4.5 pp / -3.5 pp / +9.5 pp / +1.0 pp.
+Episode-paired comparisons are in the two result-root `analysis.json` files and the cross-root P4/P2 artifact. On final, batch64 P4 vs P3 is 0.0 pp / -7.0 pp / -7.0 pp / +0.5 pp for Cube / Push-T / Reacher / TwoRoom. P4 vs P2 is +4.5 pp / -3.5 pp / +9.5 pp / +1.0 pp.
 
 P4-first shows the verifier effect: relative to first-candidate execution, P4 gains 0 pp on Cube, 30 pp on Push-T, 26 pp on Reacher, and 2 pp on TwoRoom in dev.
 
 ## Planning timing and resources
 
-P3/P4 timing is in the formal result payloads. P1/P2 CEM timing was added without changing solver semantics and recorded in the timed sidecar. Dev median planning seconds were:
+P3/P4 timing is in the protocol-correct batch64 result payloads. P1/P2 CEM timing was added without changing solver semantics and recorded in the timed sidecar. Dev median planning seconds were:
 
 | task | P1 CEM | P2 warm-start CEM | P3 action-64 | P4 latent-64 |
 |---|---:|---:|---:|---:|
-| Cube | 6.312 | 4.614 | 1.762 | 1.755 |
-| Push-T | 5.332 | 4.809 | 1.104 | 1.003 |
-| Reacher | 7.740 | 7.417 | 1.445 | 1.365 |
-| TwoRoom | 8.644 | 5.507 | 1.014 | 0.956 |
+| Cube | 6.312 | 4.614 | 0.880 | 0.919 |
+| Push-T | 5.332 | 4.809 | 0.360 | 0.363 |
+| Reacher | 7.740 | 7.417 | 0.540 | 0.477 |
+| TwoRoom | 8.644 | 5.507 | 0.381 | 0.375 |
 
-P3/P4 use 64 candidates, 16 flow steps, solver batch 1, and candidate batch 8. The timed CEM sidecar contains p95 latency and forward counts. Its success vectors match the formal P1/P2 vectors except for one Push-T P2 final episode on the repeated environment run (92.0% sidecar versus 92.5% formal); the formal result remains canonical.
+P3/P4 use 64 candidates, 16 flow steps, solver batch 1, and candidate batch 64 in the protocol-correct root. The timed CEM sidecar contains p95 latency and forward counts. Its success vectors match the formal P1/P2 vectors except for one Push-T P2 final episode on the repeated environment run (92.0% sidecar versus 92.5% formal); the formal result remains canonical.
 
 ## LeFlow reference
 
-The four-task artifact manifest and dependent LeWM checkpoints passed SHA256 validation. Revised final success rates are:
+The four-task artifact manifest and dependent LeWM checkpoints passed SHA256 validation. The gradient/provenance audit is recorded in `docs/plan/round4_leflow_audit.md`. Revised final success rates are:
 
 | task | LeFlow final |
 |---|---:|
@@ -78,6 +79,19 @@ Epoch-10 diagnostics (`loss`, `d_loss`, `d_path_variance`, `e_action_mse`) are:
 
 The per-run `round4_diagnostics.jsonl` files retain epoch 0/5/10 where available; resumed runs also retain the pre-resume epoch snapshots.
 
+## Offline IDM/path diagnostics
+
+`scripts/round4_offline_diagnostics.py` evaluates 16 real windows and 8 generated paths per window. The columns are real-path E action MSE, B verifier MSE for E-decoded real paths, B validation MSE on generated paths, and the generated endpoint MSE (fixed to zero by D's endpoint contract):
+
+| task | real E MSE | decoded-action B MSE | generated-path B MSE | endpoint MSE |
+|---|---:|---:|---:|---:|
+| Cube | 0.0696 | 0.0103 | 0.0775 | 0.0000 |
+| Push-T | 0.0630 | 0.0322 | 0.1258 | 0.0000 |
+| Reacher | 0.8149 | 0.0219 | 0.1428 | 0.0000 |
+| TwoRoom | 0.7657 | 0.1160 | 0.2926 | 0.0000 |
+
+These diagnostics are offline capability checks; P4's actual selection still uses B scoring of decoded actions and does not use the clamped D endpoint.
+
 ## Expansion decision
 
 The pre-registered epoch-10 dev gate is `expand=false`; seeds 3073 and 3074 are not run. The gate fails because P4 is not at least +5 pp on two tasks without a large regression: versus P3, only Reacher clears +5 pp and Push-T declines; versus P2, Reacher improves but Push-T declines by 6 pp. The efficiency gate also requires no task to decline by more than 2 pp, which Push-T violates.
@@ -95,8 +109,10 @@ Decision artifact: `outputs/round4/epoch10_seed3072/expansion_decision.json`.
 
 ## Verification
 
-- LeFlow manifest validation: accepted for all four tasks.
+- LeFlow artifact manifest validation: accepted for all four tasks.
 - Cohort file SHA256s match `config/round4/cohort_artifacts.json`.
+- Batch64 P3/P4/P4-first protocol-correct results: 20/20 result artifacts present and valid.
+- Offline IDM/path diagnostics: 4/4 tasks completed.
 - Targeted R4 tests: pass, including mode/mask, gradients, checkpoint round-trip, candidate splitting, timing wrapper, and continuation behavior.
 - Full unittest: 287 tests, 2 skipped, 2 failures. Both failures are pre-existing `test_inspect_h5_dataset.py` expectations for episode-length text that the current inspector omits; no Round 4 test failed.
 
