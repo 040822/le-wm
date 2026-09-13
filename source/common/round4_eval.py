@@ -66,11 +66,19 @@ class _TimedSolver:
             environment_batch_size = 0
         batch_size = max(1, int(getattr(self._solver, "batch_size", 1)))
         n_steps = max(1, int(getattr(self._solver, "n_steps", 1)))
+        device = getattr(self._solver, "device", None)
+        peak_memory_bytes = None
+        if device is not None and str(device).startswith("cuda"):
+            import torch
+
+            torch.cuda.reset_peak_memory_stats(device)
         _sync_solver_device(self._solver)
         started = time.perf_counter()
         result = call(*args, **kwargs)
         _sync_solver_device(self._solver)
         elapsed = time.perf_counter() - started
+        if device is not None and str(device).startswith("cuda"):
+            peak_memory_bytes = int(torch.cuda.max_memory_allocated(device))
         self.events.append(
             {
                 "encode_seconds": 0.0,
@@ -80,6 +88,7 @@ class _TimedSolver:
                 "idm_seconds": 0.0,
                 "planning_seconds": float(elapsed),
                 "environment_batch_size": int(environment_batch_size),
+                "peak_memory_bytes": peak_memory_bytes,
                 "forward_count": int(
                     n_steps
                     * ((environment_batch_size + batch_size - 1) // batch_size)

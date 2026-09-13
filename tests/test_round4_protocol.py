@@ -29,6 +29,7 @@ class Round4ProtocolTests(unittest.TestCase):
         self.assertEqual(timed.solve({"pixels": [0, 1]})["actions"], [])
         self.assertEqual(len(timed.events), 1)
         self.assertEqual(timed.events[0]["forward_count"], 60)
+        self.assertIsNone(timed.events[0]["peak_memory_bytes"])
         self.assertGreaterEqual(timed.events[0]["planning_seconds"], 0.0)
 
     def test_cuda_evaluation_binds_one_permitted_gpu_to_mujoco_egl(self):
