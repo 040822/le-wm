@@ -7,8 +7,8 @@
 - Evaluation protocol: `round3_revised`, seed 42, dev 50 episodes, final 200 episodes, goal offset 25, budget 50, horizon 5, receding horizon 5, action block 5.
 - Base result root: `outputs/round4/epoch10_seed3072` (P0/P1/P2 and the original P3/P4 run).
 - Protocol-correct best-of-N root: `outputs/round4/epoch10_seed3072_batch64` (P3/P4/P4-first with candidate batch 64).
-- CEM timing sidecar: `outputs/round4/epoch10_seed3072_timed`.
-- Code commits: `419c704` (R4 implementation), `245ad56` (weight-only continuation), `96b254d` (CEM timing metadata), plus the final report/diagnostic commits.
+- CEM timing sidecar: `outputs/round4/epoch10_seed3072_timed_peak`.
+- Code commits: `419c704` (R4 implementation), `245ad56` (weight-only continuation), `96b254d` (CEM timing metadata), `dd7af42` (CEM peak-memory metadata), plus the final report/diagnostic commits.
 
 The final cohort is fixed and reproducible, but it is not a strict held-out generalization set: it is drawn from the complete original dataset under the existing window-level split protocol. These results are exploratory and do not establish a causal improvement of A/B from adding D/E.
 
@@ -42,16 +42,29 @@ P4-first shows the verifier effect: relative to first-candidate execution, P4 ga
 
 ## Planning timing and resources
 
-P3/P4 timing is in the protocol-correct batch64 result payloads. P1/P2 CEM timing was added without changing solver semantics and recorded in the timed sidecar. Dev median planning seconds were:
+P3/P4 timing is in the protocol-correct batch64 result payloads. P1/P2 CEM timing was added without changing solver semantics and recorded in the final `timed_peak` sidecar. Dev median planning seconds were:
 
 | task | P1 CEM | P2 warm-start CEM | P3 action-64 | P4 latent-64 |
 |---|---:|---:|---:|---:|
-| Cube | 6.312 | 4.614 | 0.880 | 0.919 |
-| Push-T | 5.332 | 4.809 | 0.360 | 0.363 |
-| Reacher | 7.740 | 7.417 | 0.540 | 0.477 |
-| TwoRoom | 8.644 | 5.507 | 0.381 | 0.375 |
+| Cube | 4.954 | 6.232 | 0.880 | 0.919 |
+| Push-T | 6.675 | 5.728 | 0.360 | 0.363 |
+| Reacher | 9.471 | 9.024 | 0.540 | 0.477 |
+| TwoRoom | 6.385 | 2.913 | 0.381 | 0.375 |
 
-P3/P4 use 64 candidates, 16 flow steps, solver batch 1, and candidate batch 64 in the protocol-correct root. The timed CEM sidecar contains p95 latency and forward counts. Its success vectors match the formal P1/P2 vectors except for one Push-T P2 final episode on the repeated environment run (92.0% sidecar versus 92.5% formal); the formal result remains canonical.
+P3/P4 use 64 candidates, 16 flow steps, solver batch 1, and candidate batch 64 in the protocol-correct root. The `timed_peak` CEM sidecar contains p95 latency, forward counts, and peak allocated memory. The dev resource audit is:
+
+| task | mode | median s | p95 s | forward count | peak allocated MiB |
+|---|---|---:|---:|---:|---:|
+| Cube | P1 | 4.954 | 6.865 | 2160 | 82.5 |
+| Cube | P2 | 6.232 | 11.437 | 1530 | 220.0 |
+| Push-T | P1 | 6.675 | 10.989 | 1740 | 82.4 |
+| Push-T | P2 | 5.728 | 9.976 | 1620 | 219.9 |
+| Reacher | P1 | 9.471 | 11.386 | 2460 | 82.4 |
+| Reacher | P2 | 9.024 | 11.119 | 2460 | 219.9 |
+| TwoRoom | P1 | 6.385 | 6.385 | 1500 | 82.4 |
+| TwoRoom | P2 | 2.913 | 4.947 | 1680 | 219.9 |
+
+The timed sidecar is a resource audit; the formal success table remains sourced from the canonical base-root results.
 
 ## LeFlow reference
 
@@ -105,15 +118,16 @@ Decision artifact: `outputs/round4/epoch10_seed3072/expansion_decision.json`.
 | Cube | `outputs/round4/resume3_seed3072_cube/checkpoints/r4_abde_seed3072_weights_epoch_10.pt` | `95a26194eb74e3b02f9d82aa4d15e32b746fdbf24bce974d9eed90550a1c5495` |
 | Push-T | `outputs/round4/resume3_seed3072_pusht/checkpoints/r4_abde_seed3072_weights_epoch_10.pt` | `1543ccdffd17c68fb9d3f905621995d760809efdfc86d8cc6c5f1486cbbcb9f1` |
 | Reacher | `outputs/round4/resume3_seed3072_reacher/checkpoints/r4_abde_seed3072_weights_epoch_10.pt` | `d56252fe27caa89914c9871514d1bfcfeda4466de6dd34494f64bee89d78a83c` |
-| TwoRoom | `outputs/20260912_102425_659562/checkpoints/r4_abde_seed3072_weights_epoch_10.pt` | `153b6baa8b5dac40ef5bc12700a19e117397199750edf289670be3e1e81deec6` |
+| TwoRoom | `outputs/20260912_102425_147611/checkpoints/r4_abde_seed3072_weights_epoch_10.pt` | `153b6baa8b5dac40ef5bc12700a19e117397199750edf289670be3e1e81deec6` |
 
 ## Verification
 
 - LeFlow artifact manifest validation: accepted for all four tasks.
 - Cohort file SHA256s match `config/round4/cohort_artifacts.json`.
 - Batch64 P3/P4/P4-first protocol-correct results: 20/20 result artifacts present and valid.
+- Timed CEM resource sidecar: 16/16 result artifacts present with p95, forward-count, and peak-memory fields.
 - Offline IDM/path diagnostics: 4/4 tasks completed.
 - Targeted R4 tests: pass, including mode/mask, gradients, checkpoint round-trip, candidate splitting, timing wrapper, and continuation behavior.
-- Full unittest: 287 tests, 2 skipped, 2 failures. Both failures are pre-existing `test_inspect_h5_dataset.py` expectations for episode-length text that the current inspector omits; no Round 4 test failed.
+- Full unittest: 287 tests, 1 skipped, 2 failures. Both failures are pre-existing `test_inspect_h5_dataset.py` expectations for episode-length text that the current inspector omits; no Round 4 test failed.
 
 Deferred experiments remain outside this round: R4-AB, independent D/E models, Flow-IDM, latent-space CEM, new Stage C, consistency/cycle losses, online+D/E, and token/DiT architecture searches.
