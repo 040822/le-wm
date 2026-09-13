@@ -47,6 +47,10 @@ class Round4ProtocolTests(unittest.TestCase):
         self.assertEqual(parsed.mode, "P4")
         train = build_parser().parse_args(["train", "cube", "--gpu", "2", "--dry-run"])
         self.assertEqual(train.gpu, "2")
+        ab_train = build_parser().parse_args(
+            ["train", "cube", "--gpu", "2", "--config-name", "round4_ab", "--dry-run"]
+        )
+        self.assertEqual(ab_train.config_name, "round4_ab")
         continuation = build_parser().parse_args(
             [
                 "train",

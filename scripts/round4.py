@@ -81,7 +81,7 @@ def command_train(args: argparse.Namespace) -> None:
         sys.executable,
         str(ROOT / "train.py"),
         "--config-name",
-        "round4_abde",
+        str(args.config_name),
         f"data={task}",
         f"seed={int(args.seed)}",
         "trainer.devices=1",
@@ -278,6 +278,12 @@ def build_parser() -> argparse.ArgumentParser:
     train = subparsers.add_parser("train")
     train.add_argument("task", choices=ROUND4_TASKS)
     train.add_argument("--gpu", required=True, help="physical GPU subset, e.g. 2")
+    train.add_argument(
+        "--config-name",
+        choices=("round4_abde", "round4_ab"),
+        default="round4_abde",
+        help="training configuration; defaults to the completed R4-ABDE path",
+    )
     train.add_argument("--seed", type=int, default=3072)
     train.add_argument("--max-epochs", type=int)
     train.add_argument("--output-model-name")

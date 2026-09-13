@@ -24,6 +24,35 @@ class FakeTrainingModule:
 
 
 class Round4TrainingTests(unittest.TestCase):
+    def test_stage_ab_round4_model_trains_ab_without_de_outputs_or_gradients(self):
+        module = FakeTrainingModule()
+        batch = {
+            "pixels": torch.randn(2, 6, 3, 8, 8),
+            "action": torch.randn(2, 5, 4),
+        }
+
+        output = fast_lewam_forward(
+            module,
+            batch=batch,
+            stage="fit",
+            action_horizon=5,
+            train_mode="stage_ab",
+            lambda_latent=1.0,
+            lambda_sigreg=0.09,
+            lambda_d=0.0,
+            lambda_e=0.0,
+            detach_clean_action=False,
+            latent_loss_noise_threshold=0.2,
+            latent_action_mix_epochs=10,
+        )
+
+        self.assertIn("action_loss", output)
+        self.assertNotIn("d_loss", output)
+        self.assertNotIn("e_loss", output)
+        output["loss"].backward()
+        self.assertIsNone(module.model.d_velocity_head.weight.grad)
+        self.assertIsNone(module.model.inverse_dynamics_head.weight.grad)
+
     def test_weight_only_continuation_keeps_round4_epoch_schedule(self):
         module = FakeTrainingModule()
         module.current_epoch = 0
