@@ -12,7 +12,9 @@
 
 最终 cohort 已固定且可复现，但不是严格的 held-out 泛化集：它来自完整原始数据集，并使用现有 window-level 切分协议生成。本结果仅用于探索，不能证明加入 D/E 对 A/B 带来因果提升。
 
-Cube、Push-T、Reacher 的首轮训练曾中断。Cube 和 Push-T 从 epoch-9 权重快照继续，Reacher 从 epoch 8 继续。这些 continuation 只恢复模型权重并重新初始化 optimizer，不恢复 optimizer state。TwoRoom 直接完成原始训练。每个 run 目录均保留了这些来源信息。
+Cube、Push-T、Reacher 的首轮训练曾中断。Cube 和 Push-T 从 epoch-9 权重快照继续，Reacher 从 epoch 8 继续。
+
+这些 continuation 只恢复模型权重并重新初始化 optimizer，不恢复 optimizer state。TwoRoom 直接完成原始训练。每个 run 目录均保留了这些来源信息。
 
 ## R4 正式成功率（%）
 
@@ -36,13 +38,17 @@ Cube、Push-T、Reacher 的首轮训练曾中断。Cube 和 Push-T 从 epoch-9 �
 | Reacher | 74 | 86.5 | 68.5 | 85 | 78 |
 | TwoRoom | 94.5 | 97 | 98.5 | 99 | 99.5 |
 
-episode 配对比较位于两个结果目录的 `analysis.json` 以及跨目录的 P4/P2 artifact 中。在 final 上，batch64 P4 相对 P3 在 Cube、Push-T、Reacher、TwoRoom 上分别为 0.0、-7.0、-7.0、+0.5 个百分点。P4 相对 P2 分别为 +4.5、-3.5、+9.5、+1.0 个百分点。
+episode 配对比较位于两个结果目录的 `analysis.json` 以及跨目录的 P4/P2 artifact 中。
+
+在 final 上，batch64 P4 相对 P3 在 Cube、Push-T、Reacher、TwoRoom 上分别为 0.0、-7.0、-7.0、+0.5 个百分点。P4 相对 P2 分别为 +4.5、-3.5、+9.5、+1.0 个百分点。
 
 P4-first 可用于观察 verifier 的作用。相对于直接执行第一条候选，P4 在 dev 上的提升为：Cube 0 个百分点、Push-T 30 个百分点、Reacher 26 个百分点、TwoRoom 2 个百分点。
 
 ## 规划耗时与资源
 
-P3/P4 的 timing 保存在符合协议的 batch64 结果 payload 中。P1/P2 的 CEM timing 在不改变 solver 语义的前提下加入，并记录在最终的 `timed_peak` 附属结果中。开发集规划中位耗时如下，单位为秒：
+P3/P4 的 timing 保存在符合协议的 batch64 结果 payload 中。P1/P2 的 CEM timing 在不改变 solver 语义的前提下加入，并记录在最终的 `timed_peak` 附属结果中。
+
+开发集规划中位耗时如下，单位为秒：
 
 | 任务 | P1 CEM | P2 热启动 CEM | P3 action-64 | P4 latent-64 |
 |---|---:|---:|---:|---:|
@@ -94,7 +100,9 @@ Epoch-10 诊断指标（`loss`、`d_loss`、`d_path_variance`、`e_action_mse`�
 
 ## 离线 IDM/路径诊断
 
-`scripts/round4_offline_diagnostics.py` 对每个任务评估 16 个真实窗口，以及每个窗口的 8 条生成路径。下表依次为：真实路径上的 E action MSE、E 解码真实路径后的 B verifier MSE、生成路径上的 B validation MSE，以及生成终点 MSE（由 D 的 endpoint contract 固定为 0）：
+`scripts/round4_offline_diagnostics.py` 对每个任务评估 16 个真实窗口，以及每个窗口的 8 条生成路径。
+
+下表依次为：真实路径上的 E action MSE、E 解码真实路径后的 B verifier MSE、生成路径上的 B validation MSE，以及生成终点 MSE（由 D 的 endpoint contract 固定为 0）：
 
 | 任务 | 真实路径 E MSE | 解码动作 B MSE | 生成路径 B MSE | 终点 MSE |
 |---|---:|---:|---:|---:|
@@ -105,9 +113,67 @@ Epoch-10 诊断指标（`loss`、`d_loss`、`d_path_variance`、`e_action_mse`�
 
 这些诊断用于检查离线能力；P4 的实际选择仍然使用 B 对解码动作的评分，不使用被 D 固定的终点。
 
+## 结论与解释
+
+1. **本轮没有证明 latent best-of-N（P4）优于 action best-of-N（P3）。** Final 上，P4 相对 P3 在 Cube、Push-T、Reacher、TwoRoom 上分别为 0.0、-7.0、-7.0、+0.5 个百分点。
+
+   Dev 上分别为 0、-4、+6、0 个百分点。
+
+   Reacher 的 dev 改善没有延续到 final，Push-T 的下降则在两个 cohort 上都出现。
+
+2. **按本轮成功率，P3 是更稳妥的 learned planner。** Final P3 为 100%、96%、85%、99%，P2 为 95.5%、92.5%、68.5%、98.5%，P4 为 100%、89%、78%、99.5%。
+
+   P3 在四个任务上均不低于 P2，并在 Push-T、Reacher 上明显高于 P4；P4 仅在 TwoRoom 上比 P3 高 0.5 个百分点。
+
+   由于 P3/P2 的结果来自独立重复评测，不能把这些成功率差异解释为 episode-level 因果效应。
+
+3. **P4 相对 CEM warm-start（P2）的结果是任务依赖的。** Final P4-P2 为 Cube +4.5、Push-T -3.5、Reacher +9.5、TwoRoom +1.0 个百分点。
+
+   Reacher 的提升较明显，但不足以支持跨任务的普遍优势；Push-T 的回退也直接阻止了本轮扩展。
+
+4. **B verifier reranking 是 latent candidate 能否工作的关键步骤。** Dev 中，P4 相对直接执行第一条候选（P4-first）在 Push-T 和 Reacher 上分别提升 30 和 26 个百分点。
+
+   Cube 和 TwoRoom 只提升 0 和 2 个百分点。
+
+   因此，P4-first 不能替代 P4；候选质量与 verifier 选择必须分开分析。
+
+5. **best-of-64 的主要确定性优势是效率，而不是已验证的成功率提升。** Dev 中 P3/P4 的规划中位耗时为 0.360–0.919 秒，P1/P2 CEM 为 2.913–9.471 秒。
+
+   按对应任务和模式比较，best-of-64 约快 5.6–18.9 倍。P3/P4 不做 CEM 迭代，因此适合作为低延迟候选生成方案，但 P4 的 latent route 不能仅凭速度替代 P3。
+
+6. **D→E 的离线链路仍有明显的路径分布差距。** 真实路径上的 E action MSE 在 Cube/Push-T 为 0.0696/0.0630，在 Reacher/TwoRoom 升至 0.8149/0.7657。
+
+   生成路径的 B validation MSE 在四个任务上都高于 E 解码真实路径的 B MSE，分别为 0.0775>0.0103、0.1258>0.0322、0.1428>0.0219、0.2926>0.1160。
+
+   D 的终点 MSE 为零是 endpoint contract 的结果，不等于生成路径已经符合 verifier 或 IDM 的有效动作流形。
+
+7. **训练诊断不能替代闭环评测。** D path variance 在四个任务上都约为 0.63–0.66，说明 D 产生了非退化的噪声相关路径，但它与最终 P4 成功率没有显示出足够的跨任务对应关系。
+
+   当前最可靠的判断仍是固定 cohort 上的闭环成功率、配对结果和规划耗时。
+
+8. **P3 接近历史 LeFlow 参考水平，但该比较不具备同 checkpoint 的因果意义。** P3 final 相对历史 LeFlow final 在 Cube、Push-T、Reacher、TwoRoom 上分别为 0、0、+1.5、-1.0 个百分点。
+
+   P4 则为 0、-7、-5.5、-0.5 个百分点。
+
+   该结果支持继续研究 action candidate，但不能据此宣称 R4-ABDE 复现或超越 LeFlow。
+
+综合来看，本轮支持的结论是：**Shared DiT 可以同时完成 A/B/D/E 的探索性训练。**
+
+P3 action best-of-64 是当前更可靠的低延迟规划候选；P4 latent best-of-64 尚未显示跨任务收益，D/E 的路径—动作接口和 verifier 一致性仍是主要风险。
+
+单 seed、权重-only continuation、非严格 held-out cohort 以及缺少 R4-AB 对照，均限制了因果和稳定性结论。
+
+若继续实验，优先级应为：先做匹配训练的 R4-AB 对照以隔离 D/E 的影响，再针对 D/E 路径分布差距评估独立 D/E 或 Flow-IDM。
+
+latent-space CEM、online+D/E 和架构搜索不应在当前证据不足时提前展开。
+
 ## 扩展决策
 
-预注册的 epoch-10 dev gate 为 `expand=false`，因此不运行 seed 3073 和 3074。该 gate 未通过：相对于 P3，只有 Reacher 提升超过 5 个百分点，同时 Push-T 出现下降；相对于 P2，Reacher 提升，但 Push-T 下降 6 个百分点。效率 gate 同样要求任何任务下降不超过 2 个百分点，Push-T 不满足该条件。
+预注册的 epoch-10 dev gate 为 `expand=false`，因此不运行 seed 3073 和 3074。
+
+该 gate 未通过：相对于 P3，只有 Reacher 提升超过 5 个百分点，同时 Push-T 出现下降。
+
+相对于 P2，Reacher 提升，但 Push-T 下降 6 个百分点。效率 gate 同样要求任何任务下降不超过 2 个百分点，Push-T 不满足该条件。
 
 决策 artifact：`outputs/round4/epoch10_seed3072/expansion_decision.json`。
 
