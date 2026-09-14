@@ -164,6 +164,40 @@ ABDE 在 P1/P2 上的平均成功率较高，但 P0 final 下降，P3 final 持�
 
 当前 seed 3072 的闭环结果没有显示 D/E 辅助训练给 P3 带来收益。这个结果支持继续使用 P3，并把 R4-AB 作为更简洁的训练方案；单个训练 seed 不能证明两种训练方式稳定等价。
 
+### P1 与 Round3 E0 LeWM 基线
+
+Round3 Phase 1 已经提供了使用同一 `round3_revised` cohort 的 E0 LeWM Stage-B/CEM 结果。
+
+E0 与 R4-P1 均使用 300 samples、topk=30、30 次 CEM 迭代、`var_scale=1.0` 和评测 seed=42。下表差值为对应 R4 结果减 E0，单位为百分点。
+
+#### 开发集（Dev）
+
+| 任务 | E0 | R4-AB | AB−E0 | R4-ABDE | ABDE−E0 |
+|---|---:|---:|---:|---:|---:|
+| Cube | 54 | 40 | -14 | 58 | +4 |
+| Push-T | 96 | 90 | -6 | 94 | -2 |
+| Reacher | 82 | 74 | -8 | 86 | +4 |
+| TwoRoom | 90 | 98 | +8 | 100 | +10 |
+| 四任务平均 | 80.5 | 75.5 | -5.0 | 84.5 | +4.0 |
+
+#### 最终集（Final）
+
+| 任务 | E0 | R4-AB | AB−E0 | R4-ABDE | ABDE−E0 |
+|---|---:|---:|---:|---:|---:|
+| Cube | 48 | 49 | +1 | 59.5 | +11.5 |
+| Push-T | 93 | 86 | -7 | 86 | -7 |
+| Reacher | 84.5 | 86 | +1.5 | 86.5 | +2 |
+| TwoRoom | 84.5 | 98.5 | +14 | 97 | +12.5 |
+| 四任务平均 | 77.5 | 79.875 | +2.375 | 82.25 | +4.75 |
+
+相对 E0，R4-ABDE 的 P1 宏平均在 dev 上高 4 个百分点、final 上高 4.75 个百分点。
+
+R4-AB 则分别低 5 个百分点和高 2.375 个百分点。ABDE 的优势主要来自 Cube 和 Reacher，Push-T final 低于 E0，TwoRoom 的 R4 优势在 AB 与 ABDE 中都存在。
+
+这些是同一 cohort 和相同 CEM 配置下的闭环参考，但不是纯粹的训练损失因果对照。
+
+E0 是原始 LeWM 模型，R4-AB/ABDE 是新的 Shared DiT 结构，且 R4-ABDE 的部分任务来自 continuation。结果应解释为协议对齐后的基线比较。
+
 本比较的完整配对结果位于 `outputs/round4/ab_vs_abde/analysis.json`，配置登记位于 `config/round4/ab_control.json`，详细对照报告位于 `docs/plan/round4_ab_vs_abde_report.md`。
 
 R4-ABDE 的 Cube、Push-T、Reacher 首轮训练曾中断并进行了权重-only continuation，因此这里是描述性对照，不能作为严格的训练因果证明。
