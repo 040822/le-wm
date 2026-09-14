@@ -147,6 +147,7 @@ def command_evaluate(args: argparse.Namespace) -> None:
         trace=True,
         candidate_count=int(args.candidate_count),
         flow_steps=int(args.flow_steps),
+        action_flow_steps=args.action_flow_steps,
         solver_batch_size=int(args.solver_batch_size),
         candidate_batch_size=args.candidate_batch_size,
     )
@@ -310,6 +311,11 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--output", default=str(DEFAULT_OUTPUT))
     evaluate.add_argument("--candidate-count", type=int, default=64)
     evaluate.add_argument("--flow-steps", type=int, default=16)
+    evaluate.add_argument(
+        "--action-flow-steps",
+        type=int,
+        help="override Stage-A action flow steps for P0/P2/P3; P1 is invariant",
+    )
     evaluate.add_argument("--solver-batch-size", type=int, default=1)
     evaluate.add_argument("--candidate-batch-size", type=int)
     evaluate.set_defaults(function=command_evaluate)

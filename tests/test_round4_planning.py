@@ -6,12 +6,81 @@ import torch
 
 from source.policy.round4 import (
     Round4BestOfNPolicy,
+    make_round4_policy,
     score_candidates_in_chunks,
 )
+from omegaconf import OmegaConf
 from tests.test_round4_model import make_round4_model
 
 
 class Round4PlanningTests(unittest.TestCase):
+    def test_action_flow_steps_override_reaches_p0_p2_and_p3(self):
+        model = make_round4_model().eval()
+        plan_config = {
+            "horizon": 5,
+            "receding_horizon": 5,
+            "action_block": 1,
+        }
+
+        p0 = make_round4_policy(
+            model,
+            mode="P0",
+            plan_config=plan_config,
+            device="cpu",
+            action_flow_steps=3,
+        )
+        self.assertEqual(p0.inference_steps, 3)
+
+        solver_cfg = OmegaConf.create(
+            {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "model": "???",
+                "batch_size": 1,
+                "num_samples": 2,
+                "n_steps": 1,
+                "topk": 1,
+                "var_scale": 1.0,
+                "device": "cpu",
+            }
+        )
+        p2 = make_round4_policy(
+            model,
+            mode="P2",
+            solver_cfg=solver_cfg,
+            plan_config=plan_config,
+            device="cpu",
+            action_flow_steps=3,
+        )
+        self.assertEqual(p2.solver.model.inference_steps, 3)
+
+        p3 = make_round4_policy(
+            model,
+            mode="P3",
+            plan_config=plan_config,
+            device="cpu",
+            flow_steps=16,
+            action_flow_steps=3,
+        )
+        self.assertEqual(p3.flow_steps, 3)
+        self.assertEqual(p3.action_flow_steps, 3)
+
+    def test_action_flow_steps_defaults_preserve_canonical_round4_values(self):
+        model = make_round4_model().eval()
+        plan_config = {
+            "horizon": 5,
+            "receding_horizon": 5,
+            "action_block": 1,
+        }
+        p0 = make_round4_policy(
+            model, mode="P0", plan_config=plan_config, device="cpu"
+        )
+        p3 = make_round4_policy(
+            model, mode="P3", plan_config=plan_config, device="cpu"
+        )
+        self.assertEqual(p0.inference_steps, 16)
+        self.assertEqual(p3.flow_steps, 16)
+        self.assertEqual(p3.action_flow_steps, 16)
+
     def test_candidate_split_does_not_change_verifier_argmin(self):
         model = make_round4_model().eval()
         policy = Round4BestOfNPolicy(

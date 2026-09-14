@@ -45,6 +45,21 @@ class Round4ProtocolTests(unittest.TestCase):
     def test_cli_exposes_independent_modes_and_requires_explicit_gpu_for_training(self):
         parsed = build_parser().parse_args(["evaluate", "cube", "P4", "--cohort", "c", "--checkpoint", "p"])
         self.assertEqual(parsed.mode, "P4")
+        self.assertIsNone(parsed.action_flow_steps)
+        parsed_steps = build_parser().parse_args(
+            [
+                "evaluate",
+                "cube",
+                "P3",
+                "--cohort",
+                "c",
+                "--checkpoint",
+                "p",
+                "--action-flow-steps",
+                "2",
+            ]
+        )
+        self.assertEqual(parsed_steps.action_flow_steps, 2)
         train = build_parser().parse_args(["train", "cube", "--gpu", "2", "--dry-run"])
         self.assertEqual(train.gpu, "2")
         ab_train = build_parser().parse_args(

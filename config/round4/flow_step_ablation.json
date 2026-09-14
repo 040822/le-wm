@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "experiment": "R4-AB-FM-step-ablation",
+  "description": "Inference-only action flow-step sweep using the R4-AB epoch-10 checkpoints.",
+  "protocol": "round3_revised",
+  "training": {
+    "model": "R4-AB",
+    "seed": 3072,
+    "checkpoint_epoch": 10,
+    "retrain": false,
+    "checkpoint_pattern": "outputs/round4/ab_seed3072_<task>/checkpoints/r4_ab_seed3072_weights_epoch_10.pt"
+  },
+  "tasks": ["cube", "pusht", "reacher", "tworoom"],
+  "action_modes": ["P0", "P2", "P3"],
+  "invariant_modes": ["P1"],
+  "action_flow_steps": [1, 2, 5, 10, 16],
+  "canonical_step": 16,
+  "evaluation": {
+    "seed": 42,
+    "dev_episodes": 50,
+    "final_episodes": 200,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "p3_candidate_count": 64,
+    "p3_solver_batch_size": 1,
+    "p3_candidate_batch_size": 64,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0
+  },
+  "output_root": "outputs/round4/ab_flow_steps_seed3072",
+  "gpu_policy": "Only physical GPU0, GPU1, GPU2, and GPU3 may be used; every CUDA command sets CUDA_VISIBLE_DEVICES explicitly."
+}

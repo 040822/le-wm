@@ -109,7 +109,9 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         self.proposal_source = proposal_source
         self.num_candidates = int(num_candidates)
         self.flow_steps = int(flow_steps)
-        self.action_flow_steps = int(action_flow_steps or flow_steps)
+        self.action_flow_steps = int(
+            flow_steps if action_flow_steps is None else action_flow_steps
+        )
         self.action_block = int(action_block)
         self.receding_horizon_blocks = int(receding_horizon_blocks)
         self.solver_batch_size = int(solver_batch_size)
@@ -350,12 +352,20 @@ def make_round4_policy(
     seed: int = 42,
     candidate_count: int = 64,
     flow_steps: int = 16,
+    action_flow_steps: int | None = None,
     solver_batch_size: int = 1,
     candidate_batch_size: int | None = None,
 ):
     """Build one of the frozen Round 4 P0--P4 policy variants."""
     if mode not in ROUND4_MODES:
         raise ValueError(f"unknown Round 4 mode {mode!r}; expected {ROUND4_MODES}")
+    if action_flow_steps is not None and int(action_flow_steps) < 1:
+        raise ValueError("action_flow_steps must be positive")
+    if mode in {"P4", "P4-first"} and action_flow_steps is not None:
+        raise ValueError("action_flow_steps is only valid for action proposals")
+    resolved_action_flow_steps = (
+        None if action_flow_steps is None else int(action_flow_steps)
+    )
     if mode == "P0":
         return make_fast_lewam_policy(
             policy_or_model,
@@ -365,7 +375,11 @@ def make_round4_policy(
             transform=transform or {},
             device=device,
             mode="stage_a",
-            inference_steps=16,
+            inference_steps=(
+                16
+                if resolved_action_flow_steps is None
+                else resolved_action_flow_steps
+            ),
             seed=seed,
         )
     if mode == "P0-shuf":
@@ -377,7 +391,11 @@ def make_round4_policy(
             transform=transform or {},
             device=device,
             mode="stage_a",
-            inference_steps=16,
+            inference_steps=(
+                16
+                if resolved_action_flow_steps is None
+                else resolved_action_flow_steps
+            ),
             seed=seed,
             goal_mode="cyclic_shift",
         )
@@ -390,7 +408,15 @@ def make_round4_policy(
             transform=transform or {},
             device=device,
             mode="stage_b",
-            inference_steps=10 if mode == "P2" else None,
+            inference_steps=(
+                None
+                if mode == "P1"
+                else (
+                    10
+                    if resolved_action_flow_steps is None
+                    else resolved_action_flow_steps
+                )
+            ),
             seed=seed,
             actor_warm_start=mode == "P2",
         )
@@ -403,12 +429,17 @@ def make_round4_policy(
             return plan_values[name]
         return getattr(plan_values, name)
 
+    proposal_flow_steps = (
+        int(flow_steps)
+        if resolved_action_flow_steps is None
+        else resolved_action_flow_steps
+    )
     return Round4BestOfNPolicy(
         model,
         proposal_source="action" if mode == "P3" else "latent",
         num_candidates=candidate_count,
-        flow_steps=flow_steps,
-        action_flow_steps=flow_steps,
+        flow_steps=proposal_flow_steps if mode == "P3" else flow_steps,
+        action_flow_steps=proposal_flow_steps if mode == "P3" else None,
         action_block=int(plan_value("action_block")),
         receding_horizon_blocks=int(plan_value("receding_horizon")),
         solver_batch_size=solver_batch_size,

@@ -211,6 +211,7 @@ def run_round4_evaluation(
     trace: bool = True,
     candidate_count: int = 64,
     flow_steps: int = 16,
+    action_flow_steps: int | None = None,
     solver_batch_size: int = 1,
     candidate_batch_size: int | None = None,
 ) -> dict[str, Any]:
@@ -219,13 +220,21 @@ def run_round4_evaluation(
     device = str(device or cfg.get("solver", {}).get("device", "cuda"))
     validate_gpu_visibility(device)
     validate_round4_config(cfg, mode)
+    if action_flow_steps is not None and int(action_flow_steps) < 1:
+        raise ValueError("action_flow_steps must be positive")
     if mode in {"P0-shuf", "P4-first"} and manifest.cohort_kind == "final":
         raise ValueError(f"{mode} is a development-only Round 4 diagnostic")
     if mode in {"P3", "P4", "P4-first"}:
         if int(candidate_count) != int(ROUND4_DEFAULTS["best_of_n"]["num_candidates"]):
             raise ValueError("Round 4 best-of-N candidate count is frozen at 64")
-        if int(flow_steps) != int(ROUND4_DEFAULTS["best_of_n"]["flow_steps"]):
+        if mode in {"P4", "P4-first"} and int(flow_steps) != int(
+            ROUND4_DEFAULTS["best_of_n"]["flow_steps"]
+        ):
             raise ValueError("Round 4 best-of-N flow steps are frozen at 16")
+        if mode == "P3" and action_flow_steps is None and int(flow_steps) != int(
+            ROUND4_DEFAULTS["best_of_n"]["flow_steps"]
+        ):
+            raise ValueError("Round 4 P3 action flow steps are frozen at 16")
     validate_cohort_manifest(
         manifest, task=task, expected_count=int(cfg.eval.num_eval)
     )
@@ -258,6 +267,7 @@ def run_round4_evaluation(
         seed=int(cfg.seed),
         candidate_count=candidate_count,
         flow_steps=flow_steps,
+        action_flow_steps=action_flow_steps,
         solver_batch_size=solver_batch_size,
         candidate_batch_size=candidate_batch_size,
     )
@@ -348,6 +358,18 @@ def run_round4_evaluation(
     planning = _planning_summary(policy)
     policy_meta = dict(spec)
     policy_meta.update(getattr(policy, "metadata", lambda: {})())
+    if mode in {"P0", "P0-shuf"}:
+        policy_meta["action_flow_steps"] = int(
+            16 if action_flow_steps is None else action_flow_steps
+        )
+    elif mode == "P2":
+        actor_steps = int(10 if action_flow_steps is None else action_flow_steps)
+        policy_meta["action_flow_steps"] = actor_steps
+        policy_meta["actor_flow_steps"] = actor_steps
+    elif mode == "P3":
+        policy_meta["action_flow_steps"] = int(
+            16 if action_flow_steps is None else action_flow_steps
+        )
     policy_meta.update(planning)
     for record in records:
         record.setdefault("planning", dict(policy_meta))
@@ -377,6 +399,7 @@ def run_round4_evaluation(
                 else None
             ),
             "solver_batch_size": int(solver_batch_size),
+            "action_flow_steps": policy_meta.get("action_flow_steps"),
         },
         "evaluation_seconds": float(elapsed),
         "success_rate": float(successes.mean()),
