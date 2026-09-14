@@ -1,0 +1,41 @@
+{
+  "protocol": "round3_revised",
+  "comparison": "R4-AB_vs_R4-ABDE",
+  "baseline": {
+    "model": "R4-AB",
+    "train_mode": "stage_ab",
+    "architecture": "Round4FastLeWAM",
+    "d_loss_weight": 0.0,
+    "e_loss_weight": 0.0,
+    "seed": 3072,
+    "epochs": 10,
+    "output_root": "outputs/round4/ab_seed3072"
+  },
+  "treatment": {
+    "model": "R4-ABDE",
+    "train_mode": "stage_abde",
+    "seed": 3072,
+    "epochs": 10,
+    "output_root": "outputs/round4/epoch10_seed3072"
+  },
+  "tasks": ["cube", "pusht", "reacher", "tworoom"],
+  "primary_mode": "P3",
+  "secondary_modes": ["P0", "P1", "P2"],
+  "diagnostic_modes": ["P0-shuf"],
+  "evaluation": {
+    "dev_episodes": 50,
+    "final_episodes": 200,
+    "seed": 42,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "p3_candidate_count": 64,
+    "p3_flow_steps": 16,
+    "p3_solver_batch_size": 1,
+    "p3_candidate_batch_size": 64
+  },
+  "comparison_artifacts": "outputs/round4/ab_vs_abde",
+  "p4_status": "not_run_for_R4_AB_because_D_and_E_are_untrained"
+}

@@ -113,6 +113,46 @@ Epoch-10 诊断指标（`loss`、`d_loss`、`d_path_variance`、`e_action_mse`�
 
 这些诊断用于检查离线能力；P4 的实际选择仍然使用 B 对解码动作的评分，不使用被 D 固定的终点。
 
+## R4-AB 与 R4-ABDE 对照
+
+R4-AB 保留完整 `Round4FastLeWAM` 结构，只训练 A/B，D/E loss 权重为 0。四个任务均从头训练 seed 3072、10 个 epoch。R4-ABDE 使用本报告已有的 epoch-10 结果作为固定对照。
+
+两组使用相同的 `round3_revised` cohort。主指标是 P3；P0、P1、P2 用于辅助定位 A/B 变化。R4-AB 不运行 P4/P4-first，因为其 D/E 参数没有训练。
+
+### P3 主结果
+
+| cohort | 任务 | R4-AB | R4-ABDE | ABDE−AB（百分点） | 配对改进/退化 |
+|---|---|---:|---:|---:|---:|
+| dev | Cube | 100 | 100 | 0 | 0/0 |
+| dev | Push-T | 96 | 94 | -2 | 1/2 |
+| dev | Reacher | 86 | 78 | -8 | 5/9 |
+| dev | TwoRoom | 100 | 98 | -2 | 0/1 |
+| dev 平均 | — | 95.5 | 92.5 | -3.0 | — |
+| final | Cube | 100 | 100 | 0 | 0/0 |
+| final | Push-T | 96 | 96 | 0 | 4/4 |
+| final | Reacher | 84.5 | 85 | +0.5 | 23/22 |
+| final | TwoRoom | 99.5 | 99 | -0.5 | 1/2 |
+| final 平均 | — | 95.0 | 95.0 | 0.0 | — |
+
+Final 上，ABDE 没有提高 P3 的宏平均成功率。逐任务差异也只有 Reacher 的 +0.5 个百分点，TwoRoom 反而下降 0.5 个百分点。Dev 上 ABDE 低于 AB 3 个百分点，主要来自 Reacher 和 Push-T。
+
+### P0–P2 辅助结果
+
+| 模式 | Dev R4-AB | Dev R4-ABDE | Dev 差值 | Final R4-AB | Final R4-ABDE | Final 差值 |
+|---|---:|---:|---:|---:|---:|---:|
+| P0 | 89.5 | 90.5 | +1.0 | 90.875 | 89.5 | -1.375 |
+| P1 | 75.5 | 84.5 | +9.0 | 79.875 | 82.25 | +2.375 |
+| P2 | 87.5 | 90.0 | +2.5 | 88.25 | 88.75 | +0.5 |
+| P3 | 95.5 | 92.5 | -3.0 | 95.0 | 95.0 | 0.0 |
+
+ABDE 在 P1/P2 上的平均成功率较高，但 P0 final 下降，P3 final 持平。因此，D/E 联合训练对 A/B 的影响并不表现为所有推理模式都一致改善。
+
+当前 seed 3072 的闭环结果没有显示 D/E 辅助训练给 P3 带来收益。这个结果支持继续使用 P3，并把 R4-AB 作为更简洁的训练方案；单个训练 seed 不能证明两种训练方式稳定等价。
+
+本比较的完整配对结果位于 `outputs/round4/ab_vs_abde/analysis.json`，配置登记位于 `config/round4/ab_control.json`，详细对照报告位于 `docs/plan/round4_ab_vs_abde_report.md`。
+
+R4-ABDE 的 Cube、Push-T、Reacher 首轮训练曾中断并进行了权重-only continuation，因此这里是描述性对照，不能作为严格的训练因果证明。
+
 ## 结论与解释
 
 1. **本轮没有证明 latent best-of-N（P4）优于 action best-of-N（P3）。** Final 上，P4 相对 P3 在 Cube、Push-T、Reacher、TwoRoom 上分别为 0.0、-7.0、-7.0、+0.5 个百分点。
@@ -161,9 +201,9 @@ Epoch-10 诊断指标（`loss`、`d_loss`、`d_path_variance`、`e_action_mse`�
 
 P3 action best-of-64 是当前更可靠的低延迟规划候选；P4 latent best-of-64 尚未显示跨任务收益，D/E 的路径—动作接口和 verifier 一致性仍是主要风险。
 
-单 seed、权重-only continuation、非严格 held-out cohort 以及缺少 R4-AB 对照，均限制了因果和稳定性结论。
+单 seed、R4-ABDE 的权重-only continuation、非严格 held-out cohort 以及两组训练随机过程不完全 bitwise 对齐，均限制了因果和稳定性结论。
 
-若继续实验，优先级应为：先做匹配训练的 R4-AB 对照以隔离 D/E 的影响，再针对 D/E 路径分布差距评估独立 D/E 或 Flow-IDM。
+如果需要更强的稳定性证据，应补跑多个训练 seed，并让 AB 与 ABDE 都使用连续、匹配的 optimizer 状态。当前结果已经足够支持 P3 作为主要推理方法。
 
 latent-space CEM、online+D/E 和架构搜索不应在当前证据不足时提前展开。
 
@@ -191,11 +231,13 @@ latent-space CEM、online+D/E 和架构搜索不应在当前证据不足时提�
 - LeFlow artifact manifest 校验：四个任务均通过。
 - Cohort 文件 SHA256：与 `config/round4/cohort_artifacts.json` 一致。
 - batch64 P3/P4/P4-first 协议结果：20/20 个结果 artifact 存在且有效。
+- R4-AB 结果：36/36 个 P0–P3/P0-shuf result artifact 存在且有效。
+- R4-AB/ABDE 对照：32 行主比较结果及配对统计已生成。
 - CEM 计时资源附属结果：16/16 个结果 artifact 存在，并包含 p95、forward count 和峰值显存字段。
 - 离线 IDM/路径诊断：四个任务全部完成。
 - Round 4 定向测试：通过，覆盖 mode/mask、梯度、checkpoint 往返、候选拆分、timing wrapper 和 continuation 行为。
-- 全量 unittest：287 个测试，1 个跳过，2 个失败。两个失败均是既有的 `test_inspect_h5_dataset.py` 对 episode-length 文本的期望，而当前 inspector 不输出该文本；Round 4 测试没有失败。
+- 全量 unittest：292 个测试，1 个跳过，2 个失败。两个失败均是既有的 `test_inspect_h5_dataset.py` 对 episode-length 文本的期望，而当前 inspector 不输出该文本；Round 4 测试没有失败。
 
 ## 延后实验
 
-以下实验不属于本轮：R4-AB、独立 D/E 模型、Flow-IDM、latent-space CEM、新 Stage C、consistency/cycle loss、online+D/E，以及 token/DiT 架构搜索。
+以下实验仍不属于本轮：独立 D/E 模型、Flow-IDM、latent-space CEM、新 Stage C、consistency/cycle loss、online+D/E，以及 token/DiT 架构搜索。
