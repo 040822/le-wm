@@ -85,9 +85,42 @@ E2 的完整报告：
 
 相关提交为 `9e0cdd2` 和 `9a5131e`。
 
+## guidance 决策记录（2026-09-16）
+
+用户已确认按本报告的推荐方案进入下一轮：
+
+- Reacher：`post_opt`；
+- Push-T：`guided_flow`；
+- T0–T6 全部保留；
+- 首轮预算保持 200 次 optimizer update，是否延长由曲线结果决定。
+
+E1 的原始 `.pt` replay 已在 report/manifest 完成核验后临时归档到
+`/tmp/round3_e1_artifacts_20260916/`，原 `outputs` 路径保留 symlink；E1 report
+和 group manifest 未移动。
+
+## 阶段二执行记录（2026-09-16，进行中）
+
+已按上述选择启动两个任务的 fixed replay 构造，并显式限制为允许的设备：
+Reacher 使用物理 GPU0，Push-T 使用物理 GPU1。两项任务都复用已经生成并校验过的
+offline replay；fixed replay 的临时根目录为
+`/tmp/round3_online_supervision/{reacher,pusht}/fixed_replay_v1/`，workspace 下对应
+路径保留 symlink，以避免再次占满 `/data`。
+
+首次连续采集尝试在第一个 continuous action 前暴露了 Stage-B guidance 与安装版
+CEM solver 的 `inference_mode` 冲突：CEM 的 actor warm-start 调用被包在
+`inference_mode` 中，导致 `post_opt`/`guided_flow` 无法建立对 action 的 latent-cost
+梯度。该次尝试没有产生 continuous 或 grounded 结果，但 offline replay 已完整保留。
+
+修复为在 `ActorWarmStartModelView` 的 guidance actor 调用处局部退出
+`inference_mode` 并显式开启 autograd；CEM 候选评分路径未改变。新增的 smoke test
+已同时覆盖 `post_opt` 和 `guided_flow`，并验证两者均实际产生 backward。随后用
+`--resume` 从既有 offline replay 重新启动 continuous collection；截至本记录时
+两个进程仍在运行，尚未生成 continuous/grounded/fixed-replay 汇总，因此尚未启动
+T0–T6 训练，也没有 success-rate 曲线或 final-200 结果可报告。
+
 ## 下一轮：固定 replay 与 200 optimizer updates
 
-下一轮在你确认 guidance 后，按任务分别执行：
+下一轮按已确认的 guidance，按任务分别执行：
 
 1. 用选定的 collector 构造每任务一份不可变 fixed replay：
    `16,000 continuous + 4,000 grounded` 原始环境步；
@@ -104,19 +137,15 @@ E2 的完整报告：
 200 update 仍是首轮筛选预算，不代表收敛。曲线在 200 update 仍明显上升时，是否
 延长到 500/1000 update，由用户根据结果决定。
 
-## 需要用户决定的内容
+## 后续仍需用户决定的内容
 
-当前只需要先确认两个任务的 guidance collector：
-
-- Reacher：是否采用 `post_opt`；若不通过，则使用未引导的 A+B（`guidance_mode=none`）；
-- Push-T：是否采用 `guided_flow`；也可以选择 `post_opt`，若不通过则使用未引导
-  的 A+B（`guidance_mode=none`）。
-
-下一轮 fixed-replay 训练完成后，再由用户决定：
+本轮 guidance gate 已完成，不再等待 collector 选择。下一轮 fixed-replay 训练
+完成后，再由用户决定：
 
 - 哪些 T3/T5/T6 结果进入阶段三 closed-loop；
 - 是否启动阶段三的 20k-env-step closed-loop 复验；
 - 是否延长固定 replay 或 closed-loop 到 500/1000 update；
 - 是否另行启动 R4-AB。R4-AB 不会自动启动。
 
-在用户确认前，不会根据 E2 的最高分自动选择 collector，也不会生成训练曲线。
+阶段二训练已按上述选择启动后，曲线结果仍只作为参考；不会自动根据某个分数
+推进阶段三、延长训练或启动 R4-AB。

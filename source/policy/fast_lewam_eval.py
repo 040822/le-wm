@@ -465,30 +465,40 @@ class ActorWarmStartModelView(StageBModelView):
             key: value.to(device) if torch.is_tensor(value) else value
             for key, value in info.items()
         }
-        current = self.model._last_frame(device_info["pixels"])
-        goal = self.model._last_frame(device_info["goal"])
-        z0 = self.model.encode_pixels(current)
-        goal_latent = self.model.encode_pixels(goal)
 
-        info[_STAGE_B_Z0] = z0
-        info[_STAGE_B_GOAL] = goal_latent
-        info[_STAGE_B_CONTEXT_PIXELS] = current.detach().clone()
-        info[_STAGE_B_CONTEXT_GOAL] = goal.detach().clone()
-        actions = self.model.get_action_from_latents(
-            z0,
-            goal_latent,
-            horizon=horizon,
-            prefix_actions=prefix_actions,
-            generator=self._generator(device),
-            num_steps=self.inference_steps,
-            integrator=self.integrator,
-            guidance_mode=self.guidance_mode,
-            guidance_step_size=self.guidance_step_size,
-            guidance_last_steps=self.guidance_last_steps,
-            guidance_inner_steps=self.guidance_inner_steps,
-            guidance_max_rms_offset=self.guidance_max_rms_offset,
-        )
-        return self._project_actions(actions * self.action_scale)
+        def sample_actor():
+            current = self.model._last_frame(device_info["pixels"])
+            goal = self.model._last_frame(device_info["goal"])
+            z0 = self.model.encode_pixels(current)
+            goal_latent = self.model.encode_pixels(goal)
+
+            info[_STAGE_B_Z0] = z0
+            info[_STAGE_B_GOAL] = goal_latent
+            info[_STAGE_B_CONTEXT_PIXELS] = current.detach().clone()
+            info[_STAGE_B_CONTEXT_GOAL] = goal.detach().clone()
+            actions = self.model.get_action_from_latents(
+                z0,
+                goal_latent,
+                horizon=horizon,
+                prefix_actions=prefix_actions,
+                generator=self._generator(device),
+                num_steps=self.inference_steps,
+                integrator=self.integrator,
+                guidance_mode=self.guidance_mode,
+                guidance_step_size=self.guidance_step_size,
+                guidance_last_steps=self.guidance_last_steps,
+                guidance_inner_steps=self.guidance_inner_steps,
+                guidance_max_rms_offset=self.guidance_max_rms_offset,
+            )
+            return self._project_actions(actions * self.action_scale)
+
+        if self.guidance_mode == "none":
+            return sample_actor()
+        # CEMSolver.solve is wrapped in inference_mode. Guidance needs a real
+        # autograd graph for d(latent_cost)/d(action), so explicitly leave that
+        # mode for the actor warm-start call only.
+        with torch.inference_mode(False), torch.enable_grad():
+            return sample_actor()
 
 
 

@@ -102,6 +102,41 @@ class FastLeWAMSolverSmokeTests(unittest.TestCase):
 
         self.assertEqual(sum(encoded_images), 4)
 
+    def test_guided_actor_warm_start_runs_outside_inference_mode(self):
+        info = {
+            "pixels": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+            "goal": np.random.randn(2, 1, 3, 8, 8).astype(np.float32),
+        }
+        for guidance_mode in ("post_opt", "guided_flow"):
+            model = make_model(stage_a_goal_injection="token").eval()
+            policy = make_fast_lewam_policy(
+                model,
+                solver_cfg=solver_config(),
+                plan_config={
+                    "horizon": 3,
+                    "receding_horizon": 1,
+                    "action_block": 2,
+                    "warm_start": False,
+                },
+                process={},
+                transform={},
+                device="cpu",
+                mode="stage_b",
+                actor_warm_start=True,
+                inference_steps=1,
+                seed=31,
+                guidance_mode=guidance_mode,
+                guidance_last_steps=1,
+                guidance_inner_steps=1,
+            )
+            policy.set_env(FakeVectorEnv())
+
+            action = policy.get_action(info)
+
+            self.assertEqual(action.shape, (2, 2))
+            self.assertTrue(np.isfinite(action).all())
+            self.assertGreater(model.last_guidance_stats["backward_count"], 0)
+
     def test_existing_cem_world_policy_executes_stage_b_cost(self):
         policy = make_fast_lewam_policy(
             make_model().eval(),
