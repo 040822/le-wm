@@ -580,11 +580,15 @@ class FastLeWAM(nn.Module):
         generator=None,
         task_condition=None,
         goal_latent=None,
+        integrator="euler",
     ):
-        """从噪声出发，用固定步长显式 Euler 积分生成归一化动作 chunk。"""
+        """从噪声出发，用 Euler 或 Heun 积分生成归一化动作 chunk。"""
         steps = self.inference_steps if num_steps is None else num_steps
         if steps < 1:
             raise ValueError("num_steps must be positive")
+        integrator = str(integrator).lower()
+        if integrator not in {"euler", "heun"}:
+            raise ValueError("integrator must be 'euler' or 'heun'")
         actions = self._initial_noise(z0, noise, generator)
         dt = 1.0 / steps
         for step in range(steps):
@@ -597,7 +601,20 @@ class FastLeWAM(nn.Module):
                 task_condition=task_condition,
                 goal_latent=goal_latent,
             )["action_velocity"]
-            actions = actions + dt * velocity
+            if integrator == "euler":
+                actions = actions + dt * velocity
+                continue
+            predictor = actions + dt * velocity
+            next_timestep = z0.new_full((z0.shape[0],), (step + 1) / steps)
+            next_velocity = self(
+                z0,
+                predictor,
+                next_timestep,
+                mode=mode,
+                task_condition=task_condition,
+                goal_latent=goal_latent,
+            )["action_velocity"]
+            actions = actions + 0.5 * dt * (velocity + next_velocity)
         return actions
 
     @torch.no_grad()
@@ -610,6 +627,7 @@ class FastLeWAM(nn.Module):
         generator=None,
         task_condition=None,
         goal_latent=None,
+        integrator="euler",
     ):
         """只运行 Stage A flow，采样一整段归一化动作 chunk。"""
         return self._euler_sample(
@@ -620,6 +638,7 @@ class FastLeWAM(nn.Module):
             generator=generator,
             task_condition=task_condition,
             goal_latent=goal_latent,
+            integrator=integrator,
         )
 
     @torch.no_grad()
@@ -631,6 +650,7 @@ class FastLeWAM(nn.Module):
         num_steps=None,
         generator=None,
         task_condition=None,
+        integrator="euler",
     ):
         """用 Stage C 采样动作，并在 clean endpoint 读取并行 latent query。"""
         actions = self._euler_sample(
@@ -640,6 +660,7 @@ class FastLeWAM(nn.Module):
             num_steps=num_steps,
             generator=generator,
             task_condition=task_condition,
+            integrator=integrator,
         )
         endpoint = self(
             z0,
@@ -666,6 +687,7 @@ class FastLeWAM(nn.Module):
         *,
         generator=None,
         num_steps=None,
+        integrator="euler",
     ):
         """Generate an actor warm start from an encoded planning context."""
         if not 1 <= horizon <= self.action_horizon:
@@ -699,6 +721,7 @@ class FastLeWAM(nn.Module):
             generator=generator,
             num_steps=num_steps,
             goal_latent=goal_latent,
+            integrator=integrator,
         )[:, :horizon]
 
     def get_action(
@@ -709,6 +732,7 @@ class FastLeWAM(nn.Module):
         *,
         generator=None,
         num_steps=None,
+        integrator="euler",
     ):
         """Implement the Actionable interface from raw current/goal images."""
         z0 = self.encode_pixels(self._last_frame(info["pixels"]))
@@ -724,6 +748,7 @@ class FastLeWAM(nn.Module):
             prefix_actions=prefix_actions,
             generator=generator,
             num_steps=num_steps,
+            integrator=integrator,
         )
 
     def get_cost_from_latents(self, z0, goal_latent, action_candidates):

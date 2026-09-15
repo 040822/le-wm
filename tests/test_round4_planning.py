@@ -64,6 +64,17 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(p3.flow_steps, 3)
         self.assertEqual(p3.action_flow_steps, 3)
 
+        heun = make_round4_policy(
+            model,
+            mode="P3",
+            plan_config=plan_config,
+            device="cpu",
+            action_flow_steps=3,
+            action_flow_integrator="heun",
+        )
+        self.assertEqual(heun.action_flow_integrator, "heun")
+        self.assertEqual(heun.metadata()["action_flow_integrator"], "heun")
+
     def test_action_flow_steps_defaults_preserve_canonical_round4_values(self):
         model = make_round4_model().eval()
         plan_config = {
@@ -80,6 +91,37 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(p0.inference_steps, 16)
         self.assertEqual(p3.flow_steps, 16)
         self.assertEqual(p3.action_flow_steps, 16)
+
+    def test_actor_warm_start_scale_is_optional_and_recorded_on_p2_view(self):
+        model = make_round4_model().eval()
+        plan_config = {
+            "horizon": 5,
+            "receding_horizon": 5,
+            "action_block": 1,
+        }
+        solver_cfg = OmegaConf.create(
+            {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "model": "???",
+                "batch_size": 1,
+                "num_samples": 2,
+                "n_steps": 1,
+                "topk": 1,
+                "var_scale": 1.0,
+                "device": "cpu",
+            }
+        )
+        policy = make_round4_policy(
+            model,
+            mode="P2",
+            solver_cfg=solver_cfg,
+            plan_config=plan_config,
+            device="cpu",
+            action_flow_steps=3,
+            actor_warm_start_scale=0.5,
+        )
+        self.assertEqual(policy.actor_warm_start_scale, 0.5)
+        self.assertEqual(policy.solver.model.action_scale, 0.5)
 
     def test_candidate_split_does_not_change_verifier_argmin(self):
         model = make_round4_model().eval()

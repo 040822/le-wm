@@ -18,6 +18,42 @@ class FastLeWAMInferenceTests(unittest.TestCase):
         self.assertEqual(stage_c["actions"].shape, (2, 3, 4))
         self.assertEqual(stage_c["predicted_latents"].shape, (2, 3, 8))
 
+    def test_action_flow_integrator_is_optional_and_euler_default_is_unchanged(self):
+        model = make_model(stage_a_goal_injection="token").eval()
+        z0 = torch.randn(2, 8)
+        goal = torch.randn(2, 8)
+        noise = torch.randn(2, 3, 4)
+
+        default = model.sample_actions(
+            z0, noise=noise, goal_latent=goal, num_steps=3
+        )
+        explicit = model.sample_actions(
+            z0,
+            noise=noise,
+            goal_latent=goal,
+            num_steps=3,
+            integrator="euler",
+        )
+        heun = model.sample_actions(
+            z0,
+            noise=noise,
+            goal_latent=goal,
+            num_steps=3,
+            integrator="heun",
+        )
+
+        torch.testing.assert_close(default, explicit)
+        self.assertEqual(heun.shape, default.shape)
+        self.assertTrue(heun.isfinite().all())
+        with self.assertRaisesRegex(ValueError, "integrator"):
+            model.sample_actions(
+                z0,
+                noise=noise,
+                goal_latent=goal,
+                num_steps=3,
+                integrator="bogus",
+            )
+
     def test_stage_b_cost_is_parallel_and_differentiable_for_solver(self):
         model = make_model().eval()
         batch, samples = 2, 4

@@ -214,6 +214,8 @@ def run_round4_evaluation(
     action_flow_steps: int | None = None,
     solver_batch_size: int = 1,
     candidate_batch_size: int | None = None,
+    actor_warm_start_scale: float = 1.0,
+    action_flow_integrator: str = "euler",
 ) -> dict[str, Any]:
     """Run a Round 4 mode and publish cohort-bound result and trace artifacts."""
     mode = validate_round4_mode(mode)
@@ -270,6 +272,8 @@ def run_round4_evaluation(
         action_flow_steps=action_flow_steps,
         solver_batch_size=solver_batch_size,
         candidate_batch_size=candidate_batch_size,
+        actor_warm_start_scale=actor_warm_start_scale,
+        action_flow_integrator=action_flow_integrator,
     )
     _time_cem_policy(policy, mode)
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
@@ -362,14 +366,18 @@ def run_round4_evaluation(
         policy_meta["action_flow_steps"] = int(
             16 if action_flow_steps is None else action_flow_steps
         )
+        policy_meta["action_flow_integrator"] = str(action_flow_integrator)
     elif mode == "P2":
         actor_steps = int(10 if action_flow_steps is None else action_flow_steps)
         policy_meta["action_flow_steps"] = actor_steps
         policy_meta["actor_flow_steps"] = actor_steps
+        policy_meta["actor_warm_start_scale"] = float(actor_warm_start_scale)
+        policy_meta["action_flow_integrator"] = str(action_flow_integrator)
     elif mode == "P3":
         policy_meta["action_flow_steps"] = int(
             16 if action_flow_steps is None else action_flow_steps
         )
+        policy_meta["action_flow_integrator"] = str(action_flow_integrator)
     policy_meta.update(planning)
     for record in records:
         record.setdefault("planning", dict(policy_meta))
@@ -400,6 +408,10 @@ def run_round4_evaluation(
             ),
             "solver_batch_size": int(solver_batch_size),
             "action_flow_steps": policy_meta.get("action_flow_steps"),
+            "actor_warm_start_scale": (
+                float(actor_warm_start_scale) if mode == "P2" else None
+            ),
+            "action_flow_integrator": str(action_flow_integrator),
         },
         "evaluation_seconds": float(elapsed),
         "success_rate": float(successes.mean()),

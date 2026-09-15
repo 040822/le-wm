@@ -84,6 +84,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         receding_horizon_blocks: int = 5,
         solver_batch_size: int = 1,
         candidate_batch_size: int | None = None,
+        action_flow_integrator: str = "euler",
         verifier: str = "stage_b",
         selection_rule: str = "argmin_verifier",
         process=None,
@@ -112,6 +113,9 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         self.action_flow_steps = int(
             flow_steps if action_flow_steps is None else action_flow_steps
         )
+        self.action_flow_integrator = str(action_flow_integrator).lower()
+        if self.action_flow_integrator not in {"euler", "heun"}:
+            raise ValueError("action_flow_integrator must be 'euler' or 'heun'")
         self.action_block = int(action_block)
         self.receding_horizon_blocks = int(receding_horizon_blocks)
         self.solver_batch_size = int(solver_batch_size)
@@ -187,6 +191,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
                 noise=noise,
                 num_steps=self.action_flow_steps,
                 goal_latent=flat_goal,
+                integrator=self.action_flow_integrator,
             )
             flow_seconds = time.perf_counter() - started
             return actions.reshape(
@@ -194,7 +199,9 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             ), {
                 "flow_steps": self.action_flow_steps,
                 "idm_type": "none",
-                "forward_count": self.action_flow_steps,
+                "forward_count": self.action_flow_steps * (
+                    2 if self.action_flow_integrator == "heun" else 1
+                ),
                 "flow_seconds": float(flow_seconds),
                 "idm_seconds": 0.0,
             }
@@ -236,6 +243,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             "candidate_count": self.num_candidates,
             "flow_steps": self.flow_steps,
             "action_flow_steps": self.action_flow_steps,
+            "action_flow_integrator": self.action_flow_integrator,
             "idm_type": "direct_shared_dit" if self.proposal_source == "latent" else "none",
             "verifier": self.verifier,
             "selection_rule": self.selection_rule,
@@ -355,6 +363,8 @@ def make_round4_policy(
     action_flow_steps: int | None = None,
     solver_batch_size: int = 1,
     candidate_batch_size: int | None = None,
+    actor_warm_start_scale: float = 1.0,
+    action_flow_integrator: str = "euler",
 ):
     """Build one of the frozen Round 4 P0--P4 policy variants."""
     if mode not in ROUND4_MODES:
@@ -381,6 +391,7 @@ def make_round4_policy(
                 else resolved_action_flow_steps
             ),
             seed=seed,
+            action_flow_integrator=action_flow_integrator,
         )
     if mode == "P0-shuf":
         return make_fast_lewam_policy(
@@ -398,9 +409,10 @@ def make_round4_policy(
             ),
             seed=seed,
             goal_mode="cyclic_shift",
+            action_flow_integrator=action_flow_integrator,
         )
     if mode in {"P1", "P2"}:
-        return make_fast_lewam_policy(
+        policy = make_fast_lewam_policy(
             policy_or_model,
             solver_cfg=solver_cfg,
             plan_config=plan_config,
@@ -419,7 +431,12 @@ def make_round4_policy(
             ),
             seed=seed,
             actor_warm_start=mode == "P2",
+            actor_warm_start_scale=actor_warm_start_scale,
+            action_flow_integrator=action_flow_integrator,
         )
+        if mode == "P2":
+            policy.actor_warm_start_scale = float(actor_warm_start_scale)
+        return policy
     model = getattr(policy_or_model, "model", policy_or_model)
     model = model.to(device).eval() if device is not None else model.eval()
     plan_values = _to_container(plan_config)
@@ -444,6 +461,7 @@ def make_round4_policy(
         receding_horizon_blocks=int(plan_value("receding_horizon")),
         solver_batch_size=solver_batch_size,
         candidate_batch_size=candidate_batch_size,
+        action_flow_integrator=action_flow_integrator,
         verifier="none" if mode == "P4-first" else "stage_b",
         selection_rule="first" if mode == "P4-first" else "argmin_verifier",
         process=process,

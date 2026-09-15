@@ -84,10 +84,24 @@ class StageBModelView(nn.Module):
 class ActorWarmStartModelView(StageBModelView):
     """为 Stage B planner 同时暴露 latent cost 和确定性的 Stage A 初始化。"""
 
-    def __init__(self, model, *, seed=0, inference_steps=None):
+    def __init__(
+        self,
+        model,
+        *,
+        seed=0,
+        inference_steps=None,
+        action_scale=1.0,
+        integrator="euler",
+    ):
         super().__init__(model)
         self.seed = int(seed)
         self.inference_steps = inference_steps
+        self.action_scale = float(action_scale)
+        if not np.isfinite(self.action_scale) or self.action_scale <= 0.0:
+            raise ValueError("action_scale must be a finite positive number")
+        self.integrator = str(integrator).lower()
+        if self.integrator not in {"euler", "heun"}:
+            raise ValueError("integrator must be 'euler' or 'heun'")
         self._generators = {}
 
     def _generator(self, device):
@@ -113,14 +127,16 @@ class ActorWarmStartModelView(StageBModelView):
         info[_STAGE_B_GOAL] = goal_latent
         info[_STAGE_B_CONTEXT_PIXELS] = current.detach().clone()
         info[_STAGE_B_CONTEXT_GOAL] = goal.detach().clone()
-        return self.model.get_action_from_latents(
+        actions = self.model.get_action_from_latents(
             z0,
             goal_latent,
             horizon=horizon,
             prefix_actions=prefix_actions,
             generator=self._generator(device),
             num_steps=self.inference_steps,
+            integrator=self.integrator,
         )
+        return actions * self.action_scale
 
 
 
@@ -162,6 +178,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         inference_steps=None,
         seed=0,
         goal_mode="correct",
+        integrator="euler",
     ):
         """构造直接动作 policy，并冻结模型、记录动作块尺寸和采样参数。"""
         super().__init__()
@@ -184,6 +201,9 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self.inference_steps = inference_steps
         self.seed = seed
         self.goal_mode = goal_mode
+        self.integrator = str(integrator).lower()
+        if self.integrator not in {"euler", "heun"}:
+            raise ValueError("integrator must be 'euler' or 'heun'")
         self._goal_indices = None
         self._action_buffer = None
         self._generators = {}
@@ -296,12 +316,14 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                         num_steps=self.inference_steps,
                         generator=generator,
                         goal_latent=goal_latent,
+                        integrator=self.integrator,
                     )
                 else:
                     chunk = self.model.sample_joint(
                         z0,
                         num_steps=self.inference_steps,
                         generator=generator,
+                        integrator=self.integrator,
                     )["actions"]
 
             keep_blocks = min(
@@ -337,6 +359,8 @@ def make_fast_lewam_policy(
     seed=0,
     goal_mode="correct",
     actor_warm_start=False,
+    actor_warm_start_scale=1.0,
+    action_flow_integrator="euler",
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -356,6 +380,8 @@ def make_fast_lewam_policy(
                 model,
                 seed=seed,
                 inference_steps=inference_steps,
+                action_scale=actor_warm_start_scale,
+                integrator=action_flow_integrator,
             )
             if actor_warm_start
             else StageBModelView(model)
@@ -381,6 +407,7 @@ def make_fast_lewam_policy(
         inference_steps=inference_steps,
         seed=seed,
         goal_mode=goal_mode,
+        integrator=action_flow_integrator,
     )
 
 

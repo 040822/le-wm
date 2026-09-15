@@ -150,6 +150,8 @@ def command_evaluate(args: argparse.Namespace) -> None:
         action_flow_steps=args.action_flow_steps,
         solver_batch_size=int(args.solver_batch_size),
         candidate_batch_size=args.candidate_batch_size,
+        actor_warm_start_scale=float(args.actor_warm_start_scale),
+        action_flow_integrator=args.action_flow_integrator,
     )
     print(json.dumps({"mode": mode, "result": str(target / "result.json"), "success_rate": result["success_rate"]}, sort_keys=True))
 
@@ -318,6 +320,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.add_argument("--solver-batch-size", type=int, default=1)
     evaluate.add_argument("--candidate-batch-size", type=int)
+    evaluate.add_argument(
+        "--actor-warm-start-scale",
+        type=float,
+        default=1.0,
+        help="diagnostic-only scale for P2 actor warm-start; default preserves Round 4",
+    )
+    evaluate.add_argument(
+        "--action-flow-integrator",
+        choices=("euler", "heun"),
+        default="euler",
+        help="diagnostic-only action flow integrator; default preserves Euler",
+    )
     evaluate.set_defaults(function=command_evaluate)
 
     evaluate_leflow = subparsers.add_parser("evaluate-leflow")
