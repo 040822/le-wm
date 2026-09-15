@@ -35,6 +35,8 @@ declare -A COHORTS_FINAL=(
 
 STEPS=(1 2 5 10 16)
 
+mkdir -p "${OUTPUT_ROOT}/logs"
+
 for task in cube pusht reacher tworoom; do
   if [[ ! -s "${CHECKPOINTS[$task]}" ]]; then
     echo "missing checkpoint for ${task}: ${CHECKPOINTS[$task]}" >&2
