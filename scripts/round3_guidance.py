@@ -91,6 +91,7 @@ def run_e2(*, task: str, checkpoint: Path, output_dir: Path, device: str) -> dic
             trace_output_dir=None,
             device=device,
             trace=False,
+            allow_solver_budget_overrides=True,
         )
         results[method] = {
             "success_rate": float(result["success_rate"]),
@@ -153,6 +154,7 @@ def run_e1(*, task: str, checkpoint: Path, pool_path: Path, output_dir: Path, de
             perturbation_rms=float(rms),
             collector_version="round3_e1_signed_gradient_v1",
             resume=True,
+            allow_empty_replay=True,
         )
         reports.append(report)
     rows = []

@@ -50,8 +50,10 @@ def validate_gpu_visibility(device: str) -> None:
         raise RuntimeError(f"only physical GPUs 0,1,2,3 may be visible; got {visible!r}")
 
 
-def validate_round3_config(cfg: Any) -> None:
-    """Reject any evaluation config that drifts from the frozen Phase 1 values."""
+def validate_round3_config(
+    cfg: Any, *, allow_solver_budget_overrides: bool = False
+) -> None:
+    """Reject evaluation drift except for explicit guidance solver budgets."""
     expected = {
         "seed": ROUND3_EVAL_DEFAULTS["seed"],
         "eval.goal_offset_steps": ROUND3_EVAL_DEFAULTS["goal_offset_steps"],
@@ -64,10 +66,19 @@ def validate_round3_config(cfg: Any) -> None:
         "solver.topk": ROUND3_EVAL_DEFAULTS["topk"],
         "solver.var_scale": ROUND3_EVAL_DEFAULTS["var_scale"],
     }
+    allowed = (
+        {"solver.num_samples", "solver.topk"}
+        if allow_solver_budget_overrides
+        else set()
+    )
     for path, expected_value in expected.items():
+        if path in allowed:
+            continue
         current = OmegaConf.select(cfg, path)
         if current != expected_value:
-            raise ValueError(f"Phase 1 config drift at {path}: expected {expected_value!r}, got {current!r}")
+            raise ValueError(
+                f"Phase 1 config drift at {path}: expected {expected_value!r}, got {current!r}"
+            )
 
 
 def _result_infos(step_result: Any) -> Any:
@@ -134,11 +145,14 @@ def run_round3_evaluation(
     trace_output_dir: str | Path | None = None,
     device: str | None = None,
     trace: bool = True,
+    allow_solver_budget_overrides: bool = False,
 ) -> dict[str, Any]:
     """Run one registered weight and publish a Phase 1 result plus trace."""
     device = str(device or cfg.solver.get("device", "cuda"))
     validate_gpu_visibility(device)
-    validate_round3_config(cfg)
+    validate_round3_config(
+        cfg, allow_solver_budget_overrides=allow_solver_budget_overrides
+    )
     expected_count = int(cfg.eval.num_eval)
     validate_cohort_manifest(manifest, task=task, expected_count=expected_count)
     if int(cfg.eval.goal_offset_steps) != int(manifest.goal_offset_steps):

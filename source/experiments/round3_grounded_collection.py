@@ -127,6 +127,7 @@ def collect_grounded_replay(
     model_override: Any | None = None,
     resolved_checkpoint_override: str | Path | None = None,
     resume: bool = False,
+    allow_empty_replay: bool = False,
 ) -> dict[str, Any]:
     """Collect exactly ``groups`` four-candidate grounded groups.
 
@@ -176,7 +177,7 @@ def collect_grounded_replay(
     )
     from source.experiments.round3_phase2_collection import ExecutedTransitionRecorder
     from source.model.fast_lewam.jepa import FastLeWAM
-    from scripts.round3_phase2 import _online_start_pairs
+    from source.experiments.round3_online_collection import _online_start_pairs
 
     checkpoint = Path(checkpoint).resolve()
     pool_path = Path(pool_path).resolve()
@@ -235,9 +236,15 @@ def collect_grounded_replay(
     prior_group_results: dict[str, dict[str, Any]] = {}
     if resume and report_path.is_file():
         prior_report = json.loads(report_path.read_text(encoding="utf-8"))
+        prior_entries = prior_report.get("groups")
+        if prior_entries is None:
+            # Failed pre-fix collectors persisted completed groups under this
+            # field; accepting it makes their already validated shards
+            # resumable without re-running those environments.
+            prior_entries = prior_report.get("completed_groups", ())
         prior_group_results = {
             str(item["group_id"]): dict(item)
-            for item in prior_report.get("groups", ())
+            for item in prior_entries
             if "group_id" in item
         }
 
@@ -470,48 +477,56 @@ def collect_grounded_replay(
                 }
                 for env_index in range(4)
             }
-            replay = recorder.replay(source="online", outcomes=outcomes)
-            save_transition_replay(shard, replay)
-            group_results.append(
-                {
-                    "group_id": entry["group_id"],
-                    "snapshot_id": entry["snapshot_id"],
-                    "path": str(shard),
-                    "count": replay.count,
-                    "environment_steps": recorder.environment_steps,
-                    "candidate_panel_sha256": policy.panel_sha256,
-                    "candidate_sources": list(policy.panel_sources),
-                    "requested_perturbation_rms": float(perturbation_rms),
-                    "candidate_rms_offsets": candidate_rms_offsets(policy.panel).tolist(),
-                    "candidate_latent_costs": policy.latent_costs.tolist(),
-                    "successes": successes.tolist(),
-                    "physical_start_costs": start_costs.tolist(),
-                    "physical_terminal_costs": terminal_costs.tolist(),
-                    "replay_sha256": replay.content_sha256(),
-                    "status": "ok",
-                }
-            )
-            shards.append(replay)
+            try:
+                replay = recorder.replay(source="online", outcomes=outcomes)
+            except RuntimeError as error:
+                if not allow_empty_replay or str(error) != "no complete action-block transitions were recorded":
+                    raise
+                replay = None
+            group_result = {
+                "group_id": entry["group_id"],
+                "snapshot_id": entry["snapshot_id"],
+                "path": None if replay is None else str(shard),
+                "count": 0 if replay is None else replay.count,
+                "environment_steps": recorder.environment_steps,
+                "candidate_panel_sha256": policy.panel_sha256,
+                "candidate_sources": list(policy.panel_sources),
+                "requested_perturbation_rms": float(perturbation_rms),
+                "candidate_rms_offsets": candidate_rms_offsets(policy.panel).tolist(),
+                "candidate_latent_costs": policy.latent_costs.tolist(),
+                "successes": successes.tolist(),
+                "physical_start_costs": start_costs.tolist(),
+                "physical_terminal_costs": terminal_costs.tolist(),
+                "replay_sha256": None if replay is None else replay.content_sha256(),
+                "status": "ok" if replay is not None else "ok_no_complete_transition_window",
+            }
+            group_results.append(group_result)
+            if replay is not None:
+                save_transition_replay(shard, replay)
+                shards.append(replay)
         except Exception as error:
             write_failure(entry["group_id"], error)
             raise
         finally:
             world.close()
 
-    if not shards:
+    if not shards and not allow_empty_replay:
         raise RuntimeError("grounded collection produced no replay shards")
-    replay = concatenate_replays(shards)
-    save_transition_replay(output, replay)
+    replay = concatenate_replays(shards) if shards else None
+    if replay is not None:
+        save_transition_replay(output, replay)
     report = {
         "schema_version": 1,
         "phase": "round3_grounded_collection",
         "task": str(task),
-        "status": "ok",
+        "status": "ok" if replay is not None else "ok_no_complete_transition_window",
         "checkpoint": str(resolved_checkpoint or checkpoint),
         "checkpoint_sha256": group_payload["checkpoint_sha256"],
         "group_manifest": str(group_manifest_path),
         "group_manifest_sha256": _file_sha256(group_manifest_path),
-        "replay": {
+        "replay": None
+        if replay is None
+        else {
             "path": str(output),
             "sha256": replay.content_sha256(),
             "count": replay.count,

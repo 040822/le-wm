@@ -175,7 +175,7 @@ def prepare_fixed_replay(
     effective_actor_warm_start = bool(actor_warm_start or str(guidance_mode) != "none")
     source_pool_path = pool_path
     if not pool_path.is_file():
-        from scripts.round3_phase2 import derive_online_pool
+        from source.experiments.round3_online_collection import derive_online_pool
 
         derive_online_pool(output=pool_path, task=str(task))
 
@@ -233,7 +233,7 @@ def prepare_fixed_replay(
     if resume and continuous_path.is_file():
         continuous_report = _read_report(_report_path(continuous_path))
     else:
-        from scripts.round3_phase2 import collect_online
+        from source.experiments.round3_online_collection import collect_online
 
         continuous_report = collect_online(
             pool_path=collection_pool_path,
@@ -485,7 +485,7 @@ def train_closed_loop(
             for index in range(1, int(step))
         )
         if kind == "continuous":
-            from scripts.round3_phase2 import collect_online
+            from source.experiments.round3_online_collection import collect_online
 
             report = collect_online(
                 pool_path=pool_path,
