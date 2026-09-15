@@ -124,8 +124,8 @@ Reacher 随后的 grounded 阶段在 `grounded-0001` 遇到一个过短 episode�
 但 fixed-replay orchestration 当时没有传入 collector 已支持的
 `allow_empty_replay=True`，因此进程提前退出。已补上该参数；重新执行时会复用
 continuous.pt 和 group-0000 shard，只从失败 group 继续。当前尚无完整
-grounded/fixed-replay 汇总，因此尚未启动 T0–T6 训练，也没有 success-rate 曲线或
-final-200 结果可报告。
+grounded/fixed-replay 汇总，因此当时尚未启动 T0–T6 训练，也没有 success-rate 曲线
+或 final-200 结果可报告。
 
 随后发现 v1 的 grounded shard 还存在独立的 shape contract 问题：旧 recorder 为了
 在 5-block panel 内产出数据使用了 `history_size=action_horizon-2`，导致 grounded
@@ -138,7 +138,15 @@ terminal observation 闭合最后一个完整 block，不调用环境、不增�
 候选现在生成与 continuous 相同的 `6/5` 窗口，提前终止候选按 no-window 记录。CPU
 回归测试已通过。正确 shape 的重建输出使用独立的
 `/tmp/round3_online_supervision/{reacher,pusht}/fixed_replay_v2/` 根目录，复用 v1
-的 offline/continuous artifact；v2 完成前不启动训练。
+的 offline/continuous artifact。v2 已完成并通过 fixed replay 拼接校验：
+
+| task | guidance | continuous actual steps | grounded nominal/actual steps | fixed rows |
+|---|---|---:|---:|---:|
+| Reacher | `post_opt` | 16,000 | 4,000 / 3,856 | 1,832 |
+| Push-T | `guided_flow` | 16,000 | 4,000 / 3,628 | 947 |
+
+两份 v2 replay 的每行 shape 均为 `observations=[6,...]`、`actions=[5,...]`，并已
+在 GPU0/GPU1 启动 T0–T6 fixed-replay 训练；训练完成前不填写 success-rate 数值。
 
 ## 下一轮：固定 replay 与 200 optimizer updates
 
