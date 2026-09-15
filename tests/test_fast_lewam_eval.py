@@ -29,6 +29,27 @@ class CountingImageTransform:
 
 
 class FastLeWAMEvalTests(unittest.TestCase):
+    def test_non_token_guidance_requests_goal_observations(self):
+        transform = CountingImageTransform()
+        policy = FastLeWAMChunkPolicy(
+            make_model().eval(),
+            mode="stage_a",
+            action_block=2,
+            receding_horizon_blocks=1,
+            inference_steps=1,
+            guidance_mode="post_opt",
+            guidance_inner_steps=1,
+            transform={"pixels": transform, "goal": transform},
+        )
+        policy.set_env(FakeVectorEnv())
+        pixels = np.random.randn(2, 1, 8, 8, 3).astype(np.float32)
+        goal = np.random.randn(2, 1, 8, 8, 3).astype(np.float32)
+
+        action = policy.get_action({"pixels": pixels, "goal": goal})
+
+        self.assertEqual(action.shape, (2, 2))
+        self.assertTrue(np.isfinite(action).all())
+
     def test_stage_a_buffered_action_skips_observation_preprocessing(self):
         transform = CountingImageTransform()
         policy = FastLeWAMChunkPolicy(

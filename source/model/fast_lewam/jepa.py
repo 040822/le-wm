@@ -164,6 +164,19 @@ class FastLeWAM(nn.Module):
             ),
             persistent=False,
         )
+        self.last_guidance_stats = {
+            "mode": "none",
+            "flow_steps": int(inference_steps),
+            "guidance_last_steps": 0,
+            "guidance_inner_steps": 0,
+            "guidance_step_size": 0.0,
+            "guidance_max_rms_offset": 0.0,
+            "forward_count": 0,
+            "stage_a_forward_count": 0,
+            "stage_b_forward_count": 0,
+            "backward_count": 0,
+            "zero_gradient_count": 0,
+        }
         
     # ========= input processing  ============
 
@@ -570,7 +583,168 @@ class FastLeWAM(nn.Module):
             raise ValueError(f"noise must have shape {shape}, got {tuple(noise.shape)}")
         return noise.to(device=z0.device, dtype=z0.dtype).clone()
 
-    def _euler_sample(
+    @staticmethod
+    def _normalize_guidance_gradient(gradient: torch.Tensor) -> tuple[torch.Tensor, int]:
+        """Normalize each candidate independently and count zero gradients."""
+        if not torch.isfinite(gradient).all():
+            raise FloatingPointError("guidance gradient contains a non-finite value")
+        reduce_dims = tuple(range(1, gradient.ndim))
+        rms = gradient.float().square().mean(dim=reduce_dims, keepdim=True).sqrt()
+        zero = rms <= torch.finfo(rms.dtype).eps
+        normalized = gradient.float() / rms.clamp_min(torch.finfo(rms.dtype).eps)
+        normalized = torch.where(zero, torch.zeros_like(normalized), normalized)
+        return normalized.to(dtype=gradient.dtype), int(zero.sum().item())
+
+    @staticmethod
+    def _clip_rms_displacement(
+        value: torch.Tensor,
+        reference: torch.Tensor,
+        max_rms_offset: float,
+    ) -> torch.Tensor:
+        """Keep every candidate inside an RMS trust region around its proposal."""
+        delta = value - reference
+        rms = delta.float().square().mean(dim=(1, 2), keepdim=True).sqrt()
+        limit = float(max_rms_offset)
+        scale = (limit / rms.clamp_min(limit)).clamp(max=1.0)
+        return reference + delta * scale.to(dtype=delta.dtype)
+
+    def _validate_guidance_options(
+        self,
+        z0: torch.Tensor,
+        goal_latent: torch.Tensor | None,
+        *,
+        guidance_mode: str,
+        guidance_step_size: float,
+        guidance_last_steps: int,
+        guidance_inner_steps: int,
+        guidance_max_rms_offset: float,
+        integrator: str,
+    ) -> str:
+        mode = str(guidance_mode).lower()
+        if mode not in {"none", "post_opt", "guided_flow"}:
+            raise ValueError(
+                "guidance_mode must be one of 'none', 'post_opt', or 'guided_flow'"
+            )
+        if mode != "none":
+            if goal_latent is None:
+                raise ValueError("goal_latent is required when guidance is enabled")
+            if tuple(goal_latent.shape) != tuple(z0.shape):
+                raise ValueError(
+                    f"goal_latent must have shape {tuple(z0.shape)}, "
+                    f"got {tuple(goal_latent.shape)}"
+                )
+            if not torch.isfinite(goal_latent).all():
+                raise ValueError("goal_latent contains a non-finite value")
+            if not torch.isfinite(z0).all():
+                raise ValueError("z0 contains a non-finite value")
+            if not torch.isfinite(z0.new_tensor(float(guidance_step_size))):
+                raise ValueError("guidance_step_size must be finite")
+            if float(guidance_step_size) <= 0.0:
+                raise ValueError("guidance_step_size must be positive")
+            if int(guidance_last_steps) < 1:
+                raise ValueError("guidance_last_steps must be positive")
+            if int(guidance_inner_steps) < 1:
+                raise ValueError("guidance_inner_steps must be positive")
+            if not torch.isfinite(z0.new_tensor(float(guidance_max_rms_offset))):
+                raise ValueError("guidance_max_rms_offset must be finite")
+            if float(guidance_max_rms_offset) <= 0.0:
+                raise ValueError("guidance_max_rms_offset must be positive")
+            if str(integrator).lower() != "euler":
+                raise ValueError("guidance is currently defined only for Euler integration")
+        return mode
+
+    def _latent_cost_from_clean_actions(
+        self,
+        z0: torch.Tensor,
+        goal_latent: torch.Tensor,
+        clean_actions: torch.Tensor,
+        task_condition: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Return one Stage-B terminal latent cost per action candidate."""
+        predicted = self.rollout_latents(
+            z0,
+            clean_actions,
+            torch.ones(z0.shape[0], device=z0.device, dtype=z0.dtype),
+            task_condition,
+        )
+        return (predicted[:, -1] - goal_latent).square().mean(dim=-1)
+
+    def _apply_post_opt_guidance(
+        self,
+        z0: torch.Tensor,
+        actions: torch.Tensor,
+        goal_latent: torch.Tensor,
+        *,
+        task_condition: torch.Tensor | None,
+        step_size: float,
+        inner_steps: int,
+        max_rms_offset: float,
+        stats: dict[str, int],
+    ) -> torch.Tensor:
+        """Apply cost descent after flow sampling inside a bounded trust region."""
+        reference = actions.detach()
+        current = reference
+        for _ in range(int(inner_steps)):
+            current = current.detach().requires_grad_(True)
+            cost = self._latent_cost_from_clean_actions(
+                z0, goal_latent, current, task_condition
+            )
+            gradient = torch.autograd.grad(cost.sum(), current)[0]
+            stats["stage_b_forward_count"] += 1
+            stats["backward_count"] += 1
+            normalized, zero_count = self._normalize_guidance_gradient(gradient)
+            stats["zero_gradient_count"] += zero_count
+            current = current.detach() - float(step_size) * normalized
+            current = self._clip_rms_displacement(
+                current, reference, float(max_rms_offset)
+            ).detach()
+        return current
+
+    def _apply_guided_flow_step(
+        self,
+        z0: torch.Tensor,
+        proposal: torch.Tensor,
+        goal_latent: torch.Tensor,
+        *,
+        next_timestep: torch.Tensor,
+        task_condition: torch.Tensor | None,
+        step_size: float,
+        inner_steps: int,
+        max_rms_offset: float,
+        stats: dict[str, int],
+    ) -> torch.Tensor:
+        """Guide one Euler proposal using clean-estimate Stage-B cost gradients."""
+        reference = proposal.detach()
+        current = reference
+        for _ in range(int(inner_steps)):
+            current = current.detach().requires_grad_(True)
+            velocity = self(
+                z0,
+                current,
+                next_timestep,
+                mode="stage_a",
+                task_condition=task_condition,
+                goal_latent=goal_latent,
+            )["action_velocity"]
+            clean = current + (
+                1.0 - next_timestep[:, None, None]
+            ) * velocity
+            cost = self._latent_cost_from_clean_actions(
+                z0, goal_latent, clean, task_condition
+            )
+            gradient = torch.autograd.grad(cost.sum(), current)[0]
+            stats["stage_a_forward_count"] += 1
+            stats["stage_b_forward_count"] += 1
+            stats["backward_count"] += 1
+            normalized, zero_count = self._normalize_guidance_gradient(gradient)
+            stats["zero_gradient_count"] += zero_count
+            current = current.detach() - float(step_size) * normalized
+            current = self._clip_rms_displacement(
+                current, reference, float(max_rms_offset)
+            ).detach()
+        return current
+
+    def _euler_sample_base(
         self,
         z0,
         *,
@@ -581,9 +755,9 @@ class FastLeWAM(nn.Module):
         task_condition=None,
         goal_latent=None,
         integrator="euler",
-    ):
-        """从噪声出发，用 Euler 或 Heun 积分生成归一化动作 chunk。"""
-        steps = self.inference_steps if num_steps is None else num_steps
+    ) -> tuple[torch.Tensor, int]:
+        """Run the original unguided Euler/Heun path and count model forwards."""
+        steps = self.inference_steps if num_steps is None else int(num_steps)
         if steps < 1:
             raise ValueError("num_steps must be positive")
         integrator = str(integrator).lower()
@@ -591,6 +765,7 @@ class FastLeWAM(nn.Module):
             raise ValueError("integrator must be 'euler' or 'heun'")
         actions = self._initial_noise(z0, noise, generator)
         dt = 1.0 / steps
+        forward_count = 0
         for step in range(steps):
             timestep = z0.new_full((z0.shape[0],), step / steps)
             velocity = self(
@@ -601,6 +776,7 @@ class FastLeWAM(nn.Module):
                 task_condition=task_condition,
                 goal_latent=goal_latent,
             )["action_velocity"]
+            forward_count += 1
             if integrator == "euler":
                 actions = actions + dt * velocity
                 continue
@@ -614,10 +790,148 @@ class FastLeWAM(nn.Module):
                 task_condition=task_condition,
                 goal_latent=goal_latent,
             )["action_velocity"]
+            forward_count += 1
             actions = actions + 0.5 * dt * (velocity + next_velocity)
-        return actions
+        return actions, forward_count
 
-    @torch.no_grad()
+    def _euler_sample(
+        self,
+        z0,
+        *,
+        mode,
+        noise=None,
+        num_steps=None,
+        generator=None,
+        task_condition=None,
+        goal_latent=None,
+        integrator="euler",
+        guidance_mode="none",
+        guidance_step_size=0.01,
+        guidance_last_steps=5,
+        guidance_inner_steps=5,
+        guidance_max_rms_offset=0.20,
+    ):
+        """Sample an action chunk with optional bounded latent-cost guidance."""
+        steps = self.inference_steps if num_steps is None else int(num_steps)
+        if steps < 1:
+            raise ValueError("num_steps must be positive")
+        integrator = str(integrator).lower()
+        mode_name = self._validate_guidance_options(
+            z0,
+            goal_latent,
+            guidance_mode=guidance_mode,
+            guidance_step_size=guidance_step_size,
+            guidance_last_steps=guidance_last_steps,
+            guidance_inner_steps=guidance_inner_steps,
+            guidance_max_rms_offset=guidance_max_rms_offset,
+            integrator=integrator,
+        )
+        stats: dict[str, int | float | str] = {
+            "mode": mode_name,
+            "flow_steps": int(steps),
+            "guidance_last_steps": int(guidance_last_steps) if mode_name != "none" else 0,
+            "guidance_inner_steps": int(guidance_inner_steps) if mode_name != "none" else 0,
+            "guidance_step_size": float(guidance_step_size) if mode_name != "none" else 0.0,
+            "guidance_max_rms_offset": (
+                float(guidance_max_rms_offset) if mode_name != "none" else 0.0
+            ),
+            "forward_count": 0,
+            "stage_a_forward_count": 0,
+            "stage_b_forward_count": 0,
+            "backward_count": 0,
+            "zero_gradient_count": 0,
+        }
+
+        if mode_name == "none":
+            with torch.no_grad():
+                actions, forward_count = self._euler_sample_base(
+                    z0,
+                    mode=mode,
+                    noise=noise,
+                    num_steps=steps,
+                    generator=generator,
+                    task_condition=task_condition,
+                    goal_latent=goal_latent,
+                    integrator=integrator,
+                )
+            stats["forward_count"] = int(forward_count)
+            stats["stage_a_forward_count"] = int(forward_count)
+            self.last_guidance_stats = dict(stats)
+            return actions.detach()
+
+        if mode_name == "post_opt":
+            with torch.no_grad():
+                actions, forward_count = self._euler_sample_base(
+                    z0,
+                    mode=mode,
+                    noise=noise,
+                    num_steps=steps,
+                    generator=generator,
+                    task_condition=task_condition,
+                    goal_latent=goal_latent,
+                    integrator=integrator,
+                )
+            stats["forward_count"] = int(forward_count)
+            stats["stage_a_forward_count"] = int(forward_count)
+            with torch.enable_grad():
+                actions = self._apply_post_opt_guidance(
+                    z0,
+                    actions,
+                    goal_latent,
+                    task_condition=task_condition,
+                    step_size=float(guidance_step_size),
+                    inner_steps=int(guidance_inner_steps),
+                    max_rms_offset=float(guidance_max_rms_offset),
+                    stats=stats,
+                )
+            stats["forward_count"] = int(
+                stats["stage_a_forward_count"] + stats["stage_b_forward_count"]
+            )
+            self.last_guidance_stats = dict(stats)
+            return actions.detach()
+
+        if mode != "stage_a":
+            raise ValueError("guidance is only supported for Stage A action sampling")
+        with torch.enable_grad():
+            actions = self._initial_noise(z0, noise, generator).detach()
+            dt = 1.0 / steps
+            start_guidance = max(0, steps - int(guidance_last_steps))
+            for step in range(steps):
+                timestep = z0.new_full((z0.shape[0],), step / steps)
+                with torch.no_grad():
+                    velocity = self(
+                        z0,
+                        actions,
+                        timestep,
+                        mode=mode,
+                        task_condition=task_condition,
+                        goal_latent=goal_latent,
+                    )["action_velocity"]
+                stats["stage_a_forward_count"] += 1
+                proposal = (actions + dt * velocity).detach()
+                if step >= start_guidance:
+                    next_timestep = z0.new_full(
+                        (z0.shape[0],), (step + 1) / steps
+                    )
+                    actions = self._apply_guided_flow_step(
+                        z0,
+                        proposal,
+                        goal_latent,
+                        next_timestep=next_timestep,
+                        task_condition=task_condition,
+                        step_size=float(guidance_step_size),
+                        inner_steps=int(guidance_inner_steps),
+                        max_rms_offset=float(guidance_max_rms_offset),
+                        stats=stats,
+                    )
+                else:
+                    actions = proposal
+        stats["forward_count"] = int(
+            stats["stage_a_forward_count"] + stats["stage_b_forward_count"]
+        )
+        self.last_guidance_stats = dict(stats)
+        return actions.detach()
+
     def sample_actions(
         self,
         z0,
@@ -628,8 +942,13 @@ class FastLeWAM(nn.Module):
         task_condition=None,
         goal_latent=None,
         integrator="euler",
+        guidance_mode="none",
+        guidance_step_size=0.01,
+        guidance_last_steps=5,
+        guidance_inner_steps=5,
+        guidance_max_rms_offset=0.20,
     ):
-        """只运行 Stage A flow，采样一整段归一化动作 chunk。"""
+        """Sample a Stage-A action chunk with optional latent-cost guidance."""
         return self._euler_sample(
             z0,
             mode="stage_a",
@@ -639,6 +958,11 @@ class FastLeWAM(nn.Module):
             task_condition=task_condition,
             goal_latent=goal_latent,
             integrator=integrator,
+            guidance_mode=guidance_mode,
+            guidance_step_size=guidance_step_size,
+            guidance_last_steps=guidance_last_steps,
+            guidance_inner_steps=guidance_inner_steps,
+            guidance_max_rms_offset=guidance_max_rms_offset,
         )
 
     @torch.no_grad()
@@ -688,6 +1012,11 @@ class FastLeWAM(nn.Module):
         generator=None,
         num_steps=None,
         integrator="euler",
+        guidance_mode="none",
+        guidance_step_size=0.01,
+        guidance_last_steps=5,
+        guidance_inner_steps=5,
+        guidance_max_rms_offset=0.20,
     ):
         """Generate an actor warm start from an encoded planning context."""
         if not 1 <= horizon <= self.action_horizon:
@@ -722,6 +1051,11 @@ class FastLeWAM(nn.Module):
             num_steps=num_steps,
             goal_latent=goal_latent,
             integrator=integrator,
+            guidance_mode=guidance_mode,
+            guidance_step_size=guidance_step_size,
+            guidance_last_steps=guidance_last_steps,
+            guidance_inner_steps=guidance_inner_steps,
+            guidance_max_rms_offset=guidance_max_rms_offset,
         )[:, :horizon]
 
     def get_action(
@@ -733,13 +1067,18 @@ class FastLeWAM(nn.Module):
         generator=None,
         num_steps=None,
         integrator="euler",
+        guidance_mode="none",
+        guidance_step_size=0.01,
+        guidance_last_steps=5,
+        guidance_inner_steps=5,
+        guidance_max_rms_offset=0.20,
     ):
         """Implement the Actionable interface from raw current/goal images."""
         z0 = self.encode_pixels(self._last_frame(info["pixels"]))
         goal_latent = None
-        if self.stage_a_goal_injection == "token":
+        if self.stage_a_goal_injection == "token" or str(guidance_mode).lower() != "none":
             if "goal" not in info:
-                raise ValueError("goal observations are required in Stage A token mode")
+                raise ValueError("goal observations are required in Stage-A goal conditioning")
             goal_latent = self.encode_pixels(self._last_frame(info["goal"]))
         return self.get_action_from_latents(
             z0,
@@ -749,6 +1088,11 @@ class FastLeWAM(nn.Module):
             generator=generator,
             num_steps=num_steps,
             integrator=integrator,
+            guidance_mode=guidance_mode,
+            guidance_step_size=guidance_step_size,
+            guidance_last_steps=guidance_last_steps,
+            guidance_inner_steps=guidance_inner_steps,
+            guidance_max_rms_offset=guidance_max_rms_offset,
         )
 
     def get_cost_from_latents(self, z0, goal_latent, action_candidates):

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "phase": "round3_online_supervision",
+  "tasks": {
+    "reacher": {
+      "checkpoint": "outputs/fast_lewam/reacher/0717_/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "final_cohort": "outputs/round3/phase1/cohorts/reacher/final.json",
+      "dev_cohort": "outputs/round3/phase1/cohorts/reacher/dev_round3_revised.json"
+    },
+    "pusht": {
+      "checkpoint": "outputs/fast_lewam/pusht/0803_e5_cross_head_grad/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "final_cohort": "outputs/round3/phase1/cohorts/pusht/final.json",
+      "dev_cohort": "outputs/round3/phase1/cohorts/pusht/dev_round3_revised.json"
+    }
+  },
+  "guidance": {
+    "flow_steps": 10,
+    "late_steps": 5,
+    "inner_steps": 5,
+    "step_size": 0.01,
+    "max_rms_offset": 0.2,
+    "e1_rms": [0.01, 0.03, 0.1],
+    "e1_states": 64,
+    "e2_dev_episodes": 50
+  },
+  "fixed_replay": {
+    "continuous_environment_steps": 16000,
+    "grounded_environment_steps": 4000,
+    "grounded_candidates_per_group": 4,
+    "grounded_action_blocks_per_candidate": 5,
+    "grounded_action_block_environment_steps": 5
+  },
+  "training": {
+    "arms": [
+      "t0_frozen",
+      "t1_offline_b_mse",
+      "t2_online_b_mse",
+      "t3_online_ranking",
+      "t4_online_offline_a",
+      "t5_online_hindsight_a",
+      "t6_online_distill_a"
+    ],
+    "max_optimizer_updates": 200,
+    "curve_interval": 10,
+    "environment_steps_per_update": 100,
+    "batch_size": 64,
+    "auxiliary_batch_size": 32,
+    "optimizer": {
+      "name": "AdamW",
+      "learning_rate": 1e-5,
+      "weight_decay": 1e-3,
+      "betas": [0.9, 0.999],
+      "eps": 1e-8,
+      "gradient_clip_norm": 1.0,
+      "scheduler": null
+    }
+  },
+  "evaluation": {
+    "step_unit": "optimizer_update_step",
+    "steps": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+    "cohort_kind": "final",
+    "episodes": 200,
+    "batch_size": 50,
+    "batch_count": 4,
+    "training_budget_excludes_evaluation": true
+  },
+  "gpu_policy": {
+    "allowed_physical_devices": [0, 1, 2, 3],
+    "forbidden_physical_devices": [4, 5, 6, 7],
+    "require_explicit_cuda_visible_devices": true
+  },
+  "decision_policy": "all gates are report-only; user decides whether to continue or extend"
+}

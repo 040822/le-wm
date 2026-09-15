@@ -393,6 +393,11 @@ class ActorWarmStartModelView(StageBModelView):
         action_scale=1.0,
         integrator="euler",
         action_projection="none",
+        guidance_mode="none",
+        guidance_step_size=0.01,
+        guidance_last_steps=5,
+        guidance_inner_steps=5,
+        guidance_max_rms_offset=0.20,
     ):
         super().__init__(model)
         self.seed = int(seed)
@@ -407,6 +412,15 @@ class ActorWarmStartModelView(StageBModelView):
             action_projection,
             allowed=("none", "clip", "global_scale"),
         )
+        self.guidance_mode = str(guidance_mode).lower()
+        if self.guidance_mode not in {"none", "post_opt", "guided_flow"}:
+            raise ValueError(
+                "guidance_mode must be one of 'none', 'post_opt', or 'guided_flow'"
+            )
+        self.guidance_step_size = float(guidance_step_size)
+        self.guidance_last_steps = int(guidance_last_steps)
+        self.guidance_inner_steps = int(guidance_inner_steps)
+        self.guidance_max_rms_offset = float(guidance_max_rms_offset)
         self.action_bounds = None
         self.last_action_bound_projection = None
         self._generators = {}
@@ -468,6 +482,11 @@ class ActorWarmStartModelView(StageBModelView):
             generator=self._generator(device),
             num_steps=self.inference_steps,
             integrator=self.integrator,
+            guidance_mode=self.guidance_mode,
+            guidance_step_size=self.guidance_step_size,
+            guidance_last_steps=self.guidance_last_steps,
+            guidance_inner_steps=self.guidance_inner_steps,
+            guidance_max_rms_offset=self.guidance_max_rms_offset,
         )
         return self._project_actions(actions * self.action_scale)
 
@@ -542,6 +561,11 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         goal_mode="correct",
         integrator="euler",
         action_bound_mode="none",
+        guidance_mode="none",
+        guidance_step_size=0.01,
+        guidance_last_steps=5,
+        guidance_inner_steps=5,
+        guidance_max_rms_offset=0.20,
     ):
         """构造直接动作 policy，并冻结模型、记录动作块尺寸和采样参数。"""
         super().__init__()
@@ -571,6 +595,17 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             action_bound_mode,
             allowed=("none", "clip", "global_scale"),
         )
+        self.guidance_mode = str(guidance_mode).lower()
+        if self.guidance_mode not in {"none", "post_opt", "guided_flow"}:
+            raise ValueError(
+                "guidance_mode must be one of 'none', 'post_opt', or 'guided_flow'"
+            )
+        if self.guidance_mode != "none" and mode != "stage_a":
+            raise ValueError("guidance is only supported for stage_a chunk policies")
+        self.guidance_step_size = float(guidance_step_size)
+        self.guidance_last_steps = int(guidance_last_steps)
+        self.guidance_inner_steps = int(guidance_inner_steps)
+        self.guidance_max_rms_offset = float(guidance_max_rms_offset)
         self.action_bounds = None
         self._goal_indices = None
         self._action_buffer = None
@@ -664,10 +699,11 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                 self.mode == "stage_a"
                 and self.model.stage_a_goal_injection == "token"
             )
-            if token_goal:
+            guidance_goal = self.mode == "stage_a" and self.guidance_mode != "none"
+            if token_goal or guidance_goal:
                 if "goal" not in info_dict:
                     raise ValueError(
-                        "goal observations are required for Stage A token mode"
+                        "goal observations are required for Stage-A goal conditioning"
                     )
                 goal_indices = self._goal_indices[np.asarray(replan)]
                 selected_raw["goal"] = self._slice_info(
@@ -682,7 +718,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             encode_started = time.perf_counter() if timed_projection else None
             current_frames = self.model._last_frame(selected["pixels"])
             goal_latent = None
-            if token_goal:
+            if token_goal or guidance_goal:
                 goal_frames = self.model._last_frame(selected["goal"])
                 encoded = self.model.encode_pixels(
                     torch.cat((current_frames, goal_frames))
@@ -706,6 +742,11 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                         generator=generator,
                         goal_latent=goal_latent,
                         integrator=self.integrator,
+                        guidance_mode=self.guidance_mode,
+                        guidance_step_size=self.guidance_step_size,
+                        guidance_last_steps=self.guidance_last_steps,
+                        guidance_inner_steps=self.guidance_inner_steps,
+                        guidance_max_rms_offset=self.guidance_max_rms_offset,
                     )
                 else:
                     chunk = self.model.sample_joint(
@@ -748,38 +789,48 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             plan = chunk[:, :keep_blocks].reshape(
                 len(replan), keep_blocks * self.action_block, base_action_dim
             )
-            if projection is not None:
-                flow_steps = int(
-                    16
-                    if self.inference_steps is None
-                    else self.inference_steps
-                )
-                self.planning_events.append(
-                    {
-                        "proposal_source": self.mode,
-                        "candidate_count": 1,
-                        "flow_steps": flow_steps,
-                        "action_flow_steps": flow_steps,
-                        "action_flow_integrator": self.integrator,
-                        "verifier": "none",
-                        "selection_rule": "direct",
-                        "environment_batch_size": len(replan),
-                        "forward_count": int(
-                            flow_steps
-                            * (2 if self.integrator == "heun" else 1)
-                        ),
-                        "action_bound_mode": self.action_bound_mode,
-                        "action_bounds": self.action_bounds.metadata(
+            flow_steps = int(
+                getattr(self.model, "inference_steps", 16)
+                if self.inference_steps is None
+                else self.inference_steps
+            )
+            self.planning_events.append(
+                {
+                    "proposal_source": self.mode,
+                    "candidate_count": 1,
+                    "flow_steps": flow_steps,
+                    "action_flow_steps": flow_steps,
+                    "action_flow_integrator": self.integrator,
+                    "verifier": "none",
+                    "selection_rule": "direct",
+                    "environment_batch_size": len(replan),
+                    "forward_count": int(
+                        flow_steps * (2 if self.integrator == "heun" else 1)
+                    ),
+                    "action_bound_mode": self.action_bound_mode,
+                    "action_bounds": (
+                        None
+                        if self.action_bounds is None
+                        else self.action_bounds.metadata(
                             action_dim=self.model.action_dim
-                        ),
-                        "action_bound_projection": projection,
-                        "encode_seconds": float(encode_seconds),
-                        "proposal_seconds": float(proposal_seconds),
-                        "flow_seconds": float(proposal_seconds),
-                        "verify_seconds": 0.0,
-                        "peak_memory_bytes": None,
-                    }
-                )
+                        )
+                    ),
+                    "action_bound_projection": projection,
+                    "guidance_mode": self.guidance_mode,
+                    "guidance_step_size": self.guidance_step_size,
+                    "guidance_last_steps": self.guidance_last_steps,
+                    "guidance_inner_steps": self.guidance_inner_steps,
+                    "guidance_max_rms_offset": self.guidance_max_rms_offset,
+                    "guidance_stats": dict(
+                        getattr(self.model, "last_guidance_stats", {})
+                    ),
+                    "encode_seconds": float(encode_seconds),
+                    "proposal_seconds": float(proposal_seconds),
+                    "flow_seconds": float(proposal_seconds),
+                    "verify_seconds": 0.0,
+                    "peak_memory_bytes": None,
+                }
+            )
             for row, env_index in enumerate(replan):
                 self._action_buffer[env_index].extend(plan[row].cpu())
 
@@ -809,6 +860,11 @@ def make_fast_lewam_policy(
     actor_warm_start_scale=1.0,
     action_flow_integrator="euler",
     action_bound_mode="none",
+    guidance_mode="none",
+    guidance_step_size=0.01,
+    guidance_last_steps=5,
+    guidance_inner_steps=5,
+    guidance_max_rms_offset=0.20,
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -850,6 +906,11 @@ def make_fast_lewam_policy(
                 action_scale=actor_warm_start_scale,
                 integrator=action_flow_integrator,
                 action_projection=warm_start_projection,
+                guidance_mode=guidance_mode,
+                guidance_step_size=guidance_step_size,
+                guidance_last_steps=guidance_last_steps,
+                guidance_inner_steps=guidance_inner_steps,
+                guidance_max_rms_offset=guidance_max_rms_offset,
             )
             if actor_warm_start
             else StageBModelView(model)
@@ -884,6 +945,11 @@ def make_fast_lewam_policy(
         goal_mode=goal_mode,
         integrator=action_flow_integrator,
         action_bound_mode=action_bound_mode,
+        guidance_mode=guidance_mode,
+        guidance_step_size=guidance_step_size,
+        guidance_last_steps=guidance_last_steps,
+        guidance_inner_steps=guidance_inner_steps,
+        guidance_max_rms_offset=guidance_max_rms_offset,
     )
 
 

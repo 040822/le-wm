@@ -124,6 +124,12 @@ class EvaluationIdentity:
     checkpoint: str | None = None
     epoch: int | None = None
     stage: str | None = None
+    actor_warm_start: bool = False
+    guidance_mode: str = "none"
+    guidance_step_size: float = 0.01
+    guidance_last_steps: int = 5
+    guidance_inner_steps: int = 5
+    guidance_max_rms_offset: float = 0.20
 
 
 def _jsonable(value):
@@ -390,6 +396,7 @@ class DatasetEvaluationSession:
             shuffled = identity.stage == "stage_a_shuffled_goal"
             actor_warm_start = (
                 identity.stage == "stage_b_actor_warm_start"
+                or bool(identity.actor_warm_start)
             )
             if shuffled and int(self.cfg.eval.num_eval) < 2:
                 raise ValueError("shuffled-goal evaluation requires num_eval >= 2")
@@ -414,6 +421,11 @@ class DatasetEvaluationSession:
                 seed=int(self.cfg.seed),
                 goal_mode="cyclic_shift" if shuffled else "correct",
                 actor_warm_start=actor_warm_start,
+                guidance_mode=str(identity.guidance_mode),
+                guidance_step_size=float(identity.guidance_step_size),
+                guidance_last_steps=int(identity.guidance_last_steps),
+                guidance_inner_steps=int(identity.guidance_inner_steps),
+                guidance_max_rms_offset=float(identity.guidance_max_rms_offset),
             )
         if identity.stage is not None:
             raise ValueError("stage is only valid for Fast-LeWAM evaluation")
