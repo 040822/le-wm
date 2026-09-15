@@ -86,6 +86,24 @@ def _read_report(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _validate_grounded_budget(report: dict[str, Any], requested_steps: int) -> int:
+    """Validate grounded group coverage while preserving early terminations."""
+    expected_groups = int(requested_steps) // 100
+    groups = report.get("groups", ())
+    if len(groups) != expected_groups:
+        raise RuntimeError(
+            f"grounded collection produced {len(groups)} groups; "
+            f"expected {expected_groups}"
+        )
+    actual_steps = int(report.get("environment_steps", -1))
+    if actual_steps < 0 or actual_steps > int(requested_steps):
+        raise RuntimeError(
+            f"grounded collection used {actual_steps} environment steps; "
+            f"nominal budget was {requested_steps}"
+        )
+    return actual_steps
+
+
 def build_offline_replay(
     *,
     task: str,
@@ -296,8 +314,10 @@ def prepare_fixed_replay(
             # the group, but should not abort the remaining grounded panel.
             allow_empty_replay=True,
         )
-    if int(grounded_report.get("environment_steps", -1)) != int(grounded_steps):
-        raise RuntimeError("grounded collection did not meet the exact fixed budget")
+    grounded_actual_steps = _validate_grounded_budget(
+        grounded_report,
+        int(grounded_steps),
+    )
 
     from source.experiments.round3_phase2 import concatenate_replays, load_transition_replay, save_transition_replay
 
@@ -336,7 +356,11 @@ def prepare_fixed_replay(
         "budget": {
             "continuous_environment_steps": int(continuous_steps),
             "grounded_environment_steps": int(grounded_steps),
+            "grounded_environment_steps_actual": int(grounded_actual_steps),
             "total_environment_steps": int(continuous_steps + grounded_steps),
+            "total_environment_steps_actual": int(
+                continuous_report["environment_steps"] + grounded_actual_steps
+            ),
             "grounded_groups": int(grounded_steps // 100),
             "candidates_per_group": 4,
             "action_blocks_per_candidate": 5,

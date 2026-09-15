@@ -213,6 +213,16 @@ class Round3OnlineSupervisionTests(unittest.TestCase):
 
             self.assertEqual(_report_path(replay), legacy_report)
 
+    def test_grounded_budget_validates_group_coverage_and_reports_shortfall(self):
+        from scripts.round3_online_supervision import _validate_grounded_budget
+
+        report = {
+            "environment_steps": 3856,
+            "groups": [{"group_id": f"grounded-{index:04d}"} for index in range(40)],
+        }
+
+        self.assertEqual(_validate_grounded_budget(report, 4000), 3856)
+
     def test_fixed_replay_runner_publishes_resumable_optimizer_curve(self):
         replay = make_supervision_replay().subset((0, 1, 2, 3))
         with tempfile.TemporaryDirectory() as directory:
