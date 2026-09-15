@@ -146,7 +146,15 @@ terminal observation 闭合最后一个完整 block，不调用环境、不增�
 | Push-T | `guided_flow` | 16,000 | 4,000 / 3,628 | 947 |
 
 两份 v2 replay 的每行 shape 均为 `observations=[6,...]`、`actions=[5,...]`，并已
-在 GPU0/GPU1 启动 T0–T6 fixed-replay 训练；训练完成前不填写 success-rate 数值。
+在 GPU0/GPU1 启动 T0–T6 fixed-replay 训练；训练完成前不填写非 T0 监督臂的
+success-rate 结果。
+
+截至当前已完成的 T0 baseline point（同一任务 final cohort 的 200 episodes，实际
+均为 4×50）为：Reacher `0.875`，cohort hash 为
+`f81e4830dd2bb80ad1a8109b67873496fa86651ccba63d49ab6d8b0c78b87490`；Push-T
+`0.885`，cohort hash 为
+`138501dd8c2d88990074da59039aa092d4269e841c7114fe68ae49fdd36cc47b`。这只是
+update-000000 的冻结 baseline，不代表任何监督臂结果。
 
 ## 下一轮：固定 replay 与 200 optimizer updates
 
