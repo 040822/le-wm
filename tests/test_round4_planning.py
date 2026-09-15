@@ -3,12 +3,14 @@ import unittest
 import gymnasium as gym
 import numpy as np
 import torch
+from sklearn.preprocessing import StandardScaler
 
 from source.policy.round4 import (
     Round4BestOfNPolicy,
     make_round4_policy,
     score_candidates_in_chunks,
 )
+from source.policy.fast_lewam_eval import ProjectedCEMSolver
 from omegaconf import OmegaConf
 from tests.test_round4_model import make_round4_model
 
@@ -122,6 +124,215 @@ class Round4PlanningTests(unittest.TestCase):
         )
         self.assertEqual(policy.actor_warm_start_scale, 0.5)
         self.assertEqual(policy.solver.model.action_scale, 0.5)
+
+    def test_action_bound_variants_are_selected_only_for_p0_and_p2(self):
+        model = make_round4_model().eval()
+        plan_config = {
+            "horizon": 5,
+            "receding_horizon": 5,
+            "action_block": 1,
+        }
+        process = {
+            "action": StandardScaler().fit(
+                np.array(
+                    [
+                        [-0.5, -0.4, -0.3, -0.2],
+                        [0.0, 0.1, 0.2, 0.3],
+                        [0.4, 0.5, 0.6, 0.7],
+                    ]
+                )
+            )
+        }
+        p0 = make_round4_policy(
+            model,
+            mode="P0",
+            plan_config=plan_config,
+            process=process,
+            device="cpu",
+            action_bound_mode="clip",
+        )
+        self.assertEqual(p0.action_bound_mode, "clip")
+
+        solver_cfg = OmegaConf.create(
+            {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "model": "???",
+                "batch_size": 1,
+                "num_samples": 2,
+                "n_steps": 1,
+                "topk": 1,
+                "var_scale": 1.0,
+                "device": "cpu",
+            }
+        )
+        p2 = make_round4_policy(
+            model,
+            mode="P2",
+            solver_cfg=solver_cfg,
+            plan_config=plan_config,
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="candidate_clip",
+        )
+        self.assertEqual(p2.action_bound_mode, "candidate_clip")
+        self.assertIsInstance(p2.solver, ProjectedCEMSolver)
+        self.assertEqual(p2.solver.model.action_projection, "clip")
+
+    def test_p0_clip_configures_bounds_and_keeps_environment_action_legal(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        model = make_round4_model().eval()
+        process = {
+            "action": StandardScaler().fit(
+                np.array(
+                    [
+                        [-0.2, -0.2, -0.2, -0.2],
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.2, 0.2, 0.2, 0.2],
+                    ]
+                )
+            )
+        }
+        policy = make_round4_policy(
+            model,
+            mode="P0",
+            plan_config={
+                "horizon": 5,
+                "receding_horizon": 5,
+                "action_block": 1,
+            },
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="clip",
+        )
+        policy.set_env(FakeEnv())
+
+        action = policy.get_action(
+            {
+                "pixels": torch.randn(1, 1, 3, 8, 8),
+                "goal": torch.randn(1, 1, 3, 8, 8),
+            }
+        )
+
+        self.assertIsNotNone(policy.action_bounds)
+        self.assertTrue(np.isfinite(action).all())
+        self.assertTrue((action <= 1.0 + 1e-6).all())
+        self.assertTrue((action >= -1.0 - 1e-6).all())
+        self.assertEqual(policy.planning_events[-1]["action_bound_mode"], "clip")
+
+    def test_p2_candidate_clip_propagates_bounds_to_solver_and_actor(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        model = make_round4_model().eval()
+        process = {
+            "action": StandardScaler().fit(
+                np.array(
+                    [
+                        [-0.2, -0.2, -0.2, -0.2],
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.2, 0.2, 0.2, 0.2],
+                    ]
+                )
+            )
+        }
+        solver_cfg = OmegaConf.create(
+            {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "model": "???",
+                "batch_size": 1,
+                "num_samples": 2,
+                "n_steps": 1,
+                "topk": 1,
+                "var_scale": 1.0,
+                "device": "cpu",
+            }
+        )
+        policy = make_round4_policy(
+            model,
+            mode="P2",
+            solver_cfg=solver_cfg,
+            plan_config={
+                "horizon": 5,
+                "receding_horizon": 5,
+                "action_block": 1,
+            },
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="candidate_clip",
+        )
+        policy.set_env(FakeEnv())
+
+        self.assertIsNotNone(policy.action_bounds)
+        self.assertIs(policy.solver.action_bounds, policy.action_bounds)
+        self.assertIs(policy.solver.model.action_bounds, policy.action_bounds)
+
+    def test_p2_candidate_clip_executes_a_bounded_cem_plan(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        model = make_round4_model().eval()
+        process = {
+            "action": StandardScaler().fit(
+                np.array(
+                    [
+                        [-0.2, -0.2, -0.2, -0.2],
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.2, 0.2, 0.2, 0.2],
+                    ]
+                )
+            )
+        }
+        solver_cfg = OmegaConf.create(
+            {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "model": "???",
+                "batch_size": 1,
+                "num_samples": 2,
+                "n_steps": 1,
+                "topk": 1,
+                "var_scale": 1.0,
+                "device": "cpu",
+            }
+        )
+        policy = make_round4_policy(
+            model,
+            mode="P2",
+            solver_cfg=solver_cfg,
+            plan_config={
+                "horizon": 5,
+                "receding_horizon": 5,
+                "action_block": 1,
+            },
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="candidate_clip",
+        )
+        policy.set_env(FakeEnv())
+
+        action = policy.get_action(
+            {
+                "pixels": torch.randn(1, 1, 3, 8, 8),
+                "goal": torch.randn(1, 1, 3, 8, 8),
+            }
+        )
+
+        self.assertEqual(action.shape, (1, 4))
+        self.assertTrue(np.isfinite(action).all())
+        self.assertTrue((action <= 1.0 + 1e-6).all())
+        self.assertTrue((action >= -1.0 - 1e-6).all())
+        self.assertIsNotNone(policy.solver.last_action_bound_projection)
 
     def test_candidate_split_does_not_change_verifier_argmin(self):
         model = make_round4_model().eval()

@@ -32,6 +32,26 @@ class Round4ProtocolTests(unittest.TestCase):
         self.assertIsNone(timed.events[0]["peak_memory_bytes"])
         self.assertGreaterEqual(timed.events[0]["planning_seconds"], 0.0)
 
+    def test_cem_timing_preserves_action_bound_projection_diagnostics(self):
+        projection = {"mode": "clip", "projected_candidate_violation_fraction": 0.0}
+
+        class FakeModel:
+            last_action_bound_projection = projection
+
+        class FakeSolver:
+            batch_size = 1
+            n_steps = 1
+            device = "cpu"
+            model = FakeModel()
+
+            def solve(self, info_dict, init_action=None):
+                del info_dict, init_action
+                return {"actions": []}
+
+        timed = _TimedSolver(FakeSolver())
+        timed.solve({"pixels": [0]})
+        self.assertEqual(timed.events[0]["action_bound_projection"], projection)
+
     def test_cuda_evaluation_binds_one_permitted_gpu_to_mujoco_egl(self):
         with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "2"}, clear=True):
             validate_gpu_visibility("cuda")

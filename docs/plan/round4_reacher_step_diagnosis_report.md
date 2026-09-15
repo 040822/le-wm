@@ -6,6 +6,8 @@
 
 最强信号来自 P2 actor warm-start 的动作幅度，而不是单纯的 Euler 步数：标准 P2 step16 的 dev 成功率为 **50.0%**，将同一 warm-start 缩放为 `alpha=0.5` 后为 **80.0%**；step1 为 **92.0%**，P1 随机 CEM 为 **74.0%**。step16 相对 alpha=0.5 的 paired 结果为 improved=17、regressed=2。
 
+重要口径修正：本文此前将 `abs(action_norm)>1` 称为“越界”，这是不准确的。当前 action normalizer 是基于完整数据集拟合的 z-score；Reacher 物理动作边界 `[-1, 1]` 映射到归一化空间约为 `[-1.7319, 1.7318]`（第二维约为 `[-1.7317, 1.7334]`）。因此下文的 `abs(action_norm)>1` 统一解释为 **legacy unit-threshold proxy**，不能直接等同于环境 action-space 越界。本报告的动作幅度结论仍然成立，但“环境越界是根因”需要由后续真实边界对照实验重新验证。
+
 Heun 能部分改变 P2 的闭环结果，但不是完整解释：P2-Heun-16 为 **68.0%**，相对 P2-Euler-16 的 paired 结果为 improved=14、regressed=5；P0 和 P3 使用 Heun 后分别为 **64.0%** 和 **78.0%**，均未优于对应 Euler-16 基线。
 
 ## 已有 step sweep
@@ -21,25 +23,25 @@ P2 step1 到 step16 的变化为 92% 到 50%，step32 回升到 56%，因此影�
 
 ## 固定噪声 sampler 诊断
 
-| sampler | median mean_abs | median 越界比例 | median path distance to Euler-16 |
+| sampler | median mean_abs | median legacy `|action_norm|>1` proxy | median path distance to Euler-16 |
 |---|---:|---:|---:|
 | Euler-1 | 0.142 | 0.000 | 6.587 |
 | Euler-16 | 0.825 | 0.390 | 0.000 |
 | Euler-32 | 0.852 | 0.420 | 0.207 |
 | Heun-16 | 0.878 | 0.440 | 0.417 |
 
-Euler step 增大使动作幅度和 normalized action 越界比例持续上升；Heun-16 的 path difference 也达到约 0.417，但其幅度并未回到 step1，而是更高。因此 Heun 不是“修复 step1 优势”的直接替代方案。
+Euler step 增大使动作幅度和 normalized action 的 legacy unit-threshold proxy 持续上升；Heun-16 的 path difference 也达到约 0.417，但其幅度并未回到 step1，而是更高。因此 Heun 不是“修复 step1 优势”的直接替代方案。
 
 ## CEM warm-start 诊断
 
-| 初始化 | median 初始 cost | median 初始越界比例 | median 最终 elite cost |
+| 初始化 | median 初始 cost | median 初始 legacy unit-threshold proxy | median 最终 elite cost |
 |---|---:|---:|---:|
 | P1 / no-warm | 0.8836 | 0.000 | 0.0088 |
 | P2 Euler-1 | 0.0349 | 0.000 | 0.0084 |
 | P2 Euler-16 | 0.0147 | 0.390 | 0.0086 |
 | P2 Euler-16, alpha=0.5 | 0.3154 | 0.000 | 0.0088 |
 
-alpha=0.5 使初始越界比例从 0.390 降到 0.000，并在闭环中恢复 30 个百分点。CEM 最终 elite cost 的差异很小，说明问题主要发生在初始动作 basin 与真实环境执行，而不是 CEM 最终 latent cost 无法收敛。
+alpha=0.5 使初始 legacy unit-threshold proxy 从 0.390 降到 0.000，并在闭环中恢复 30 个百分点。CEM 最终 elite cost 的差异很小，说明问题主要发生在初始动作 basin 与真实环境执行，而不是 CEM 最终 latent cost 无法收敛。
 
 ## Heun 闭环 gate
 
@@ -56,9 +58,9 @@ Heun 对 P2 有一定帮助，但 P0/P3 反而下降，不能据此把积分器�
 
 ## 失败边界与限制
 
-P2 Euler-16 dev 失败 episode 中，有 1/25 个 terminal margin 落在 `[-0.01, 0)`，说明 Reacher 严格的逐关节 0.05 rad 判据会放大很小的动作差异；但这只是放大器，不足以解释动作越界比例和 alpha 对照的恢复效果。
+P2 Euler-16 dev 失败 episode 中，有 1/25 个 terminal margin 落在 `[-0.01, 0)`，说明 Reacher 严格的逐关节 0.05 rad 判据会放大很小的动作差异；但这只是放大器，不足以解释动作尺度 proxy 和 alpha 对照的恢复效果。
 
-本轮没有重新训练、没有运行 final、没有增加第二个训练 seed。结果应解释为：在固定 checkpoint 和固定 dev cohort 上，P2 的 step 敏感性主要与 actor warm-start 的动作尺度/越界及 Reacher 阈值交互有关，Euler/Heun 离散化是次要影响因素。后续优先检查 action normalizer、warm-start 输出裁剪策略和 actor flow 的训练/校准；不建议仅通过增加 Euler steps 选择 P2 的默认配置。
+本轮没有重新训练、没有运行 final、没有增加第二个训练 seed。结果应解释为：在固定 checkpoint 和固定 dev cohort 上，P2 的 step 敏感性主要与 actor warm-start 的动作尺度、legacy unit-threshold proxy 以及 Reacher 阈值交互有关，Euler/Heun 离散化是次要影响因素。真实环境边界是否参与其中尚未由本轮证明；后续优先检查 action normalizer、真实归一化边界、warm-start 输出裁剪策略和 actor flow 的训练/校准；不建议仅通过增加 Euler steps 选择 P2 的默认配置。
 
 ## 可复现实验产物
 

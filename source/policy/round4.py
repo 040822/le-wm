@@ -365,6 +365,7 @@ def make_round4_policy(
     candidate_batch_size: int | None = None,
     actor_warm_start_scale: float = 1.0,
     action_flow_integrator: str = "euler",
+    action_bound_mode: str = "none",
 ):
     """Build one of the frozen Round 4 P0--P4 policy variants."""
     if mode not in ROUND4_MODES:
@@ -392,6 +393,7 @@ def make_round4_policy(
             ),
             seed=seed,
             action_flow_integrator=action_flow_integrator,
+            action_bound_mode=action_bound_mode,
         )
     if mode == "P0-shuf":
         return make_fast_lewam_policy(
@@ -410,6 +412,7 @@ def make_round4_policy(
             seed=seed,
             goal_mode="cyclic_shift",
             action_flow_integrator=action_flow_integrator,
+            action_bound_mode=action_bound_mode,
         )
     if mode in {"P1", "P2"}:
         policy = make_fast_lewam_policy(
@@ -433,6 +436,7 @@ def make_round4_policy(
             actor_warm_start=mode == "P2",
             actor_warm_start_scale=actor_warm_start_scale,
             action_flow_integrator=action_flow_integrator,
+            action_bound_mode=action_bound_mode,
         )
         if mode == "P2":
             policy.actor_warm_start_scale = float(actor_warm_start_scale)
@@ -440,6 +444,10 @@ def make_round4_policy(
     model = getattr(policy_or_model, "model", policy_or_model)
     model = model.to(device).eval() if device is not None else model.eval()
     plan_values = _to_container(plan_config)
+    if str(action_bound_mode).lower() != "none":
+        raise ValueError(
+            "action-bound variants are currently supported only for P0 and P2"
+        )
 
     def plan_value(name):
         if isinstance(plan_values, Mapping):

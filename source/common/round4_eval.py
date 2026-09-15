@@ -95,6 +95,20 @@ class _TimedSolver:
                 ),
             }
         )
+        projection = (
+            result.get("action_bound_projection")
+            if isinstance(result, dict)
+            else None
+        )
+        if projection is None:
+            solver_model = getattr(self._solver, "model", None)
+            projection = getattr(
+                solver_model,
+                "last_action_bound_projection",
+                None,
+            )
+        if projection is not None:
+            self.events[-1]["action_bound_projection"] = projection
         return result
 
     def __call__(self, *args, **kwargs):
@@ -193,6 +207,13 @@ def _planning_summary(policy: Any) -> dict[str, Any]:
         if item.get("peak_memory_bytes") is not None
     ]
     result["peak_memory_bytes"] = max(peak_values) if peak_values else None
+    projection_events = [
+        item["action_bound_projection"]
+        for item in events
+        if item.get("action_bound_projection") is not None
+    ]
+    if projection_events:
+        result["action_bound_projection"] = projection_events
     return result
 
 
@@ -216,6 +237,7 @@ def run_round4_evaluation(
     candidate_batch_size: int | None = None,
     actor_warm_start_scale: float = 1.0,
     action_flow_integrator: str = "euler",
+    action_bound_mode: str = "none",
 ) -> dict[str, Any]:
     """Run a Round 4 mode and publish cohort-bound result and trace artifacts."""
     mode = validate_round4_mode(mode)
@@ -274,6 +296,7 @@ def run_round4_evaluation(
         candidate_batch_size=candidate_batch_size,
         actor_warm_start_scale=actor_warm_start_scale,
         action_flow_integrator=action_flow_integrator,
+        action_bound_mode=action_bound_mode,
     )
     _time_cem_policy(policy, mode)
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
@@ -362,6 +385,15 @@ def run_round4_evaluation(
     planning = _planning_summary(policy)
     policy_meta = dict(spec)
     policy_meta.update(getattr(policy, "metadata", lambda: {})())
+    policy_meta["action_bound_mode"] = str(action_bound_mode)
+    action_bounds = getattr(policy, "action_bounds", None)
+    if action_bounds is not None:
+        policy_meta["action_bounds"] = action_bounds.metadata(
+            action_dim=int(cfg.plan_config.action_block)
+            * int(getattr(envs, "single_action_space", envs).shape[-1])
+            if envs is not None and hasattr(envs, "single_action_space")
+            else None
+        )
     if mode in {"P0", "P0-shuf"}:
         policy_meta["action_flow_steps"] = int(
             16 if action_flow_steps is None else action_flow_steps
@@ -412,6 +444,7 @@ def run_round4_evaluation(
                 float(actor_warm_start_scale) if mode == "P2" else None
             ),
             "action_flow_integrator": str(action_flow_integrator),
+            "action_bound_mode": str(action_bound_mode),
         },
         "evaluation_seconds": float(elapsed),
         "success_rate": float(successes.mean()),
