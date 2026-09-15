@@ -10,7 +10,17 @@ import numpy as np
 import stable_worldmodel as swm
 import torch
 
-from source.policy.fast_lewam_eval import _validate_action_dim, make_fast_lewam_policy
+from source.common.round4_action_bounds import (
+    NormalizedActionBounds,
+    compute_normalized_action_bounds,
+    normalized_action_stats,
+    project_normalized_actions,
+)
+from source.policy.fast_lewam_eval import (
+    _validate_action_bound_mode,
+    _validate_action_dim,
+    make_fast_lewam_policy,
+)
 from source.policy.lewm import _to_container
 
 
@@ -90,6 +100,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         process=None,
         transform=None,
         seed: int = 42,
+        action_bound_mode: str = "none",
     ):
         super().__init__()
         if proposal_source not in {"action", "latent"}:
@@ -125,6 +136,11 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         self.process = process or {}
         self.transform = transform or {}
         self.seed = int(seed)
+        self.action_bound_mode = _validate_action_bound_mode(
+            action_bound_mode,
+            allowed=("none", "clip", "global_scale"),
+        )
+        self.action_bounds: NormalizedActionBounds | None = None
         self._generators = {}
         self._action_buffer = None
         self.planning_events: list[dict] = []
@@ -143,6 +159,18 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         self.env = env
         self._action_buffer = [deque() for _ in range(env.num_envs)]
         _validate_action_dim(self.model, env, self.action_block)
+        if self.action_bound_mode == "none":
+            return
+        processor = self.process.get("action") if self.process else None
+        if processor is None:
+            raise ValueError(
+                "action-bound projection requires the evaluation action processor"
+            )
+        self.action_bounds = compute_normalized_action_bounds(
+            env.single_action_space,
+            processor,
+            action_block=self.action_block,
+        )
 
     @staticmethod
     def _slice_info(info, indices):
@@ -237,8 +265,43 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             candidate_batch_size=self.candidate_batch_size,
         )
 
+    def _project_candidates(self, candidates):
+        if self.action_bound_mode == "none":
+            return candidates, None
+        if self.action_bounds is None:
+            raise RuntimeError(
+                "set_env must configure action bounds before planning"
+            )
+        projected = project_normalized_actions(
+            candidates,
+            self.action_bounds,
+            mode=self.action_bound_mode,
+        )
+        before = normalized_action_stats(candidates, self.action_bounds)
+        after = normalized_action_stats(projected, self.action_bounds)
+        delta = (projected - candidates).detach().float().abs()
+        changed_fraction = float((delta > 1e-6).float().mean().cpu())
+        return projected, {
+            "mode": self.action_bound_mode,
+            "bounds": self.action_bounds.metadata(
+                action_dim=self.model.action_dim
+            ),
+            "before": before,
+            "after": after,
+            "changed_fraction": changed_fraction,
+            "mean_abs_delta": float(delta.mean().cpu()),
+            "max_abs_delta": float(delta.max().cpu()),
+            "raw_candidate_violation_fraction": float(
+                before["true_normalized_bound_violation_fraction"]
+            ),
+            "projected_candidate_violation_fraction": float(
+                after["true_normalized_bound_violation_fraction"]
+            ),
+            "candidate_changed_fraction": changed_fraction,
+        }
+
     def metadata(self) -> dict:
-        return {
+        metadata = {
             "proposal_source": self.proposal_source,
             "candidate_count": self.num_candidates,
             "flow_steps": self.flow_steps,
@@ -249,7 +312,13 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             "selection_rule": self.selection_rule,
             "solver_batch_size": self.solver_batch_size,
             "candidate_batch_size": self.candidate_batch_size,
+            "action_bound_mode": self.action_bound_mode,
         }
+        if self.action_bounds is not None:
+            metadata["action_bounds"] = self.action_bounds.metadata(
+                action_dim=self.model.action_dim
+            )
+        return metadata
 
     def get_action(self, info_dict, **kwargs):
         del kwargs
@@ -285,7 +354,10 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
 
             started = time.perf_counter()
             with torch.no_grad():
-                candidates, proposal_meta = self._propose(z_start, z_goal, generator)
+                raw_candidates, proposal_meta = self._propose(
+                    z_start, z_goal, generator
+                )
+                candidates, projection = self._project_candidates(raw_candidates)
             _sync(device)
             proposal_seconds = time.perf_counter() - started
 
@@ -333,6 +405,8 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
                 "forward_count": int(proposal_meta["forward_count"] + verifier_forward_count),
                 "peak_memory_bytes": peak_memory,
             }
+            if projection is not None:
+                event["action_bound_projection"] = projection
             self.planning_events.append(event)
             for row, env_index in enumerate(replan):
                 self._action_buffer[env_index].extend(plan[row].detach().cpu())
@@ -444,9 +518,9 @@ def make_round4_policy(
     model = getattr(policy_or_model, "model", policy_or_model)
     model = model.to(device).eval() if device is not None else model.eval()
     plan_values = _to_container(plan_config)
-    if str(action_bound_mode).lower() != "none":
+    if mode in {"P4", "P4-first"} and str(action_bound_mode).lower() != "none":
         raise ValueError(
-            "action-bound variants are currently supported only for P0 and P2"
+            "action-bound variants are not defined for latent P4 proposals"
         )
 
     def plan_value(name):
@@ -475,6 +549,7 @@ def make_round4_policy(
         process=process,
         transform=transform,
         seed=seed,
+        action_bound_mode=action_bound_mode,
     )
 
 

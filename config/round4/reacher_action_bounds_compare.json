@@ -45,6 +45,15 @@
       "mode": "P0",
       "action_bound_mode": "global_scale"
     },
+    "P1_none": {
+      "mode": "P1",
+      "action_bound_mode": "none",
+      "reuse": "outputs/round4/ab_flow_steps_seed3072/invariant_p1/reacher/P1/dev/result.json"
+    },
+    "P1_candidate_clip": {
+      "mode": "P1",
+      "action_bound_mode": "candidate_clip"
+    },
     "P2_none": {
       "mode": "P2",
       "action_bound_mode": "none",
@@ -66,6 +75,14 @@
       "mode": "P3",
       "action_bound_mode": "none",
       "reuse": "outputs/round4/ab_flow_steps_seed3072/steps_16/reacher/P3/dev/result.json"
+    },
+    "P3_clip": {
+      "mode": "P3",
+      "action_bound_mode": "clip"
+    },
+    "P3_scale": {
+      "mode": "P3",
+      "action_bound_mode": "global_scale"
     }
   },
   "output_root": "outputs/round4/reacher_action_bounds_compare_seed3072_dev",

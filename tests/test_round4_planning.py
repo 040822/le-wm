@@ -125,7 +125,7 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(policy.actor_warm_start_scale, 0.5)
         self.assertEqual(policy.solver.model.action_scale, 0.5)
 
-    def test_action_bound_variants_are_selected_only_for_p0_and_p2(self):
+    def test_action_bound_variants_are_available_for_p0_p1_p2_and_p3(self):
         model = make_round4_model().eval()
         plan_config = {
             "horizon": 5,
@@ -178,6 +178,91 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(p2.action_bound_mode, "candidate_clip")
         self.assertIsInstance(p2.solver, ProjectedCEMSolver)
         self.assertEqual(p2.solver.model.action_projection, "clip")
+
+        p1 = make_round4_policy(
+            model,
+            mode="P1",
+            solver_cfg=solver_cfg,
+            plan_config=plan_config,
+            process=process,
+            device="cpu",
+            action_bound_mode="candidate_clip",
+        )
+        self.assertEqual(p1.action_bound_mode, "candidate_clip")
+        self.assertIsInstance(p1.solver, ProjectedCEMSolver)
+        self.assertEqual(p1.solver.model.__class__.__name__, "StageBModelView")
+
+        p3 = make_round4_policy(
+            model,
+            mode="P3",
+            plan_config=plan_config,
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="clip",
+        )
+        self.assertEqual(p3.action_bound_mode, "clip")
+
+        p3_scale = make_round4_policy(
+            model,
+            mode="P3",
+            plan_config=plan_config,
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="global_scale",
+        )
+        self.assertEqual(p3_scale.action_bound_mode, "global_scale")
+
+    def test_p3_projects_candidates_before_verifier_with_real_normalized_bounds(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        process = {
+            "action": StandardScaler().fit(
+                np.array(
+                    [
+                        [-0.5, -0.5, -0.5, -0.5],
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.5, 0.5, 0.5, 0.5],
+                    ]
+                )
+            )
+        }
+        policy = make_round4_policy(
+            make_round4_model().eval(),
+            mode="P3",
+            plan_config={
+                "horizon": 5,
+                "receding_horizon": 5,
+                "action_block": 1,
+            },
+            process=process,
+            device="cpu",
+            action_flow_steps=1,
+            action_bound_mode="clip",
+        )
+        policy.set_env(FakeEnv())
+
+        raw = torch.full((1, 4, 5, 4), 4.0)
+        projected, summary = policy._project_candidates(raw)
+
+        self.assertIsNotNone(policy.action_bounds)
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["mode"], "clip")
+        self.assertGreater(summary["raw_candidate_violation_fraction"], 0.0)
+        self.assertEqual(summary["projected_candidate_violation_fraction"], 0.0)
+        self.assertTrue(
+            torch.all(
+                projected
+                <= torch.as_tensor(
+                    policy.action_bounds.for_action_dim(4)[1]
+                ).reshape(1, 1, 1, 4)
+                + 1e-6
+            )
+        )
 
     def test_p0_clip_configures_bounds_and_keeps_environment_action_legal(self):
         class FakeEnv:

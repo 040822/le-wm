@@ -827,14 +827,19 @@ def make_fast_lewam_policy(
             action_bound_mode,
             allowed=("none", "warm_start_clip", "candidate_clip", "warm_start_scale"),
         )
-        if action_bound_mode != "none" and not actor_warm_start:
+        if (
+            action_bound_mode != "none"
+            and action_bound_mode != "candidate_clip"
+            and not actor_warm_start
+        ):
             raise ValueError(
-                "action-bound variants for stage_b require actor_warm_start=True"
+                "warm-start action-bound variants for stage_b require "
+                "actor_warm_start=True"
             )
         warm_start_projection = {
             "none": "none",
             "warm_start_clip": "clip",
-            "candidate_clip": "clip",
+            "candidate_clip": "clip" if actor_warm_start else "none",
             "warm_start_scale": "global_scale",
         }[action_bound_mode]
         solver_model = (

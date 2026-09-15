@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compare normalized action-bound projections on the fixed Reacher dev cohort.
 
-The script reuses the frozen Round 4 evaluator for new P0/P2 variants and
-loads the existing P0/P2/P3 step-16 results as baselines.  It deliberately
+The script reuses the frozen Round 4 evaluator for new P1/P3 variants and
+loads existing P0/P1/P2/P3 step-16 results as baselines.  It deliberately
 does not retrain a checkpoint or run the final cohort.
 """
 
@@ -158,6 +158,14 @@ def _validate_result(
         planning.get("actor_flow_steps", planning.get("action_flow_steps", -1))
     ) != 16:
         raise ValueError(f"{name} is not a P2 Euler-16 result")
+    if spec["mode"] == "P1":
+        for field, expected in (
+            ("candidate_count", 300),
+            ("cem_iterations", 30),
+            ("cem_topk", 30),
+        ):
+            if int(planning.get(field, -1)) != expected:
+                raise ValueError(f"{name} does not use the frozen P1 CEM settings")
 
 
 def _physical_action_stats(episodes: list[Mapping[str, Any]]) -> dict[str, float | int]:
@@ -301,7 +309,7 @@ def _render_report(
         [
             "## Dev 结果",
             "",
-            "| variant | 方法 | 边界处理 | 成功率 | 物理动作越界率 | warm-start 归一化真实越界率(前) | CEM 原始候选越界率 | planning median(s) |",
+            "| variant | 方法 | 边界处理 | 成功率 | 物理动作越界率 | 投影前归一化真实越界率 | 原始候选归一化越界率 | planning median(s) |",
             "|---|---|---|---:|---:|---:|---:|---:|",
         ]
     )
@@ -316,10 +324,9 @@ def _render_report(
             "",
             "## 结论",
             "",
-            "- P2 candidate-clip 从 50.0% 提升到 80.0%（+30pp）；episode-level paired comparison 为 improved=18、regressed=3，McNemar exact two-sided p=0.00149。物理动作越界率从 0.1278 降到 0。",
-            "- P2 warm-start clip 为 50.0%，P2 global-scale 为 52.0%；两者没有复现 candidate-clip 的收益，说明只处理 actor warm-start 不够，关键作用发生在 CEM candidate 生成/评分/elite 更新的一致约束上。",
-            "- P0 clip 和 global-scale 都保持 70.0%；物理越界率从 0.0009 降为 0，但成功率不变，说明 P0 的少量真实越界不是本 cohort 的主要失败原因。",
-            "- 归一化真实边界约为 `[-1.73, 1.73]`，而不是 `[-1, 1]`。因此本实验支持“CEM 候选约束有益”，但不能把收益简单解释成消除了大量 actor warm-start 环境越界；它也可能改变了 B verifier 看到的候选分布和搜索轨迹。",
+            "- P0、P1、P2、P3 均以各自的 `*_none` 作为 paired baseline；P1 的 candidate-clip 只约束 CEM candidate，P3 的 clip/global-scale 约束 A 生成的 64 条候选后再交给 B verifier。",
+            "- CEM candidate 约束同时改变候选、B 评分输入和 elite 更新轨迹；P3 的候选约束则改变 B 评分输入和最终 argmin。因此成功率变化不能简单归因于执行阶段避免越界。",
+            "- 归一化真实边界约为 `[-1.73, 1.73]`，而不是 `[-1, 1]`；本报告同时记录真实物理动作越界和归一化边界越界。",
             "",
             "## Episode-level paired comparison",
             "",
@@ -347,8 +354,8 @@ def _render_report(
             "",
             "## 解释规则",
             "",
-            "- P0 仅比较直接动作路径的 `clip` 和 `global_scale`；P2 分别比较 warm-start、CEM candidate 和 global-scale 处理。P3 作为已有 step16 baseline。",
-            "- 若真实物理越界下降且成功率提高，动作边界处理可作为后续 P2 候选，但不覆盖默认 evaluator。",
+            "- P0 比较直接动作路径的 `clip` 和 `global_scale`；P1 比较随机初始化 CEM 的 candidate-clip；P2 保留 warm-start、CEM candidate 和 global-scale 三类处理；P3 比较 A best-of-64 候选的 `clip` 和 `global_scale`。",
+            "- 若真实物理越界下降且成功率提高，动作边界处理可作为后续规划候选，但不覆盖默认 evaluator。",
             "- 若真实越界接近零而成功率不变，则此前主要信号来自 `abs>1` proxy，不能据此断言环境动作越界是根因。",
             "",
             f"输出目录：`{output_root}`",
