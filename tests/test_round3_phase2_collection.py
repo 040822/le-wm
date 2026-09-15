@@ -94,6 +94,39 @@ class Round3Phase2CollectionTests(unittest.TestCase):
         self.assertTrue(torch.equal(replay.successes, torch.tensor([True, False, True, False])))
         self.assertEqual(replay.group_ids, ("g",) * 4)
 
+    def test_finalize_closes_last_complete_block_without_extra_environment_step(self):
+        policy = FakePolicy()
+        recorder = ExecutedTransitionRecorder(
+            policy,
+            episode_ids=[7],
+            start_steps=[3],
+            history_size=3,
+            action_block=2,
+            model_version="e5:epoch10",
+        )
+        for step in range(8):
+            recorder.get_action(
+                {
+                    "pixels": np.full((1, 1, 2, 2), step, dtype=np.uint8),
+                    "goal": np.zeros((1, 1), dtype=np.float32),
+                }
+            )
+
+        before = recorder.environment_steps
+        recorder.finalize(
+            {
+                "pixels": np.full((1, 1, 2, 2), 8, dtype=np.uint8),
+                "goal": np.zeros((1, 1), dtype=np.float32),
+            }
+        )
+        replay = recorder.replay()
+
+        self.assertEqual(recorder.environment_steps, before)
+        self.assertEqual(replay.count, 2)
+        self.assertEqual(tuple(replay.observations.shape), (2, 4, 1, 2, 2))
+        self.assertEqual(tuple(replay.actions.shape), (2, 3, 4))
+        self.assertEqual(replay.observations[-1, -1].mean().item(), 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()

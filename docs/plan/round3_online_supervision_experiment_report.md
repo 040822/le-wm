@@ -127,6 +127,19 @@ continuous.pt 和 group-0000 shard，只从失败 group 继续。当前尚无完
 grounded/fixed-replay 汇总，因此尚未启动 T0–T6 训练，也没有 success-rate 曲线或
 final-200 结果可报告。
 
+随后发现 v1 的 grounded shard 还存在独立的 shape contract 问题：旧 recorder 为了
+在 5-block panel 内产出数据使用了 `history_size=action_horizon-2`，导致 grounded
+行是 `observations=[4,...]`、`actions=[3,...]`，而 Fast-LeWAM 训练严格要求
+`observations=[action_horizon+1,...]`、`actions=[action_horizon,...]`。v1 的
+grounded/fixed 汇总因此被保留为诊断 artifact，不作为训练输入。
+
+已修复 recorder：grounded 仍只执行 5 个 action blocks，在 rollout 结束后以
+terminal observation 闭合最后一个完整 block，不调用环境、不增加 env step；完整
+候选现在生成与 continuous 相同的 `6/5` 窗口，提前终止候选按 no-window 记录。CPU
+回归测试已通过。正确 shape 的重建输出使用独立的
+`/tmp/round3_online_supervision/{reacher,pusht}/fixed_replay_v2/` 根目录，复用 v1
+的 offline/continuous artifact；v2 完成前不启动训练。
+
 ## 下一轮：固定 replay 与 200 optimizer updates
 
 下一轮按已确认的 guidance，按任务分别执行：

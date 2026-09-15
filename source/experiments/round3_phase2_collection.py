@@ -96,6 +96,64 @@ class ExecutedTransitionRecorder:
             return raw.float()
         return torch.stack([self.observation_transform(frame) for frame in raw], dim=0)
 
+    def _record_block_boundary(
+        self,
+        index: int,
+        pixels: torch.Tensor,
+        raw_pixels: torch.Tensor,
+    ) -> None:
+        """Close one completed block and record eligible history windows."""
+        step = self._steps[index]
+        if step % self.action_block != 0:
+            return
+        if step > 0:
+            if len(self._current_actions[index]) != self.action_block:
+                raise RuntimeError("action block closed before collecting all environment actions")
+            self._completed_actions[index].append(
+                torch.cat(self._current_actions[index], dim=-1)
+            )
+            self._completed_raw_actions[index].append(
+                torch.cat(self._current_raw_actions[index], dim=-1)
+            )
+            self._current_actions[index].clear()
+            self._current_raw_actions[index].clear()
+        self._block_observations[index].append(pixels[index].clone())
+        self._block_raw_observations[index].append(raw_pixels[index].clone())
+        if (
+            len(self._block_observations[index]) >= self.history_size + 1
+            and len(self._completed_actions[index]) >= self.history_size
+        ):
+            observation_window = torch.stack(
+                self._block_observations[index][-self.history_size - 1 :]
+            )
+            raw_observation_window = torch.stack(
+                self._block_raw_observations[index][-self.history_size - 1 :]
+            )
+            action_window = torch.stack(
+                self._completed_actions[index][-self.history_size :]
+            )
+            raw_action_window = torch.stack(
+                self._completed_raw_actions[index][-self.history_size :]
+            )
+            self._records.append({
+                "observations": observation_window,
+                "raw_observations": raw_observation_window,
+                "actions": action_window,
+                "raw_actions": raw_action_window,
+                "episode_ids": (self.episode_ids[index],) * (self.history_size + 1),
+                "start_step": self.start_steps[index] + step - self.history_size * self.action_block,
+                "goal": self._goals[index],
+                "env_index": index,
+                "group_id": (
+                    None if self.group_ids is None else self.group_ids[index]
+                ),
+                "snapshot_id": (
+                    None
+                    if self.snapshot_ids is None
+                    else self.snapshot_ids[index]
+                ),
+            })
+
     def get_action(self, info: dict[str, Any], **kwargs: Any) -> np.ndarray:
         raw_pixels = _batch_pixels(info["pixels"])
         pixels = self._processed_pixels(raw_pixels)
@@ -120,55 +178,7 @@ class ExecutedTransitionRecorder:
                     )
 
         for index in range(len(self.episode_ids)):
-            step = self._steps[index]
-            if step % self.action_block == 0:
-                if step > 0:
-                    if len(self._current_actions[index]) != self.action_block:
-                        raise RuntimeError("action block closed before collecting all environment actions")
-                    self._completed_actions[index].append(
-                        torch.cat(self._current_actions[index], dim=-1)
-                    )
-                    self._completed_raw_actions[index].append(
-                        torch.cat(self._current_raw_actions[index], dim=-1)
-                    )
-                    self._current_actions[index].clear()
-                    self._current_raw_actions[index].clear()
-                self._block_observations[index].append(pixels[index].clone())
-                self._block_raw_observations[index].append(raw_pixels[index].clone())
-                if (
-                    len(self._block_observations[index]) >= self.history_size + 1
-                    and len(self._completed_actions[index]) >= self.history_size
-                ):
-                    observation_window = torch.stack(
-                        self._block_observations[index][-self.history_size - 1 :]
-                    )
-                    raw_observation_window = torch.stack(
-                        self._block_raw_observations[index][-self.history_size - 1 :]
-                    )
-                    action_window = torch.stack(
-                        self._completed_actions[index][-self.history_size :]
-                    )
-                    raw_action_window = torch.stack(
-                        self._completed_raw_actions[index][-self.history_size :]
-                    )
-                    self._records.append({
-                        "observations": observation_window,
-                        "raw_observations": raw_observation_window,
-                        "actions": action_window,
-                        "raw_actions": raw_action_window,
-                        "episode_ids": (self.episode_ids[index],) * (self.history_size + 1),
-                        "start_step": self.start_steps[index] + step - self.history_size * self.action_block,
-                        "goal": self._goals[index],
-                        "env_index": index,
-                        "group_id": (
-                            None if self.group_ids is None else self.group_ids[index]
-                        ),
-                        "snapshot_id": (
-                            None
-                            if self.snapshot_ids is None
-                            else self.snapshot_ids[index]
-                        ),
-                    })
+            self._record_block_boundary(index, pixels, raw_pixels)
 
         raw_action = _batch_actions(self.policy.get_action(info, **kwargs))
         normalized_action = torch.as_tensor(self.normalize_action(raw_action)).detach().cpu().float()
@@ -179,6 +189,26 @@ class ExecutedTransitionRecorder:
             self._current_raw_actions[index].append(raw_action[index].clone())
             self._steps[index] += 1
         return raw_action.numpy()
+
+    def finalize(self, info: dict[str, Any]) -> None:
+        """Close a final full action block using terminal observations only.
+
+        Fixed finite-horizon panels have no policy call after their last
+        environment step. This method records that terminal observation
+        without invoking the wrapped policy or increasing ``environment_steps``.
+        Incomplete blocks and early-terminated environments are ignored.
+        """
+        raw_pixels = _batch_pixels(info["pixels"])
+        pixels = self._processed_pixels(raw_pixels)
+        if len(raw_pixels) != len(self.episode_ids):
+            raise ValueError("policy info env count differs from recorder metadata")
+        for index in range(len(self.episode_ids)):
+            if (
+                self._steps[index] > 0
+                and self._steps[index] % self.action_block == 0
+                and len(self._current_actions[index]) == self.action_block
+            ):
+                self._record_block_boundary(index, pixels, raw_pixels)
 
     def __call__(self, info: dict[str, Any], **kwargs: Any) -> np.ndarray:
         return self.get_action(info, **kwargs)

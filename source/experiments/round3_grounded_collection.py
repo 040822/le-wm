@@ -435,7 +435,7 @@ def collect_grounded_replay(
             policy,
             episode_ids=[entry["episode_id"]] * 4,
             start_steps=[entry["start_step"]] * 4,
-            history_size=int(model.action_horizon) - 2,
+            history_size=int(model.action_horizon),
             action_block=action_block,
             model_version=f"{resolved_checkpoint or checkpoint}:{group_payload['checkpoint_sha256']}",
             normalize_action=lambda value: torch.as_tensor(
@@ -462,6 +462,7 @@ def collect_grounded_replay(
                 callables=OmegaConf.to_container(cfg.eval.callables, resolve=True),
                 reset_mode="wait",
             )
+            recorder.finalize(world.infos)
             if not recorder.initial_physical_info:
                 raise RuntimeError("grounded collector did not receive physical reset fields")
             start_costs = _costs_from_info(task, recorder.initial_physical_info)
