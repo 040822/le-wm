@@ -243,6 +243,19 @@ def _projection_stats(payload: Mapping[str, Any]) -> dict[str, Any]:
         "projected_candidate_violation_fraction": mean(
             "projected_candidate_violation_fraction", list(events)
         ),
+        "projection_input_violation_fraction": (
+            mean("raw_candidate_violation_fraction", list(events))
+            if any(
+                item.get("raw_candidate_violation_fraction") is not None
+                for item in events
+            )
+            else mean(
+                "true_normalized_bound_violation_fraction", before
+            )
+        ),
+        "candidate_changed_fraction": mean(
+            "candidate_changed_fraction", list(events)
+        ),
     }
 
 
@@ -270,6 +283,8 @@ def _result_row(name: str, spec: Mapping[str, Any], payload: Mapping[str, Any]) 
         "projection_changed_fraction",
         "projection_mean_abs_delta",
         "projection_max_abs_delta",
+        "projection_input_violation_fraction",
+        "candidate_changed_fraction",
         "raw_candidate_violation_fraction",
         "projected_candidate_violation_fraction",
     ):
@@ -309,13 +324,13 @@ def _render_report(
         [
             "## Dev 结果",
             "",
-            "| variant | 方法 | 边界处理 | 成功率 | 物理动作越界率 | 投影前归一化真实越界率 | 原始候选归一化越界率 | planning median(s) |",
-            "|---|---|---|---:|---:|---:|---:|---:|",
+            "| variant | 方法 | 边界处理 | 成功率 | 物理动作越界率 | 投影输入归一化真实越界率 | 原始候选归一化越界率 | 候选修改率 | planning median(s) |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         lines.append(
-            "| {variant} | {method} | {action_bound_mode} | {success_rate_percent:.1f}% | {physical_action_violation_fraction:.4f} | {true_normalized_bound_before_fraction} | {raw_candidate_violation_fraction} | {planning_median_seconds} |".format(
+            "| {variant} | {method} | {action_bound_mode} | {success_rate_percent:.1f}% | {physical_action_violation_fraction:.4f} | {projection_input_violation_fraction} | {raw_candidate_violation_fraction} | {candidate_changed_fraction} | {planning_median_seconds} |".format(
                 **row
             )
         )
@@ -522,10 +537,16 @@ def main(argv: list[str] | None = None) -> None:
         for name in variants
     ]
     paired: dict[str, Any] = {}
+    baseline_by_method = {
+        "P0": "P0_none",
+        "P1": "P1_none",
+        "P2": "P2_none",
+        "P3": "P3_none",
+    }
     for name, spec in variants.items():
-        if name in {"P0_none", "P2_none", "P3_none"}:
+        baseline_name = baseline_by_method[spec["mode"]]
+        if name == baseline_name:
             continue
-        baseline_name = "P0_none" if spec["mode"] == "P0" else "P2_none"
         comparison = paired_comparison(
             payloads[baseline_name].get("episodes", []),
             payloads[name].get("episodes", []),

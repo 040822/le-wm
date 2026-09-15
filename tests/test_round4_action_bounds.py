@@ -208,6 +208,7 @@ class Round4ActionBoundsTests(unittest.TestCase):
                         },
                         "raw_candidate_violation_fraction": 0.4,
                         "projected_candidate_violation_fraction": 0.0,
+                        "candidate_changed_fraction": 0.4,
                     }
                 ]
             }
@@ -219,6 +220,7 @@ class Round4ActionBoundsTests(unittest.TestCase):
         self.assertAlmostEqual(stats["true_normalized_bound_after_fraction"], 0.0)
         self.assertAlmostEqual(stats["raw_candidate_violation_fraction"], 0.4)
         self.assertAlmostEqual(stats["projected_candidate_violation_fraction"], 0.0)
+        self.assertAlmostEqual(stats["candidate_changed_fraction"], 0.4)
 
 
 if __name__ == "__main__":
