@@ -203,6 +203,16 @@ class Round3OnlineSupervisionTests(unittest.TestCase):
             self.assertEqual(metadata["step_unit"], "optimizer_update_step")
             self.assertIn("optimizer_update_step", (Path(directory) / "curve.csv").read_text())
 
+    def test_fixed_replay_resume_accepts_legacy_continuous_report_name(self):
+        from scripts.round3_online_supervision import _report_path
+
+        with tempfile.TemporaryDirectory() as directory:
+            replay = Path(directory) / "continuous.pt"
+            legacy_report = replay.with_suffix(".json")
+            legacy_report.write_text("{}")
+
+            self.assertEqual(_report_path(replay), legacy_report)
+
     def test_fixed_replay_runner_publishes_resumable_optimizer_curve(self):
         replay = make_supervision_replay().subset((0, 1, 2, 3))
         with tempfile.TemporaryDirectory() as directory:

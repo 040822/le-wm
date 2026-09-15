@@ -66,7 +66,15 @@ def _path(value: str | Path) -> Path:
 
 
 def _report_path(replay_path: Path) -> Path:
-    return replay_path.with_suffix(replay_path.suffix + ".json")
+    report_path = replay_path.with_suffix(replay_path.suffix + ".json")
+    if report_path.is_file():
+        return report_path
+    # collect_online historically published ``continuous.json`` while the
+    # other replay builders use ``<replay>.pt.json``. Keep resume compatible
+    # with that already completed artifact and use the canonical path for new
+    # reports.
+    legacy_path = replay_path.with_suffix(".json")
+    return legacy_path if legacy_path.is_file() else report_path
 
 
 def _read_report(path: Path) -> dict[str, Any]:
@@ -283,6 +291,10 @@ def prepare_fixed_replay(
             guidance_max_rms_offset=float(guidance_max_rms_offset),
             collector_version="round3_grounded_v1",
             resume=bool(resume),
+            # Some sampled starts terminate before one complete history
+            # window. They still consume the fixed 100 environment steps for
+            # the group, but should not abort the remaining grounded panel.
+            allow_empty_replay=True,
         )
     if int(grounded_report.get("environment_steps", -1)) != int(grounded_steps):
         raise RuntimeError("grounded collection did not meet the exact fixed budget")

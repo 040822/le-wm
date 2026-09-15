@@ -11,7 +11,7 @@
 - 所有 E1/E2 collection report 均为 `ok`；
 - E1 的 `Δphysical_cost` 定义为候选终点物理 cost 减去 actor anchor cost，负值
   表示物理 cost 下降；
-- 本轮没有启动 fixed replay、T0–T6 训练或 success-rate 曲线。
+- 阶段二 fixed replay 已启动但尚未完成；T0–T6 训练和 success-rate 曲线尚未启动。
 
 GPU 最初在沙箱内不可见，改用沙箱外执行后确认节点有 8 张 RTX 4090。本轮实际
 只使用物理 GPU0–3：E1 使用 GPU0/1，E2 使用 GPU2/3；GPU4–7 未使用。
@@ -115,8 +115,17 @@ CEM solver 的 `inference_mode` 冲突：CEM 的 actor warm-start 调用被包�
 `inference_mode` 并显式开启 autograd；CEM 候选评分路径未改变。新增的 smoke test
 已同时覆盖 `post_opt` 和 `guided_flow`，并验证两者均实际产生 backward。随后用
 `--resume` 从既有 offline replay 重新启动 continuous collection；截至本记录时
-两个进程仍在运行，尚未生成 continuous/grounded/fixed-replay 汇总，因此尚未启动
-T0–T6 训练，也没有 success-rate 曲线或 final-200 结果可报告。
+Reacher 的 continuous 已完成精确 16,000 env steps，并已发布
+`replay/continuous.pt`；Push-T 的 continuous 仍在运行。
+
+Reacher 随后的 grounded 阶段在 `grounded-0001` 遇到一个过短 episode，recorder
+没有形成完整 history window。group-0000 的 100 env steps 和 8 条 replay rows 已
+保留；该情况本应被记录为 `ok_no_complete_transition_window` 并继续后续 groups，
+但 fixed-replay orchestration 当时没有传入 collector 已支持的
+`allow_empty_replay=True`，因此进程提前退出。已补上该参数；重新执行时会复用
+continuous.pt 和 group-0000 shard，只从失败 group 继续。当前尚无完整
+grounded/fixed-replay 汇总，因此尚未启动 T0–T6 训练，也没有 success-rate 曲线或
+final-200 结果可报告。
 
 ## 下一轮：固定 replay 与 200 optimizer updates
 
