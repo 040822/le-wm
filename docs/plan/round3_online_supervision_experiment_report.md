@@ -207,6 +207,7 @@ GPU 映射后的 RNG state 转回 CPU ByteTensor 的恢复保护；针对性测�
 | Reacher | T3 online ranking | 87.5 | 79.5 | 81.0 | 78.0 | 77.5 |
 | Reacher | T4 online/offline-A | 87.5 | 79.5 | 78.0 | 80.0 | 70.5 |
 | Reacher | T5 online hindsight-A | 87.5 | 78.5 | 82.5 | 79.5 | 76.0 |
+| Reacher | T6 online distill-A | 87.5 | 79.0 | 76.5 | 78.5 | 79.5 |
 | Push-T | T0 frozen | 88.5 | 88.5 | 89.0 | 88.5 | 89.0 |
 | Push-T | T1 offline-B MSE | 88.5 | 88.5 | 85.5 | 83.5 | 85.0 |
 | Push-T | T2 online-B MSE | 88.5 | 84.5 | 81.5 | 83.0 | 81.5 |
@@ -246,6 +247,89 @@ Reacher T6 当前已完成的曲线点为：update 0=`87.5%`、10=`82.5%`、20=`
 2. 在 Reacher T6 完成后，哪些 T3/T5/T6 arm 值得进入 closed-loop；
 3. 是否先按 200-update 曲线做阶段三的 20k-env-step 复验，或延长固定 replay 到
    500/1000 update。这里不预设通过分数，最终由你决定。
+
+## 阶段二最终结果（2026-09-16 22:25）
+
+### 完成性与协议核验
+
+Reacher 和 Push-T 的 fixed-replay 根结果均为 `status=ok`，T0--T6 共 14 个 arm
+全部完成 200 个 optimizer updates。每个 arm 均有完整的
+`0, 10, 20, ..., 200` 曲线、21 个 checkpoint 和 200 条 update history；曲线的
+step unit 明确为 `optimizer_update_step`，不是 env step。
+
+final evaluation 独立核验了 294 个 aggregate 结果（14 arms × 21 points）：每个
+结果均为 200 episodes，由 4 个各 50 episodes 的 batch 组成，状态为 `ok`，并且
+每个任务内部使用同一个 fixed final cohort。Reacher cohort hash 为
+`f81e4830dd2bb80ad1a8109b67873496fa86651ccba63d49ab6d8b0c78b87490`，Push-T
+cohort hash 为 `138501dd8c2d88990074da59039aa092d4269e841c7114fe68ae49fdd36cc47b`。
+所有 final checkpoint hash、curve coverage、loss finite性和 source counts 均已通过
+全量校验。
+
+工程侧验证也已完成：Round3 定向测试 `14/14` 通过，3 个本轮修改文件通过
+`py_compile`。全仓库共运行 343 个测试，其中 1 个 skip；仅有 2 个既有的
+`inspect_h5_dataset` 输出格式断言失败，均不涉及本轮 Round3 文件或实验 artifacts，
+因此没有将其混入本轮修复。
+
+### update-200 final success rate
+
+| task | T0 frozen | T1 offline-B | T2 online-B | T3 ranking | T4 offline-A | T5 hindsight-A | T6 distill-A |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Reacher | 87.5% | 83.0% | 77.5% | 77.5% | 70.5% | 76.0% | 79.5% |
+| Push-T | 89.0% | 85.0% | 81.5% | 81.5% | 81.5% | 80.5% | 80.5% |
+
+按 update-200 的 final-200 endpoint 看，当前新增监督臂没有超过各任务的 T0
+冻结 baseline；Reacher 的最高训练臂为 T1 的 83.0%，Push-T 的最高训练臂为 T1
+的 85.0%。完整 21-point 曲线仍以以下 artifacts 为准：
+
+- [Reacher fixed-train result](../../outputs/round3/online_supervision/reacher/fixed_train_v1/result.json)
+- [Reacher T5 curve](../../outputs/round3/online_supervision/reacher/fixed_train_v1/t5_online_hindsight_a/curve/curve.csv)
+- [Reacher T6 curve](../../outputs/round3/online_supervision/reacher/fixed_train_v1/t6_online_distill_a/curve/curve.csv)
+- [Push-T fixed-train result](../../outputs/round3/online_supervision/pusht/fixed_train_v1/result.json)
+- [Push-T T6 curve](../../outputs/round3/online_supervision/pusht/fixed_train_v1/t6_online_distill_a/curve/curve.csv)
+
+### loss 与监督信号核验
+
+以下为 200 次 update 的平均 total loss，以及 update-200 的 total loss / B-MSE；
+带辅助项的 total loss 不应直接与 B-MSE-only 臂横向解释。
+
+| task | arm | mean total loss | final total / B-MSE |
+|---|---|---:|---:|
+| Reacher | T1 | 0.05220 | 0.04460 / 0.04460 |
+| Reacher | T2 | 0.07185 | 0.07202 / 0.07202 |
+| Reacher | T3 | 0.07185 | 0.07202 / 0.07202 |
+| Reacher | T4 | 0.14039 | 0.11447 / 0.05062 |
+| Reacher | T5 | 0.18795 | 0.17984 / 0.06981 |
+| Reacher | T6 | 0.18449 | 0.17682 / 0.06980 |
+| Push-T | T1 | 0.01152 | 0.00905 / 0.00905 |
+| Push-T | T2 | 0.02814 | 0.01799 / 0.01799 |
+| Push-T | T3 | 0.02814 | 0.01799 / 0.01799 |
+| Push-T | T4 | 0.03220 | 0.02742 / 0.02394 |
+| Push-T | T5 | 0.04514 | 0.03645 / 0.02069 |
+| Push-T | T6 | 0.03928 | 0.03023 / 0.02064 |
+
+source/batch manifest 也完成了预期覆盖：每个非 T0 update 的 B-MSE batch 为
+64 条（32 offline + 24 continuous + 8 grounded）；T1 的 offline replacement
+为 32 条；T4/T5/T6 的 offline-A 各为 32 条；T5 hindsight-A 和 T6 distill-A
+各为 32 条。200 updates 的累计辅助样本数为 T5 hindsight-A=6,400、T6
+distill-A=6,400，均为实际参与训练的样本。
+
+需要单独保留的结论是：两任务 T3 的 batch manifest 中 200 updates 的
+`ranking_pairs` 累计均为 0，calibration 因而报告 auxiliary gradient norm=`0`
+并将 rank weight 设为 `0`。这解释了 T3 与 T2 的训练 loss/曲线相同；它是当前
+ranking replay/contract 未提供有效 pair 的诊断结果，不应被解读为 ranking
+监督已经验证有效。
+
+### 本轮实验结论与下一步决策
+
+本轮 fixed-replay 筛选已完成，但结果不支持自动推进任何新增监督臂。下一步仍由
+用户决定：
+
+1. 是否把 T3 ranking 的 `ranking_pairs=0` 作为需要先修复的协议问题；
+2. 若暂不修复，是否选择 Reacher/Push-T 各自的 T3/T5/T6 中任意 arm 进入
+   20k-env-step closed-loop 复验；
+3. 是否对某些 arm 延长固定 replay 到 500/1000 optimizer updates。
+
+除非用户明确选择，否则不会自动启动 closed-loop、延长训练或 R4-AB。
 
 ## 后续仍需用户决定的内容
 
