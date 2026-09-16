@@ -175,6 +175,78 @@ update-000000 的冻结 baseline，不代表任何监督臂结果。
 200 update 仍是首轮筛选预算，不代表收敛。曲线在 200 update 仍明显上升时，是否
 延长到 500/1000 update，由用户根据结果决定。
 
+## 阶段二中间验收快照（2026-09-16 21:19）
+
+### 当前执行状态
+
+截至本快照，Push-T 的 T0--T6 已全部完成 200 个 optimizer updates；Reacher 的
+T0--T5 已完成，T6 `online_distill_a` 正在运行到 update 40/200。T6 的 update-40
+checkpoint 已写入，final-200 评测正在进行，因此该点暂记为
+`evaluation_pending`；Reacher 的 T6 完成后才算本阶段训练结束。当前 GPU 进程已用
+提升权限启动，并通过 `CUDA_VISIBLE_DEVICES=0` 限制在物理 GPU0；Push-T 使用的
+GPU1 任务已结束。
+
+本次中断恢复过程也已核验：第一次 Reacher T5 运行在 update-50 评测期间被中断，
+造成 `run_state` 停在 40、adapter state 到 50 的不一致。随后用同一 checkpoint、
+replay、seed 重建了 T5 的 update-40 adapter state，并逐 tensor 验证其 model 参数
+与原 update-40 checkpoint 完全一致，再从 update 40 继续。因此当前 T5 的 1--200
+update history 是连续的。runner 同时增加了评测前先落盘 pending 状态，以及将
+GPU 映射后的 RNG state 转回 CPU ByteTensor 的恢复保护；针对性测试为 14 个通过。
+
+### 已完成曲线的 final-200 success rate（百分比）
+
+下表列出 0/50/100/150/200 optimizer updates 五个检查点，完整 0, 10, ..., 200
+曲线保存在各 arm 的 `curve.csv`/`curve.json`。每个数均为同一任务固定 final cohort
+的 200 episodes（4×50），不是 env step；两任务不混合比较。
+
+| task | arm | 0 | 50 | 100 | 150 | 200 |
+|---|---|---:|---:|---:|---:|---:|
+| Reacher | T0 frozen | 87.5 | 87.5 | 87.5 | 87.5 | 87.5 |
+| Reacher | T1 offline-B MSE | 87.5 | 87.0 | 79.0 | 83.5 | 83.0 |
+| Reacher | T2 online-B MSE | 87.5 | 79.5 | 81.0 | 78.0 | 77.5 |
+| Reacher | T3 online ranking | 87.5 | 79.5 | 81.0 | 78.0 | 77.5 |
+| Reacher | T4 online/offline-A | 87.5 | 79.5 | 78.0 | 80.0 | 70.5 |
+| Reacher | T5 online hindsight-A | 87.5 | 78.5 | 82.5 | 79.5 | 76.0 |
+| Push-T | T0 frozen | 88.5 | 88.5 | 89.0 | 88.5 | 89.0 |
+| Push-T | T1 offline-B MSE | 88.5 | 88.5 | 85.5 | 83.5 | 85.0 |
+| Push-T | T2 online-B MSE | 88.5 | 84.5 | 81.5 | 83.0 | 81.5 |
+| Push-T | T3 online ranking | 89.0 | 84.5 | 82.5 | 83.0 | 81.5 |
+| Push-T | T4 online/offline-A | 88.5 | 85.5 | 83.0 | 83.0 | 81.5 |
+| Push-T | T5 online hindsight-A | 88.5 | 81.5 | 86.5 | 79.5 | 80.5 |
+| Push-T | T6 online distill-A | 88.5 | 83.5 | 85.5 | 80.5 | 80.5 |
+
+Reacher T6 当前已完成的曲线点为：update 0=`87.5%`、10=`82.5%`、20=`84.0%`、
+30=`80.0%`；update 40 仍在评测。其余已完成曲线的原始结果：
+
+- [Reacher fixed-replay curves](../../outputs/round3/online_supervision/reacher/fixed_train_v1/)
+- [Push-T fixed-replay curves](../../outputs/round3/online_supervision/pusht/fixed_train_v1/)
+
+### supervision 信号的中间诊断
+
+- T3 的 ranking calibration 在 Reacher 和 Push-T 都报告
+  `invalid_terms=[rank]`、auxiliary gradient norm=`0`、rank weight=`0`。所以当前
+  T3 实际退化为 T2 的 B-MSE-only 更新；Reacher 两者曲线完全相同，Push-T 的训练
+  更新和曲线也相同（update-0 的评测随机性造成的 0.5 个百分点差异不改变这一判断）。
+- Reacher 的非零校准权重为 T4/T5/T6 的 offline-A=`0.0425672`、T5 hindsight
+  A=`0.0261718`、T6 distill-A=`0.0232694`；Push-T 对应 offline-A=`0.00379493`、
+  hindsight-A=`0.00877454`、distill-A=`0.00384556`。
+- 已完成 T5 的 update-200 total loss / B-MSE 为 Reacher
+  `0.17984 / 0.06981`、Push-T `0.03645 / 0.02069`；T5 的 hindsight 项在两任务
+  均实际有 32 个样本。Push-T T6 的 update-200 total loss / B-MSE 为
+  `0.03023 / 0.02064`，distill 项实际有 32 个样本。T6 Reacher 的 update-40
+  loss snapshot 已记录在 run state，待完成后再纳入最终汇总。
+
+### 请用户进行的中间验收
+
+这版结果只供你判断，不设置自动门槛，也不会自动启动下一阶段。当前最值得确认
+的是：
+
+1. 是否接受 T3 ranking signal 在本实现/当前 replay 上校准为零，暂按 T2 的重复
+   对照保留，还是在继续前要求单独修正 ranking loss/replay contract；
+2. 在 Reacher T6 完成后，哪些 T3/T5/T6 arm 值得进入 closed-loop；
+3. 是否先按 200-update 曲线做阶段三的 20k-env-step 复验，或延长固定 replay 到
+   500/1000 update。这里不预设通过分数，最终由你决定。
+
 ## 后续仍需用户决定的内容
 
 本轮 guidance gate 已完成，不再等待 collector 选择。下一轮 fixed-replay 训练

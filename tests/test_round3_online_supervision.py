@@ -312,6 +312,78 @@ class Round3OnlineSupervisionTests(unittest.TestCase):
                 [0, 0, 0],
             )
 
+    def test_fixed_replay_resume_recovers_after_evaluation_interrupt(self):
+        replay = make_supervision_replay().subset((0, 1, 2, 3))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            replay_path = root / "replay.pt"
+            checkpoint = root / "initial.pt"
+            from source.experiments.round3_phase2 import save_transition_replay
+
+            save_transition_replay(replay_path, replay)
+            checkpoint.write_bytes(b"initial-checkpoint")
+
+            def loader(path, device):
+                return make_model(), path
+
+            calls = {"count": 0}
+
+            def evaluator(task, arm, checkpoint_path, update_step):
+                if int(update_step) == 1 and calls["count"] == 0:
+                    calls["count"] += 1
+                    raise RuntimeError("simulated evaluator interruption")
+                return {
+                    "success_rate": 0.5,
+                    "episodes": 200,
+                    "cohort_sha256": "final-cohort",
+                }
+
+            run_root = root / "run"
+            with self.assertRaisesRegex(RuntimeError, "simulated evaluator interruption"):
+                run_fixed_replay_training(
+                    checkpoint=checkpoint,
+                    replay_path=replay_path,
+                    output_root=run_root,
+                    task="reacher",
+                    device="cpu",
+                    max_updates=2,
+                    curve_interval=1,
+                    arms=("t1_offline_b_mse",),
+                    model_loader=loader,
+                    evaluator=evaluator,
+                )
+
+            arm_root = run_root / "t1_offline_b_mse"
+            interrupted = json.loads((arm_root / "run_state.json").read_text())
+            self.assertEqual(interrupted["optimizer_update_step"], 1)
+            self.assertEqual(interrupted["curve_rows"][-1]["status"], "evaluation_pending")
+            adapter_state = torch.load(
+                arm_root / "adapter_state.pt", map_location="cpu", weights_only=False
+            )
+            self.assertEqual(adapter_state["optimizer_steps"], 1)
+
+            resumed = run_fixed_replay_training(
+                checkpoint=checkpoint,
+                replay_path=replay_path,
+                output_root=run_root,
+                task="reacher",
+                device="cpu",
+                max_updates=2,
+                curve_interval=1,
+                arms=("t1_offline_b_mse",),
+                model_loader=loader,
+                evaluator=evaluator,
+                resume=True,
+            )
+            self.assertEqual(resumed["status"], "ok")
+            final_state = json.loads((arm_root / "run_state.json").read_text())
+            self.assertEqual(final_state["optimizer_update_step"], 2)
+            self.assertEqual(
+                [row["optimizer_update_step"] for row in final_state["curve_rows"]],
+                [0, 1, 2],
+            )
+            self.assertTrue(all(row["status"] == "ok" for row in final_state["curve_rows"]))
+
     def test_closed_loop_runner_accepts_injected_collection_and_evaluation(self):
         full_replay = make_supervision_replay()
         replay = full_replay.subset((0, 1, 2, 3))

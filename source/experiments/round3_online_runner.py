@@ -494,34 +494,29 @@ def run_fixed_replay_training(
                 checkpoint_record = _save_model_checkpoint(adapter.model, checkpoint_path)
                 adapter_state_path = arm_dir / "adapter_state.pt"
                 adapter_state_sha256 = _save_adapter_state(adapter, adapter_state_path)
-                if evaluator is not None:
-                    evaluation = dict(evaluator(str(task), arm, checkpoint_path, update_step))
-                    curve_rows.append(
-                        make_curve_row(
-                            optimizer_update_step=update_step,
-                            environment_steps=update_step * int(environment_steps_per_update),
-                            success_rate=float(evaluation["success_rate"]),
-                            episodes=int(evaluation.get("episodes", 200)),
-                            checkpoint=str(checkpoint_path),
-                            checkpoint_sha256=checkpoint_record["sha256"],
-                            cohort_sha256=str(evaluation["cohort_sha256"]),
-                        )
-                    )
-                else:
-                    curve_rows.append(
-                        {
-                            "optimizer_update_step": int(update_step),
-                            "environment_steps": int(update_step) * int(environment_steps_per_update),
-                            "success_rate": None,
-                            "success_rate_percent": None,
-                            "episodes": 0,
-                            "checkpoint": str(checkpoint_path),
-                            "checkpoint_sha256": checkpoint_record["sha256"],
-                            "cohort_sha256": None,
-                            "status": "evaluation_pending",
-                            "skipped_reason": "no evaluator supplied",
-                        }
-                    )
+                # Publish a checkpoint/adapter pair and a pending curve row
+                # before entering the potentially long final-cohort evaluator.
+                # If the evaluator is interrupted, resume can load a coherent
+                # optimizer state instead of leaving the run state one boundary
+                # behind the adapter checkpoint.
+                curve_rows.append(
+                    {
+                        "optimizer_update_step": int(update_step),
+                        "environment_steps": int(update_step) * int(environment_steps_per_update),
+                        "success_rate": None,
+                        "success_rate_percent": None,
+                        "episodes": 0,
+                        "checkpoint": str(checkpoint_path),
+                        "checkpoint_sha256": checkpoint_record["sha256"],
+                        "cohort_sha256": None,
+                        "status": "evaluation_pending",
+                        "skipped_reason": (
+                            "evaluation interrupted"
+                            if evaluator is not None
+                            else "no evaluator supplied"
+                        ),
+                    }
+                )
                 state = {
                     **root_state,
                     "arm": arm,
@@ -546,6 +541,22 @@ def run_fixed_replay_training(
                     "curve_rows": curve_rows,
                 }
                 _write_json_atomic(state_path, _jsonable(state))
+
+                if evaluator is not None:
+                    evaluation = dict(evaluator(str(task), arm, checkpoint_path, update_step))
+                    curve_rows[-1] = make_curve_row(
+                        optimizer_update_step=update_step,
+                        environment_steps=update_step * int(environment_steps_per_update),
+                        success_rate=float(evaluation["success_rate"]),
+                        episodes=int(evaluation.get("episodes", 200)),
+                        checkpoint=str(checkpoint_path),
+                        checkpoint_sha256=checkpoint_record["sha256"],
+                        cohort_sha256=str(evaluation["cohort_sha256"]),
+                    )
+                    state["curve_rows"] = curve_rows
+                    state["last_update"] = update_payload
+                    state["status"] = "running"
+                    _write_json_atomic(state_path, _jsonable(state))
 
         if evaluator is not None:
             refreshed_rows: list[dict[str, Any]] = []
