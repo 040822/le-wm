@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "phase": "round3_phase1_5",
+  "status": "decision_frozen_phase1_5_e5_legacy",
+  "decision_source": "user_confirmation",
+  "protocol": "round3_revised",
+  "base_variant": "e5_fast",
+  "phase1_5_representation": {
+    "token_encoding": "legacy",
+    "stage_b_timestep_mode": "legacy",
+    "latent_head_dim": 192,
+    "seed": 3072,
+    "checkpoint_status": "historical_e5_checkpoints_registered"
+  },
+  "phase3_mainline": {
+    "token_encoding": "legacy",
+    "stage_b_timestep_mode": "legacy",
+    "latent_head_dim": 192,
+    "seed": 3072,
+    "checkpoint_status": "reuse_historical_e5_checkpoints",
+    "decision": "legacy_e5_reselected_after_physical_time_type_followup"
+  },
+  "physical_time_type_followup": {
+    "status": "completed_exploratory_not_mainline",
+    "report": "outputs/round3/phase3/phase3_e5_physical_time_type_report.md",
+    "stage_b_delta_vs_historical_e5_pp": {
+      "cube": 2.0,
+      "pusht": -3.5,
+      "reacher": -1.5,
+      "tworoom": 0.5
+    },
+    "mean_stage_b_delta_pp": -0.625,
+    "decision": "not_promoted"
+  },
+  "selection_evidence": {
+    "cohort_kind": "dev",
+    "stage": "stage_b",
+    "tasks_with_canonical_e3_and_e5": ["cube", "pusht", "reacher"],
+    "e3_success_rate": {
+      "cube": 0.42,
+      "pusht": 0.86,
+      "reacher": 0.78
+    },
+    "e5_success_rate": {
+      "cube": 0.48,
+      "pusht": 0.94,
+      "reacher": 0.78
+    },
+    "e5_minus_e3_mean_pp": 4.666666666666667,
+    "formal_threshold_pp": 5.0,
+    "threshold_decision": "explicit_user_acceptance_near_threshold"
+  },
+  "historical_e5_checkpoints": {
+    "cube": {
+      "path": "outputs/fast_lewam/cube/0803_e5_cross_head_grad/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "7d0e2737795e457c383ce6a84f111f926df9e469b68cf0710418e80b8fa0aca3"
+    },
+    "pusht": {
+      "path": "outputs/fast_lewam/pusht/0803_e5_cross_head_grad/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "be384ae18e1f41d75c1e047002a3e2d4dd3db46c1aaed784753b8caa7b93fc71"
+    },
+    "reacher": {
+      "path": "outputs/fast_lewam/reacher/0717_/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "c5a6f55354aded51a1e7e2ed052b6b2c8e1c2ea1f65427bf6964465226f6145f"
+    },
+    "tworoom": {
+      "path": "outputs/fast_lewam/tworoom/0717_/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "949ceb8051f4c98c85c5d8f73cfc35a40032c61df20f34778a566cfc73759115"
+    }
+  },
+  "tworoom_e3_supplemental": {
+    "included": true,
+    "canonical_status": "supplemental_not_canonical",
+    "checkpoint": {
+      "path": "outputs/fast_lewam/tworoom/0911_parallel2_round1_tworoom_e3_expert_actions/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "dc1d235d13da970971dc2d382d15f5f4a5a7f0b0a36245e23f592512e30e5894"
+    },
+    "round3_revised_final_stage_b": {
+      "success_rate": 0.905,
+      "cohort_sha256": "d981c8872d168ca951450d01f713315df269bb8ee61c6c268f6c61956c3b9421",
+      "result": "outputs/round3/extended/evals/round1_tworoom_E3_0911_parallel2_round1_tworoom_e3_expert_actions/results/tworoom/e3_fast/round3_revised/stage_b/final/d981c8872d168ca951450d01f713315df269bb8ee61c6c268f6c61956c3b9421/result.json"
+    },
+    "canonical_dev_status": "not_yet_evaluated"
+  },
+  "existing_physical_time_type_e3_evidence": {
+    "pusht": {
+      "path": "outputs/fast_lewam/pusht/0812_s41_e3_physical_time_type_192/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "d4ffba52a3749d02dcd27c9585732f607fb6b35e787040221e7b6722919418f4"
+    },
+    "reacher": {
+      "path": "outputs/fast_lewam/reacher/0812_s41_e3_physical_time_type_192/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "sha256": "864daa4dac717ca6805b8ff287a9ae1467343b270262d5b56abfced0a92d17b6"
+    }
+  },
+  "round4": {
+    "continue_current_run": true,
+    "result_interpretation": "exploratory_possible_round3_cohort_exposure",
+    "gpu_parallel_rule": "round3_gpu_work_waits_for_an_explicit_GPU0_3_resource_window"
+  },
+  "next_actions": [
+    "phase2_cpu_dry_run_completed_and_registered",
+    "run_phase2_only_when_round4_resource_window_is_safe",
+    "phase3_physical_time_type_evidence_archived_not_mainline",
+    "reuse_historical_e5_legacy_checkpoints_for_future_fast_evaluation",
+    "run_phase2_with_one_optimizer_update_per_100_environment_steps"
+  ]
+}

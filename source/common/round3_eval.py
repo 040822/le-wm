@@ -36,6 +36,11 @@ from .round3_runtime_audit import (
     run_independent_cpu_neutral_hold,
     validate_neutral_hold_diagnostic,
 )
+from .round4_action_bounds import (
+    compute_normalized_action_bounds,
+    summarize_executed_action_bounds,
+)
+from .gpu_environment import PERMITTED_PHYSICAL_GPUS
 
 
 def validate_gpu_visibility(device: str) -> None:
@@ -46,8 +51,12 @@ def validate_gpu_visibility(device: str) -> None:
     if visible is None or not visible.strip():
         raise RuntimeError("set CUDA_VISIBLE_DEVICES explicitly before GPU evaluation")
     ids = [value.strip() for value in visible.split(",") if value.strip()]
-    if not ids or any(not value.isdigit() or int(value) not in range(4) for value in ids):
-        raise RuntimeError(f"only physical GPUs 0,1,2,3 may be visible; got {visible!r}")
+    if not ids or any(
+        not value.isdigit() or int(value) not in PERMITTED_PHYSICAL_GPUS
+        for value in ids
+    ):
+        allowed = ",".join(str(value) for value in sorted(PERMITTED_PHYSICAL_GPUS))
+        raise RuntimeError(f"only physical GPUs {allowed} may be visible; got {visible!r}")
 
 
 def validate_round3_config(
@@ -146,6 +155,7 @@ def run_round3_evaluation(
     device: str | None = None,
     trace: bool = True,
     allow_solver_budget_overrides: bool = False,
+    planning_timing: bool = False,
 ) -> dict[str, Any]:
     """Run one registered weight and publish a Phase 1 result plus trace."""
     device = str(device or cfg.solver.get("device", "cuda"))
@@ -198,6 +208,14 @@ def run_round3_evaluation(
         cohort=manifest.to_evaluation_cohort(),
     )
     policy = session._build_policy(policy_or_model, identity, device)
+    if planning_timing and hasattr(policy, "solver"):
+        # Reuse the Round 4 timing seam so LeWM's reference measurement uses
+        # the same synchronized CEM boundary as the Fast-LeWAM conditions.
+        from .round4_eval import _TimedSolver
+
+        timed_solver = _TimedSolver(policy.solver)
+        policy.solver = timed_solver
+        policy.planning_events = timed_solver.events
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
     world_cfg["max_episode_steps"] = 2 * int(cfg.eval.eval_budget)
     save_video = bool(cfg.get("output", {}).get("save_video", False))
@@ -211,6 +229,21 @@ def run_round3_evaluation(
     collector = None
     original_step = None
     envs = getattr(world, "envs", None)
+    # A few legacy/test session adapters intentionally expose only the
+    # dataset, cohort and world factory.  Action-bound diagnostics are
+    # optional for those adapters, so treat a missing process registry as an
+    # empty one rather than changing the evaluator's compatibility contract.
+    process = getattr(session, "process", {})
+    action_processor = (
+        process.get("action") if hasattr(process, "get") else None
+    )
+    action_bounds = None
+    if action_processor is not None and envs is not None:
+        action_bounds = compute_normalized_action_bounds(
+            envs.single_action_space,
+            action_processor,
+            action_block=int(cfg.plan_config.action_block),
+        )
     if trace:
         action_space = getattr(envs, "single_action_space", None)
         collector = Round3TraceCollector(
@@ -218,6 +251,8 @@ def run_round3_evaluation(
             manifest,
             action_block=int(cfg.plan_config.action_block),
             action_space=action_space,
+            action_processor=action_processor,
+            normalized_action_bounds=action_bounds,
         )
     try:
         world.set_policy(_PolicyTap(policy))
@@ -299,6 +334,27 @@ def run_round3_evaluation(
         trace_records=trace_records,
     )
     payload["neutral_hold_diagnostic"] = neutral_hold_diagnostic
+    if planning_timing:
+        from .round4_eval import _planning_summary
+
+        payload["round4_planning"] = {
+            "cem_protocol": "legacy",
+            "action_bound_mode": "none",
+            "action_flow_steps": None,
+            "action_flow_integrator": "not_applicable",
+            **_planning_summary(policy),
+        }
+        if action_bounds is not None:
+            payload["round4_planning"]["action_bounds"] = action_bounds.metadata(
+                action_dim=None
+            )
+            payload["round4_planning"]["executed_action_bounds"] = (
+                summarize_executed_action_bounds(
+                    payload["episodes"],
+                    action_bounds,
+                    action_processor,
+                )
+            )
     payload.setdefault("status", "ok")
     payload["schema_version"] = RESULT_SCHEMA_VERSION
     payload["cohort_kind"] = manifest.cohort_kind

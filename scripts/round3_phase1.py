@@ -44,6 +44,16 @@ from source.common.round3_protocol import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "outputs" / "round3" / "phase1"
+FAST_EVALUATION_METHODS = (
+    "leflow",
+    "e1_fast",
+    "e2_fast",
+    "e3_fast",
+    "e4_fast",
+    "e5_fast",
+    "e6_fast",
+)
+FAST_EVALUATION_STAGES = (*FAST_STAGES, "stage_b_actor_warm_start")
 
 
 def _write_json(path: Path, value) -> None:
@@ -115,7 +125,7 @@ def _load_dataset(task: str, dataset_name: str | None, cache_dir: str | None, nu
     if cache_dir:
         overrides.append(f"cache_dir={cache_dir}")
     cfg = compose_eval_config(task, overrides=overrides)
-    cfg = OmegaConf.merge(cfg, {"output": {"save_video": False}})
+    cfg = OmegaConf.merge(cfg, {"output": {"save_video": True}})
     dataset_path = Path(str(cfg.eval.dataset_name))
     if dataset_name and dataset_path.is_file():
         dataset = HDF5Dataset(path=dataset_path, keys_to_cache=list(cfg.dataset.keys_to_cache))
@@ -171,11 +181,27 @@ def command_legacy_cohort(args: argparse.Namespace) -> None:
 
 def command_analyze(args: argparse.Namespace) -> None:
     output = Path(args.output)
-    rows = write_phase1_matrix(output / "results", output / "phase1_matrix.csv")
     registry_path = output / "artifact_registry.json"
     registry = load_result(registry_path) if registry_path.is_file() else None
-    write_phase1_report(rows, output / "phase1_report.md", registry=registry)
-    print(f"matrix_rows={len(rows)}")
+    rows = write_phase1_matrix(
+        output / "results",
+        output / "phase1_matrix.csv",
+        registry=registry,
+    )
+    final_rows = write_phase1_matrix(
+        output / "results",
+        output / "phase1_final_matrix.csv",
+        registry=registry,
+        cohort_kind="final",
+        variants=("round3_revised",),
+    )
+    write_phase1_report(
+        rows,
+        output / "phase1_report.md",
+        registry=registry,
+        final_rows=final_rows,
+    )
+    print(f"matrix_rows={len(rows)} final_matrix_rows={len(final_rows)}")
 
 
 def command_stage_b_reuse_decision(args: argparse.Namespace) -> None:
@@ -198,11 +224,13 @@ def command_evaluate(args: argparse.Namespace) -> None:
     _validate_gpu_visibility(args.device)
     if args.task not in TASKS:
         raise ValueError(f"unsupported task {args.task!r}")
-    if args.method not in {"e0_lewm", "e3_fast", "e5_fast"}:
+    if args.method not in {"e0_lewm", *FAST_EVALUATION_METHODS}:
         raise ValueError(f"unsupported method {args.method!r}")
     if args.method == "e0_lewm" and args.stage != "stage_b":
         raise ValueError("E0 LeWM is registered only for Stage B")
-    if args.method != "e0_lewm" and args.stage not in FAST_STAGES:
+    if args.method == "leflow" and args.stage != "stage_b":
+        raise ValueError("LeFlow is registered only for Stage B")
+    if args.method != "e0_lewm" and args.stage not in FAST_EVALUATION_STAGES:
         raise ValueError(f"Fast-LeWAM stage must be one of {FAST_STAGES}")
     manifest = CohortManifest.load(args.cohort)
     if manifest.task != args.task:
@@ -223,14 +251,28 @@ def command_evaluate(args: argparse.Namespace) -> None:
         cfg,
         {
             "solver": {"device": args.device},
-            "output": {"save_video": False},
+            "output": {"save_video": bool(args.save_video)},
             "world": {"num_envs": len(manifest.entries)},
         },
     )
     policy_or_model, checkpoint = load_policy_or_model(args.checkpoint)
+    if args.method == "leflow":
+        from source.model.leflow.latent_planner import LatentPlannerRuntime
+
+        if not isinstance(policy_or_model, LatentPlannerRuntime):
+            raise TypeError(
+                "leflow evaluation requires a LeFlow latent_planner.pt payload; "
+                f"loaded {type(policy_or_model).__name__} from {args.checkpoint}"
+            )
     identity = EvaluationIdentity(
         entrypoint="round3_phase1",
-        policy_kind="lewm" if args.method == "e0_lewm" else "fast_lewam",
+        policy_kind=(
+            "lewm"
+            if args.method == "e0_lewm"
+            else "leflow"
+            if args.method == "leflow"
+            else "fast_lewam"
+        ),
         checkpoint=str(checkpoint or args.checkpoint),
         epoch=args.epoch,
         stage=None if args.method == "e0_lewm" else args.stage,
@@ -331,14 +373,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     evaluate = subparsers.add_parser("evaluate")
     evaluate.add_argument("task", choices=TASKS)
-    evaluate.add_argument("method", choices=("e0_lewm", "e3_fast", "e5_fast"))
-    evaluate.add_argument("stage", choices=("stage_a", "stage_a_shuffled_goal", "stage_b"))
+    evaluate.add_argument("method", choices=("e0_lewm", *FAST_EVALUATION_METHODS))
+    evaluate.add_argument("stage", choices=FAST_EVALUATION_STAGES)
     evaluate.add_argument("--protocol-variant", choices=("legacy", "sampling_revised", "tolerance_revised", "round3_revised"), default="round3_revised")
     evaluate.add_argument("--cohort", required=True)
     evaluate.add_argument("--checkpoint", required=True)
     evaluate.add_argument("--epoch", type=int, default=10)
     evaluate.add_argument("--dataset-name")
     evaluate.add_argument("--device", default="cpu")
+    evaluate.add_argument("--save-video", dest="save_video", action="store_true", default=True)
+    evaluate.add_argument("--no-save-video", dest="save_video", action="store_false")
     evaluate.add_argument("--output", default=str(DEFAULT_OUTPUT))
     evaluate.set_defaults(function=command_evaluate)
     return parser

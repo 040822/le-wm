@@ -40,6 +40,10 @@ from .round3_protocol import (
     physical_distance_components,
     resolve_task_field,
 )
+from .round4_action_bounds import (
+    bounded_physical_action_stats,
+    normalized_action_stats,
+)
 
 
 PHASE1_DEV_EPISODES = 50
@@ -1168,12 +1172,24 @@ class Round3TraceCollector:
     it can be attached by a wrapper without modifying stable-worldmodel.
     """
 
-    def __init__(self, task: str, manifest: CohortManifest, *, action_block: int = 5, action_space: Any = None, neutral_action: Any = None):
+    def __init__(
+        self,
+        task: str,
+        manifest: CohortManifest,
+        *,
+        action_block: int = 5,
+        action_space: Any = None,
+        neutral_action: Any = None,
+        action_processor: Any = None,
+        normalized_action_bounds: Any = None,
+    ):
         self.task = task
         self.manifest = manifest
         self.action_block = int(action_block)
         self.action_space = action_space
         self.neutral_action = None if neutral_action is None else np.asarray(neutral_action, dtype=np.float64).reshape(-1)
+        self.action_processor = action_processor
+        self.normalized_action_bounds = normalized_action_bounds
         self._steps: list[list[dict[str, Any]]] = [[] for _ in manifest.entries]
 
     def record_step(self, actions: Any, infos: Any, *, raw_env_step: int) -> None:
@@ -1217,6 +1233,26 @@ class Round3TraceCollector:
                 else predicate_success
             )
             legality = action_legality(action, self.action_space)
+            normalized_action = None
+            normalized_stats = None
+            physical_stats = None
+            if action is not None and self.action_processor is not None:
+                if not hasattr(self.action_processor, "transform"):
+                    raise TypeError("action_processor must expose transform")
+                physical_row = np.asarray(action, dtype=np.float64).reshape(1, -1)
+                normalized_action = np.asarray(
+                    self.action_processor.transform(physical_row),
+                    dtype=np.float64,
+                ).reshape(-1)
+                if self.normalized_action_bounds is not None:
+                    normalized_stats = normalized_action_stats(
+                        normalized_action,
+                        self.normalized_action_bounds,
+                    )
+                    physical_stats = bounded_physical_action_stats(
+                        physical_row.reshape(-1),
+                        self.normalized_action_bounds,
+                    )
             neutral = bool(
                 action is not None
                 and np.allclose(
@@ -1253,6 +1289,9 @@ class Round3TraceCollector:
                     "predicate_success": predicate_success,
                     "env_success": env_success,
                     "action": _jsonable(action),
+                    "action_normalized": _jsonable(normalized_action),
+                    "action_normalized_stats": _jsonable(normalized_stats),
+                    "action_physical_stats": _jsonable(physical_stats),
                     "action_legal": legality.get("legal"),
                     "action_legality": legality,
                     "action_source": legality.get("source"),
@@ -1297,8 +1336,7 @@ class Round3TraceCollector:
                 (item.get("terminated") or item.get("truncated")) and int(item["raw_env_step"]) < int(eval_budget)
                 for item in steps
             )
-            records.append(
-                {
+            episode_record = {
                     "slot": int(slot),
                     "episode_id": _jsonable(entry.episode_id),
                     "dataset_episode": _jsonable(entry.episode_id),
@@ -1321,7 +1359,31 @@ class Round3TraceCollector:
                     "steps_executed": int(len(steps)),
                     "steps": steps,
                 }
-            )
+            if self.normalized_action_bounds is not None:
+                normalized_values = [
+                    np.asarray(item["action_normalized"], dtype=np.float64)
+                    for item in steps
+                    if item.get("action_normalized") is not None
+                ]
+                physical_values = [
+                    np.asarray(item["action"], dtype=np.float64)
+                    for item in steps
+                    if item.get("action") is not None
+                ]
+                if normalized_values:
+                    normalized_array = np.asarray(normalized_values)
+                    physical_array = np.asarray(physical_values)
+                    episode_record["executed_action_bounds"] = {
+                        "normalized": normalized_action_stats(
+                            normalized_array,
+                            self.normalized_action_bounds,
+                        ),
+                        "physical": bounded_physical_action_stats(
+                            physical_array,
+                            self.normalized_action_bounds,
+                        ),
+                    }
+            records.append(episode_record)
         return records
 
 
@@ -2090,6 +2152,18 @@ def _load_dev_manifest(
         return None, path
 
 
+def _load_final_manifest(
+    output_root: Path, task: str
+) -> tuple[CohortManifest | None, Path]:
+    path = output_root / "cohorts" / task / "final.json"
+    if not path.is_file():
+        return None, path
+    try:
+        return CohortManifest.load(path), path
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None, path
+
+
 def _result_and_trace_paths(
     output_root: Path,
     *,
@@ -2635,18 +2709,30 @@ def write_phase1_matrix(
     output_csv: str | Path,
     *,
     registry: Mapping[str, Any] | None = None,
+    cohort_kind: str = "dev",
+    variants: Sequence[str] = PROTOCOL_VARIANTS,
 ) -> list[dict[str, Any]]:
-    """Write the fixed matrix with strict result status provenance."""
+    """Write a fixed matrix with strict result status provenance.
+
+    The default remains the historical development/protocol matrix. Final
+    testing is a separate frozen matrix because it has one protocol variant
+    and a different cohort identity.
+    """
     root = Path(results_root)
     output_root = root.parent if root.name == "results" else root
+    if cohort_kind not in {"dev", "final"}:
+        raise ValueError(f"unsupported matrix cohort kind {cohort_kind!r}")
     rows = []
     for task, method, stage in iter_phase1_matrix():
         registry_entry = _registry_entry_for(
             registry, task=task, method=method, stage=stage
         )
         registry_available = _registry_weight_available(registry_entry)
-        for variant in PROTOCOL_VARIANTS:
-            manifest, _manifest_file = _load_dev_manifest(output_root, task, variant)
+        for variant in variants:
+            if cohort_kind == "dev":
+                manifest, _manifest_file = _load_dev_manifest(output_root, task, variant)
+            else:
+                manifest, _manifest_file = _load_final_manifest(output_root, task)
             path, metrics_path, trace_path = _result_and_trace_paths(
                 output_root,
                 task=task,
@@ -2762,6 +2848,7 @@ def write_phase1_report(
     output_path: str | Path,
     *,
     registry: Mapping[str, Any] | None = None,
+    final_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> Path:
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2783,6 +2870,38 @@ def write_phase1_report(
         lines.append(
             f"| {row.get('task')} | {row.get('method')} | {row.get('stage')} | "
             f"{row.get('protocol_variant')} | {row.get('num_episodes')} | {rate_text} | {interval} | {row.get('status')} |"
+        )
+    if final_rows is not None:
+        lines.extend(
+            [
+                "",
+                "## Frozen final test (round3_revised)",
+                "",
+                "The final cohort is independent of development cohorts and is reported after protocol freeze.",
+                "",
+                "| Task | Method | Stage | n | Success | Wilson 95% | Status |",
+                "|---|---|---|---:|---:|---|---|",
+            ]
+        )
+        for row in final_rows:
+            low = row.get("wilson_low")
+            high = row.get("wilson_high")
+            interval = "—" if low is None or high is None else f"{100 * low:.1f}%–{100 * high:.1f}%"
+            rate = row.get("success_rate")
+            rate_text = "—" if rate is None else f"{100 * float(rate):.1f}%"
+            lines.append(
+                f"| {row.get('task')} | {row.get('method')} | {row.get('stage')} | "
+                f"{row.get('num_episodes')} | {rate_text} | {interval} | {row.get('status')} |"
+            )
+        final_ok = sum(row.get("status_taxonomy") == "ok" for row in final_rows)
+        final_missing = sum(
+            row.get("status_taxonomy") == "missing_weight" for row in final_rows
+        )
+        lines.extend(
+            [
+                "",
+                f"Final matrix entries: {len(final_rows)}; valid results: {final_ok}; unavailable weights: {final_missing}.",
+            ]
         )
     if registry is not None:
         entries = registry.get("entries", [])
