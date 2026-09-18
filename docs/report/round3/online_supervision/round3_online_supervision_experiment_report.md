@@ -71,10 +71,10 @@ checkpoint success rate。
 
 E2 的完整报告：
 
-- [Reacher E1](../../outputs/round3/online_supervision/reacher/e1/e1_report.json)
-- [Reacher E2](../../outputs/round3/online_supervision/reacher/e2_v2/e2_report.json)
-- [Push-T E1](../../outputs/round3/online_supervision/pusht/e1/e1_report.json)
-- [Push-T E2](../../outputs/round3/online_supervision/pusht/e2_v2/e2_report.json)
+- [Reacher E1](../../../../outputs/round3/online_supervision/reacher/e1/e1_report.json)
+- [Reacher E2](../../../../outputs/round3/online_supervision/reacher/e2_v2/e2_report.json)
+- [Push-T E1](../../../../outputs/round3/online_supervision/pusht/e1/e1_report.json)
+- [Push-T E2](../../../../outputs/round3/online_supervision/pusht/e2_v2/e2_report.json)
 
 本轮还修正了两个运行问题并保留在提交中：
 
@@ -219,8 +219,8 @@ GPU 映射后的 RNG state 转回 CPU ByteTensor 的恢复保护；针对性测�
 Reacher T6 当前已完成的曲线点为：update 0=`87.5%`、10=`82.5%`、20=`84.0%`、
 30=`80.0%`；update 40 仍在评测。其余已完成曲线的原始结果：
 
-- [Reacher fixed-replay curves](../../outputs/round3/online_supervision/reacher/fixed_train_v1/)
-- [Push-T fixed-replay curves](../../outputs/round3/online_supervision/pusht/fixed_train_v1/)
+- [Reacher fixed-replay curves](../../../../outputs/round3/online_supervision/reacher/fixed_train_v1/)
+- [Push-T fixed-replay curves](../../../../outputs/round3/online_supervision/pusht/fixed_train_v1/)
 
 ### supervision 信号的中间诊断
 
@@ -281,11 +281,11 @@ cohort hash 为 `138501dd8c2d88990074da59039aa092d4269e841c7114fe68ae49fdd36cc47
 冻结 baseline；Reacher 的最高训练臂为 T1 的 83.0%，Push-T 的最高训练臂为 T1
 的 85.0%。完整 21-point 曲线仍以以下 artifacts 为准：
 
-- [Reacher fixed-train result](../../outputs/round3/online_supervision/reacher/fixed_train_v1/result.json)
-- [Reacher T5 curve](../../outputs/round3/online_supervision/reacher/fixed_train_v1/t5_online_hindsight_a/curve/curve.csv)
-- [Reacher T6 curve](../../outputs/round3/online_supervision/reacher/fixed_train_v1/t6_online_distill_a/curve/curve.csv)
-- [Push-T fixed-train result](../../outputs/round3/online_supervision/pusht/fixed_train_v1/result.json)
-- [Push-T T6 curve](../../outputs/round3/online_supervision/pusht/fixed_train_v1/t6_online_distill_a/curve/curve.csv)
+- [Reacher fixed-train result](../../../../outputs/round3/online_supervision/reacher/fixed_train_v1/result.json)
+- [Reacher T5 curve](../../../../outputs/round3/online_supervision/reacher/fixed_train_v1/t5_online_hindsight_a/curve/curve.csv)
+- [Reacher T6 curve](../../../../outputs/round3/online_supervision/reacher/fixed_train_v1/t6_online_distill_a/curve/curve.csv)
+- [Push-T fixed-train result](../../../../outputs/round3/online_supervision/pusht/fixed_train_v1/result.json)
+- [Push-T T6 curve](../../../../outputs/round3/online_supervision/pusht/fixed_train_v1/t6_online_distill_a/curve/curve.csv)
 
 ### loss 与监督信号核验
 
