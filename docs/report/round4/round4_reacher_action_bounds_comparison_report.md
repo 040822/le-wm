@@ -26,9 +26,11 @@ Reacher 的物理 action space 是 `[-1, 1]`。现有 scaler 映射后，两个�
 | P0-scale | A 生成的整条路径使用单一比例缩放到真实边界内 |
 | P1-none | 随机初始化 CEM，300 samples、topk30、30 iterations；复用已有结果 |
 | P1-candidate-clip | CEM 每轮的候选在 B 评分和 elite 更新前逐元素裁剪 |
+| P1-candidate-scale | CEM 每轮的候选在 B 评分和 elite 更新前按单一比例缩放 |
 | P2-none | A warm-start + B/CEM，Euler-16，无投影；复用已有结果 |
 | P2-warm-clip | 仅裁剪 A warm-start，CEM 样本保持原逻辑 |
 | P2-candidate-clip | warm-start 与每轮 CEM candidate 均裁剪，B 评分和 elite 更新使用裁剪后 candidate |
+| P2-candidate-scale | warm-start 与每轮 CEM candidate 均按各自路径的单一比例缩放，B 评分和 elite 更新使用缩放后 candidate |
 | P2-scale | 仅对 A warm-start 做单一比例缩放 |
 | P3-none | A best-of-64 + B 选优，Euler-16；复用已有结果 |
 | P3-clip | A 生成的 64 条动作候选逐元素裁剪后再交给 B verifier |
@@ -47,9 +49,11 @@ Reacher 的物理 action space 是 `[-1, 1]`。现有 scaler 映射后，两个�
 | P0-scale | P0 | global-scale | 70.0% | 0 | 0.001045 | — | — | 0.070 |
 | P1-none | P1 | none | 74.0% | 0.0098 | — | — | — | 4.946 |
 | P1-candidate-clip | P1 | candidate-clip | 88.0% | 0 | 0.012465 | 0.012465 | 0.012465 | 5.522 |
+| P1-candidate-scale | P1 | candidate-scale | 60.0% | 0 | 0.005687 | 0.005687 | 0.152607 | 43.429 |
 | P2-none | P2 | none | 50.0% | 0.1278 | — | — | — | 5.521 |
 | P2-warm-clip | P2 | warm-start-clip | 50.0% | 0.1278 | 0.000926 | — | — | 4.814 |
 | P2-candidate-clip | P2 | candidate-clip | 80.0% | 0 | 0.022548 | 0.022548 | 0.022548 | 5.789 |
+| P2-candidate-scale | P2 | candidate-scale | 92.0% | 0 | 0.008913 | 0.008913 | 0.107985 | 41.531 |
 | P2-scale | P2 | warm-start-scale | 52.0% | 0.1281 | 0.000926 | — | — | 4.985 |
 | P3-none | P3 | none | 86.0% | 0.0007 | — | — | — | 0.441 |
 | P3-clip | P3 | clip | 84.0% | 0 | 0.001338 | 0.001338 | 0.001338 | 0.304 |
@@ -62,8 +66,12 @@ Reacher 的物理 action space 是 `[-1, 1]`。现有 scaler 映射后，两个�
 | P0-clip vs P0-none | 0pp | 0 | 0 | 0 | — |
 | P0-scale vs P0-none | 0pp | 0 | 0 | 0 | — |
 | P1-candidate-clip vs P1-none | +14pp | 10 | 3 | +7 | 0.09229 |
+| P1-candidate-scale vs P1-none | -14pp | 6 | 13 | -7 | 0.16707 |
+| P1-candidate-scale vs P1-candidate-clip | -28pp | 2 | 16 | -14 | 0.00131 |
 | P2-warm-clip vs P2-none | 0pp | 0 | 0 | 0 | — |
 | P2-candidate-clip vs P2-none | +30pp | 18 | 3 | +15 | 0.00149 |
+| P2-candidate-scale vs P2-none | +42pp | 23 | 2 | +21 | 0.0000194 |
+| P2-candidate-scale vs P2-candidate-clip | +12pp | 8 | 2 | +6 | 0.10938 |
 | P2-scale vs P2-none | +2pp | 1 | 0 | +1 | 1.00000 |
 | P3-clip vs P3-none | -2pp | 0 | 1 | -1 | 1.00000 |
 | P3-scale vs P3-none | -2pp | 0 | 1 | -1 | 1.00000 |
@@ -71,14 +79,14 @@ Reacher 的物理 action space 是 `[-1, 1]`。现有 scaler 映射后，两个�
 ## 结论
 
 1. **P0：** clip 和 global-scale 都保持 70.0%。它们把物理动作越界率从 0.0009 降到0，但没有改变成功率；P0 的少量真实越界不是该 cohort 的主要失败原因。
-2. **P1：** candidate-clip 从 74.0% 提升到 88.0%（+14pp），paired improved=10、regressed=3，但 50 episodes 下的 McNemar `p=0.09229`，应视为积极但尚未稳定的探索信号。CEM 原始候选真实归一化越界率为 1.246%，投影后为0，物理动作越界也为0。
-3. **P2：** candidate-clip 从 50.0% 提升到 80.0%（+30pp），paired improved=18、regressed=3，`p=0.00149`；只裁剪 warm-start 为50.0%，global-scale 为52.0%。这再次说明关键作用位于 CEM candidate 生成、B 评分和 elite 更新的一致约束，而不是只处理 actor warm-start。
+2. **P1：** candidate-clip 从 74.0% 提升到 88.0%（+14pp），paired improved=10、regressed=3，但 50 episodes 下的 McNemar p=0.09229，应视为积极但尚未稳定的探索信号。candidate-scale 反而为 60.0%，相对 candidate-clip 低 28pp，paired improved=2、regressed=16，p=0.00131。两者都消除了真实物理动作越界，但 global-scale 修改了约15.3%的候选元素，远多于 clip 的约1.25%，并使 planning median 从5.522s升至43.429s。
+3. **P2：** candidate-clip 从 50.0% 提升到 80.0%（+30pp），paired improved=18、regressed=3，p=0.00149；candidate-scale 进一步达到92.0%，相对 P2-none 为+42pp，paired improved=23、regressed=2，p=0.0000194。 但 candidate-scale 相对 candidate-clip 的直接 paired 差异为+12pp，只有8个改进、2个退化，p=0.10938，当前只能作为强探索信号。candidate-scale 的 planning median 为41.531s，约为 candidate-clip 的7倍。
 4. **P3：** clip 和 global-scale 都从 86.0% 降到84.0%，各自仅有1个 paired regression；没有观察到正收益。P3 baseline 的物理越界本来就只有0.0007%，因此边界投影消除极少量越界不足以改善闭环成功率。
-5. **跨方法解释：** P1/P2 的 candidate-clip 会改变 CEM 的搜索分布、B 的评分输入和 elite 更新轨迹；P3 的投影会改变 B 的评分输入和最终 argmin。因此成功率变化不能简单归因于“执行阶段避免越界”。本轮结果支持继续优先研究 CEM candidate 约束，但不支持将边界投影默认加入 P3。
+5. **跨方法解释：** P1/P2 的 candidate-clip 和 candidate-scale 都会改变 CEM 的搜索分布、B 的评分输入和 elite 更新轨迹；P3 的投影会改变 B 的评分输入和最终 argmin。因此成功率变化不能简单归因于“执行阶段避免越界”。当前结果支持继续研究 P2 的 candidate-level 约束，但还不足以默认采用 global-scale，也不支持将边界投影加入 P3。
 
 ## 限制与后续
 
-这是单 checkpoint、单训练 seed、50 条 dev episode 的探索性结果，不是 final 泛化证明，也不宣称动作边界处理带来稳定提升。下一步若要确认 P1 candidate-clip 的收益，应优先在保持同一 cohort/协议下补充训练或评测 seed；P3 的投影暂不值得扩展到更大候选预算，除非出现新的越界证据。
+这是单 checkpoint、单训练 seed、50 条 dev episode 的探索性结果，不是 final 泛化证明，也不宣称动作边界处理带来稳定提升。candidate-scale 的额外计算开销也需要单独优化或复核后，才能作为实际规划配置。下一步应优先在保持同一 cohort/协议下补充训练或评测 seed，确认 P2 candidate-scale 相对 candidate-clip 的收益；P3 的投影暂不值得扩展到更大候选预算，除非出现新的越界证据。
 
 ## 可复现产物
 

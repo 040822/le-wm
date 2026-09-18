@@ -23,7 +23,7 @@ P2 step1 到 step16 的变化为 92% 到 50%，step32 回升到 56%，因此影�
 
 ## 固定噪声 sampler 诊断
 
-| sampler | median mean_abs | median legacy `|action_norm|>1` proxy | median path distance to Euler-16 |
+| sampler | median mean_abs | median legacy abs_action_norm>1 proxy | median path distance to Euler-16 |
 |---|---:|---:|---:|
 | Euler-1 | 0.142 | 0.000 | 6.587 |
 | Euler-16 | 0.825 | 0.390 | 0.000 |
@@ -34,12 +34,12 @@ Euler step 增大使动作幅度和 normalized action 的 legacy unit-threshold 
 
 ## CEM warm-start 诊断
 
-| 初始化 | median 初始 cost | median 初始 legacy unit-threshold proxy | median 最终 elite cost |
-|---|---:|---:|---:|
-| P1 / no-warm | 0.8836 | 0.000 | 0.0088 |
-| P2 Euler-1 | 0.0349 | 0.000 | 0.0084 |
-| P2 Euler-16 | 0.0147 | 0.390 | 0.0086 |
-| P2 Euler-16, alpha=0.5 | 0.3154 | 0.000 | 0.0088 |
+| 初始化 | median 初始 cost | median 初始 legacy unit-threshold proxy | median 最终 elite cost | 对应闭环成功率 |
+|---|---:|---:|---:|---:|
+| P1 / no-warm | 0.8836 | 0.000 | 0.0088 | 74.0% |
+| P2 Euler-1 | 0.0349 | 0.000 | 0.0084 | 92.0% |
+| P2 Euler-16 | 0.0147 | 0.390 | 0.0086 | 50.0% |
+| P2 Euler-16, alpha=0.5 | 0.3154 | 0.000 | 0.0088 | 80.0% |
 
 alpha=0.5 使初始 legacy unit-threshold proxy 从 0.390 降到 0.000，并在闭环中恢复 30 个百分点。CEM 最终 elite cost 的差异很小，说明问题主要发生在初始动作 basin 与真实环境执行，而不是 CEM 最终 latent cost 无法收敛。
 
