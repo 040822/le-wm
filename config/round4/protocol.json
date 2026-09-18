@@ -18,7 +18,7 @@
   "best_of_n": {
     "candidate_count": 64,
     "flow_steps": 16,
-    "solver_batch_size": 1
+    "solver_batch_size": 50
   },
   "modes": ["P0", "P0-shuf", "P1", "P2", "P3", "P4", "P4-first"],
   "training": {

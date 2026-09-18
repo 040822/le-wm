@@ -10,7 +10,9 @@ from source.common.round4_action_bounds import (
     NormalizedActionBounds,
     compute_normalized_action_bounds,
     normalized_action_stats,
+    physical_action_stats,
     project_normalized_actions,
+    scale_factor_stats,
 )
 from source.policy.fast_lewam_eval import ProjectedCEMSolver
 from scripts.round4_reacher_action_bounds import _projection_stats
@@ -50,6 +52,15 @@ class Round4ActionBoundsTests(unittest.TestCase):
             expanded_low,
             np.tile(bounds.normalized_low, 2),
         )
+        physical_stats = physical_action_stats(
+            bounds.normalized_high[:2] + 0.1,
+            bounds,
+            scaler,
+        )
+        self.assertGreater(physical_stats["physical_action_violation_fraction"], 0.0)
+        metadata = bounds.metadata(action_dim=4)
+        np.testing.assert_allclose(metadata["normalizer_mean"], scaler.mean_)
+        np.testing.assert_allclose(metadata["normalizer_scale"], scaler.scale_)
 
     def test_clip_projects_each_action_coordinate_without_mutating_input(self):
         bounds = NormalizedActionBounds(
@@ -135,6 +146,22 @@ class Round4ActionBoundsTests(unittest.TestCase):
             stats["true_normalized_bound_violation_fraction"],
             0.5,
         )
+        self.assertAlmostEqual(
+            stats["true_normalized_action_vector_violation_fraction"],
+            0.5,
+        )
+        self.assertAlmostEqual(
+            stats["true_normalized_trajectory_violation_fraction"],
+            1.0,
+        )
+        self.assertAlmostEqual(stats["max_normalized_bound_violation"], 0.5)
+
+    def test_scale_factor_stats_exposes_distribution_quantiles(self):
+        stats = scale_factor_stats(np.array([1.0, 0.5, 0.25, 0.75]))
+
+        self.assertEqual(stats["count"], 4)
+        self.assertAlmostEqual(stats["min"], 0.25)
+        self.assertAlmostEqual(stats["median"], 0.625)
 
     def test_projected_cem_scores_and_returns_only_bounded_candidates(self):
         class CostModel(torch.nn.Module):
@@ -185,6 +212,58 @@ class Round4ActionBoundsTests(unittest.TestCase):
         self.assertLessEqual(float(result["actions"].abs().max()), 0.5 + 1e-6)
         projection = result["action_bound_projection"]
         self.assertEqual(projection["mode"], "clip")
+        self.assertEqual(projection["projected_candidate_violation_fraction"], 0.0)
+        self.assertGreater(projection["raw_candidate_violation_fraction"], 0.0)
+
+    def test_projected_cem_supports_global_scale_for_each_candidate(self):
+        class CostModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.anchor = torch.nn.Parameter(torch.zeros(1))
+                self.max_seen = 0.0
+
+            def get_cost(self, info, candidates):
+                del info
+                self.max_seen = max(self.max_seen, float(candidates.abs().max()))
+                return candidates.square().mean(dim=(-1, -2))
+
+        model = CostModel()
+        base_solver = __import__(
+            "stable_worldmodel.solver",
+            fromlist=["CEMSolver"],
+        ).CEMSolver(
+            model=model,
+            batch_size=1,
+            num_samples=4,
+            var_scale=1.0,
+            n_steps=2,
+            topk=2,
+            device="cpu",
+            seed=7,
+        )
+        config = OmegaConf.create(
+            {"horizon": 2, "receding_horizon": 2, "action_block": 1}
+        )
+        base_solver.configure(
+            action_space=gym.spaces.Box(-1.0, 1.0, shape=(1, 2)),
+            n_envs=1,
+            config=config,
+        )
+        solver = ProjectedCEMSolver(base_solver, projection_mode="global_scale")
+        bounds = NormalizedActionBounds(
+            physical_low=np.array([-1.0, -1.0]),
+            physical_high=np.array([1.0, 1.0]),
+            normalized_low=np.array([-0.25, -0.5]),
+            normalized_high=np.array([0.25, 0.5]),
+        )
+        solver.set_action_bounds(bounds)
+
+        result = solver.solve({"state": torch.zeros(1, 1)})
+
+        self.assertLessEqual(model.max_seen, 0.5 + 1e-6)
+        self.assertLessEqual(float(result["actions"].abs().max()), 0.5 + 1e-6)
+        projection = result["action_bound_projection"]
+        self.assertEqual(projection["mode"], "global_scale")
         self.assertEqual(projection["projected_candidate_violation_fraction"], 0.0)
         self.assertGreater(projection["raw_candidate_violation_fraction"], 0.0)
 

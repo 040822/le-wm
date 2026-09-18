@@ -101,6 +101,11 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         transform=None,
         seed: int = 42,
         action_bound_mode: str = "none",
+        bf16_proposal: bool = False,
+        bf16_verifier: bool = False,
+        optimize_proposal: bool = False,
+        cache_goal_latent: bool = False,
+        bf16_encode: bool = False,
     ):
         super().__init__()
         if proposal_source not in {"action", "latent"}:
@@ -141,9 +146,23 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             allowed=("none", "clip", "global_scale"),
         )
         self.action_bounds: NormalizedActionBounds | None = None
+        self.bf16_proposal = bool(bf16_proposal)
+        self.bf16_verifier = bool(bf16_verifier)
+        self.optimize_proposal = bool(optimize_proposal)
+        self.cache_goal_latent = bool(cache_goal_latent)
+        self.bf16_encode = bool(bf16_encode)
+        self._goal_latent_cache = None
         self._generators = {}
         self._action_buffer = None
         self.planning_events: list[dict] = []
+
+    def _autocast(self, enabled: bool):
+        device = next(self.model.parameters()).device
+        return torch.autocast(
+            device_type=device.type,
+            dtype=torch.bfloat16,
+            enabled=bool(enabled) and device.type == "cuda",
+        )
 
     def _generator(self, device):
         key = str(device)
@@ -158,6 +177,9 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
     def set_env(self, env):
         self.env = env
         self._action_buffer = [deque() for _ in range(env.num_envs)]
+        self._goal_latent_cache = (
+            [None] * env.num_envs if self.cache_goal_latent else None
+        )
         _validate_action_dim(self.model, env, self.action_block)
         if self.action_bound_mode == "none":
             return
@@ -194,33 +216,60 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             for key, value in selected.items()
         }
 
-    def _encode_context(self, info):
-        current = self.model._last_frame(info["pixels"])
-        goal = self.model._last_frame(info["goal"])
-        encoded = self.model.encode_pixels(torch.cat((current, goal), dim=0))
-        return encoded[: current.shape[0]], encoded[current.shape[0] :]
+    def _encode_context(self, info, indices=None):
+        with self._autocast(self.bf16_encode):
+            current = self.model._last_frame(info["pixels"])
+            cache = self._goal_latent_cache
+            if cache is not None and indices is not None and all(
+                cache[index] is not None for index in indices
+            ):
+                current_latent = self.model.encode_pixels(current).float()
+                goal_latent = torch.stack(
+                    [cache[index] for index in indices], dim=0
+                ).float()
+                return current_latent, goal_latent
+            goal = self.model._last_frame(info["goal"])
+            encoded = self.model.encode_pixels(torch.cat((current, goal), dim=0))
+        # Cast back to fp32 so Stage A/B always see a stable dtype regardless of
+        # whether the encoder ran under bf16 autocast.
+        current_latent = encoded[: current.shape[0]].float()
+        goal_latent = encoded[current.shape[0] :].float()
+        if cache is not None and indices is not None:
+            for row, index in enumerate(indices):
+                cache[index] = goal_latent[row].detach()
+        return current_latent, goal_latent
 
     def _propose(self, z_start, z_goal, generator):
         batch = z_start.shape[0]
         if self.proposal_source == "action":
             flat_start = z_start[:, None].expand(batch, self.num_candidates, -1).reshape(-1, z_start.shape[-1])
             flat_goal = z_goal[:, None].expand(batch, self.num_candidates, -1).reshape(-1, z_goal.shape[-1])
-            noise = torch.randn(
-                batch * self.num_candidates,
-                self.model.action_horizon,
-                self.model.action_dim,
-                device=z_start.device,
-                dtype=z_start.dtype,
-                generator=generator,
-            )
             started = time.perf_counter()
-            actions = self.model.sample_actions(
-                flat_start,
-                noise=noise,
-                num_steps=self.action_flow_steps,
-                goal_latent=flat_goal,
-                integrator=self.action_flow_integrator,
-            )
+            with self._autocast(self.bf16_proposal):
+                if self.optimize_proposal:
+                    actions = self.model.sample_actions(
+                        flat_start,
+                        num_steps=self.action_flow_steps,
+                        goal_latent=flat_goal,
+                        integrator=self.action_flow_integrator,
+                        generator=generator,
+                    )
+                else:
+                    noise = torch.randn(
+                        batch * self.num_candidates,
+                        self.model.action_horizon,
+                        self.model.action_dim,
+                        device=z_start.device,
+                        dtype=z_start.dtype,
+                        generator=generator,
+                    )
+                    actions = self.model.sample_actions(
+                        flat_start,
+                        noise=noise,
+                        num_steps=self.action_flow_steps,
+                        goal_latent=flat_goal,
+                        integrator=self.action_flow_integrator,
+                    )
             flow_seconds = time.perf_counter() - started
             return actions.reshape(
                 batch, self.num_candidates, self.model.action_horizon, self.model.action_dim
@@ -254,16 +303,17 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         }
 
     def score_candidates(self, z_start, z_goal, candidates):
-        return score_candidates_in_chunks(
-            lambda start, goal, actions: self.model.get_cost_from_latents(
-                start, goal, actions
-            ),
-            z_start,
-            z_goal,
-            candidates,
-            solver_batch_size=self.solver_batch_size,
-            candidate_batch_size=self.candidate_batch_size,
-        )
+        with self._autocast(self.bf16_verifier):
+            return score_candidates_in_chunks(
+                lambda start, goal, actions: self.model.get_cost_from_latents(
+                    start, goal, actions
+                ),
+                z_start,
+                z_goal,
+                candidates,
+                solver_batch_size=self.solver_batch_size,
+                candidate_batch_size=self.candidate_batch_size,
+            )
 
     def _project_candidates(self, candidates):
         if self.action_bound_mode == "none":
@@ -313,6 +363,11 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             "solver_batch_size": self.solver_batch_size,
             "candidate_batch_size": self.candidate_batch_size,
             "action_bound_mode": self.action_bound_mode,
+            "bf16_proposal": self.bf16_proposal,
+            "bf16_verifier": self.bf16_verifier,
+            "optimize_proposal": self.optimize_proposal,
+            "cache_goal_latent": self.cache_goal_latent,
+            "bf16_encode": self.bf16_encode,
         }
         if self.action_bounds is not None:
             metadata["action_bounds"] = self.action_bounds.metadata(
@@ -329,6 +384,8 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             for index, flush in enumerate(needs_flush):
                 if flush:
                     self._action_buffer[index].clear()
+                    if self._goal_latent_cache is not None:
+                        self._goal_latent_cache[index] = None
         terminated = info_dict.get("terminated")
         dead = (
             np.asarray(terminated, dtype=bool)
@@ -348,7 +405,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             generator = self._generator(device)
             _sync(device)
             started = time.perf_counter()
-            z_start, z_goal = self._encode_context(selected)
+            z_start, z_goal = self._encode_context(selected, replan)
             _sync(device)
             encode_seconds = time.perf_counter() - started
 
@@ -397,6 +454,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
                 **self.metadata(),
                 **proposal_meta,
                 "environment_batch_size": len(replan),
+                "replan_indices": [int(index) for index in replan],
                 "selected_indices": selected_indices.detach().cpu().tolist(),
                 "verify_seconds": float(verify_seconds),
                 "proposal_seconds": float(proposal_seconds),
@@ -440,6 +498,11 @@ def make_round4_policy(
     actor_warm_start_scale: float = 1.0,
     action_flow_integrator: str = "euler",
     action_bound_mode: str = "none",
+    bf16_proposal: bool = False,
+    bf16_verifier: bool = False,
+    optimize_proposal: bool = False,
+    cache_goal_latent: bool = False,
+    bf16_encode: bool = False,
 ):
     """Build one of the frozen Round 4 P0--P4 policy variants."""
     if mode not in ROUND4_MODES:
@@ -550,6 +613,11 @@ def make_round4_policy(
         transform=transform,
         seed=seed,
         action_bound_mode=action_bound_mode,
+        bf16_proposal=bf16_proposal,
+        bf16_verifier=bf16_verifier,
+        optimize_proposal=optimize_proposal,
+        cache_goal_latent=cache_goal_latent,
+        bf16_encode=bf16_encode,
     )
 
 

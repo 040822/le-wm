@@ -12,7 +12,12 @@ from source.common.round4_artifacts import (
     validate_leflow_manifest,
 )
 from source.common.round4_eval import _TimedSolver, validate_gpu_visibility
-from source.common.round4_protocol import mode_spec, should_expand_seed
+from source.common.round4_protocol import (
+    ROUND4_DEFAULTS,
+    mode_spec,
+    resolve_cem_protocol,
+    should_expand_seed,
+)
 
 
 class Round4ProtocolTests(unittest.TestCase):
@@ -62,6 +67,13 @@ class Round4ProtocolTests(unittest.TestCase):
             with self.assertRaisesRegex(EnvironmentError, "exactly one"):
                 validate_gpu_visibility("cuda")
 
+    def test_best_of_n_solver_batch_size_is_frozen_at_the_dev_world_size(self):
+        self.assertEqual(ROUND4_DEFAULTS["best_of_n"]["solver_batch_size"], 50)
+        parsed = build_parser().parse_args(
+            ["evaluate", "cube", "P3", "--cohort", "c", "--checkpoint", "p"]
+        )
+        self.assertIsNone(parsed.solver_batch_size)
+
     def test_cli_exposes_independent_modes_and_requires_explicit_gpu_for_training(self):
         parsed = build_parser().parse_args(["evaluate", "cube", "P4", "--cohort", "c", "--checkpoint", "p"])
         self.assertEqual(parsed.mode, "P4")
@@ -80,6 +92,34 @@ class Round4ProtocolTests(unittest.TestCase):
             ]
         )
         self.assertEqual(parsed_steps.action_flow_steps, 2)
+        parsed_protocol = build_parser().parse_args(
+            [
+                "evaluate",
+                "cube",
+                "P2",
+                "--cohort",
+                "c",
+                "--checkpoint",
+                "p",
+                "--cem-protocol",
+                "cem-scale",
+            ]
+        )
+        self.assertEqual(parsed_protocol.cem_protocol, "cem-scale")
+        self.assertEqual(
+            resolve_cem_protocol(
+                parsed_protocol.mode,
+                parsed_protocol.cem_protocol,
+                parsed_protocol.action_bound_mode,
+            ),
+            ("cem-scale", "candidate_scale"),
+        )
+        self.assertEqual(
+            resolve_cem_protocol("P0", "not_applicable", "none"),
+            ("not_applicable", "none"),
+        )
+        with self.assertRaises(ValueError):
+            resolve_cem_protocol("P1", "cem-clip", "warm_start_clip")
         train = build_parser().parse_args(["train", "cube", "--gpu", "2", "--dry-run"])
         self.assertEqual(train.gpu, "2")
         ab_train = build_parser().parse_args(

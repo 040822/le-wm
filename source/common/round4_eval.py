@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from statistics import median
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -30,7 +30,12 @@ from .round3_validation import (
 from .round4_protocol import (
     ROUND4_DEFAULTS,
     mode_spec,
+    resolve_cem_protocol,
     validate_round4_mode,
+)
+from .round4_action_bounds import (
+    compute_normalized_action_bounds,
+    summarize_executed_action_bounds,
 )
 from .gpu_environment import configure_mujoco_egl_device
 
@@ -140,6 +145,26 @@ def validate_gpu_visibility(device: str) -> None:
     configure_mujoco_egl_device()
 
 
+def validate_round4_protocol_variant(
+    manifest: CohortManifest,
+    allowed_protocol_variants: Sequence[str] = ("round3_revised",),
+) -> CohortManifest:
+    """Validate the cohort protocol against an explicit Round 4 allow-list.
+
+    The default preserves the original Round 4 contract.  Experiments that
+    intentionally compare the historical cohort must opt in explicitly.
+    """
+    allowed = tuple(str(value) for value in allowed_protocol_variants)
+    if not allowed:
+        raise ValueError("allowed_protocol_variants must not be empty")
+    if manifest.protocol_variant not in allowed:
+        raise ValueError(
+            "Round 4 cohort protocol variant is not allowed: "
+            f"got {manifest.protocol_variant!r}; allowed={allowed!r}"
+        )
+    return manifest
+
+
 def validate_round4_config(cfg: Any, mode: str) -> None:
     """Validate frozen shared settings without forcing CEM on P3/P4."""
     mode = validate_round4_mode(mode)
@@ -191,6 +216,8 @@ def _planning_summary(policy: Any) -> dict[str, Any]:
     ]
     result = {
         "replans": len(events),
+        "planning_samples_seconds": totals,
+        "planning_mean_seconds": float(np.mean(totals)),
         "planning_median_seconds": float(median(totals)),
         "planning_p95_seconds": float(np.quantile(totals, 0.95)),
         "encode_median_seconds": float(median(float(item.get("encode_seconds", 0.0)) for item in events)),
@@ -233,17 +260,36 @@ def run_round4_evaluation(
     candidate_count: int = 64,
     flow_steps: int = 16,
     action_flow_steps: int | None = None,
-    solver_batch_size: int = 1,
+    solver_batch_size: int | None = None,
     candidate_batch_size: int | None = None,
     actor_warm_start_scale: float = 1.0,
     action_flow_integrator: str = "euler",
     action_bound_mode: str = "none",
+    cem_protocol: str | None = None,
+    bf16_proposal: bool = False,
+    bf16_verifier: bool = False,
+    optimize_proposal: bool = False,
+    cache_goal_latent: bool = False,
+    bf16_encode: bool = False,
+    allowed_protocol_variants: Sequence[str] = ("round3_revised",),
 ) -> dict[str, Any]:
     """Run a Round 4 mode and publish cohort-bound result and trace artifacts."""
     mode = validate_round4_mode(mode)
+    cem_protocol, action_bound_mode = resolve_cem_protocol(
+        mode,
+        cem_protocol,
+        action_bound_mode,
+    )
     device = str(device or cfg.get("solver", {}).get("device", "cuda"))
     validate_gpu_visibility(device)
     validate_round4_config(cfg, mode)
+    solver_batch_size = (
+        int(ROUND4_DEFAULTS["best_of_n"]["solver_batch_size"])
+        if solver_batch_size is None
+        else int(solver_batch_size)
+    )
+    if solver_batch_size < 1:
+        raise ValueError("solver_batch_size must be positive")
     if action_flow_steps is not None and int(action_flow_steps) < 1:
         raise ValueError("action_flow_steps must be positive")
     if mode in {"P0-shuf", "P4-first"} and manifest.cohort_kind == "final":
@@ -262,11 +308,7 @@ def run_round4_evaluation(
     validate_cohort_manifest(
         manifest, task=task, expected_count=int(cfg.eval.num_eval)
     )
-    if manifest.protocol_variant != "round3_revised":
-        raise ValueError(
-            "Round 4 requires the frozen round3_revised cohort variant; "
-            f"got {manifest.protocol_variant!r}"
-        )
+    validate_round4_protocol_variant(manifest, allowed_protocol_variants)
     if int(cfg.eval.goal_offset_steps) != int(manifest.goal_offset_steps):
         raise ValueError("evaluation goal offset differs from the frozen cohort")
     if int(cfg.seed) != int(manifest.seed):
@@ -297,6 +339,11 @@ def run_round4_evaluation(
         actor_warm_start_scale=actor_warm_start_scale,
         action_flow_integrator=action_flow_integrator,
         action_bound_mode=action_bound_mode,
+        bf16_proposal=bf16_proposal,
+        bf16_verifier=bf16_verifier,
+        optimize_proposal=optimize_proposal,
+        cache_goal_latent=cache_goal_latent,
+        bf16_encode=bf16_encode,
     )
     _time_cem_policy(policy, mode)
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
@@ -315,12 +362,22 @@ def run_round4_evaluation(
     try:
         world = session.world_factory(**world_cfg, image_shape=(224, 224))
         envs = getattr(world, "envs", None)
+        action_processor = session.process.get("action")
+        action_bounds = None
+        if action_processor is not None and envs is not None:
+            action_bounds = compute_normalized_action_bounds(
+                envs.single_action_space,
+                action_processor,
+                action_block=int(cfg.plan_config.action_block),
+            )
         if trace:
             collector = Round3TraceCollector(
                 task,
                 manifest,
                 action_block=int(cfg.plan_config.action_block),
                 action_space=getattr(envs, "single_action_space", None),
+                action_processor=action_processor,
+                normalized_action_bounds=action_bounds,
             )
         world.set_policy(_PolicyTap(policy))
         if collector is not None and envs is not None and hasattr(envs, "step"):
@@ -385,16 +442,25 @@ def run_round4_evaluation(
     planning = _planning_summary(policy)
     policy_meta = dict(spec)
     policy_meta.update(getattr(policy, "metadata", lambda: {})())
+    policy_meta["cem_protocol"] = cem_protocol
     policy_meta["action_bound_mode"] = str(action_bound_mode)
-    action_bounds = getattr(policy, "action_bounds", None)
+    action_bounds = action_bounds or getattr(policy, "action_bounds", None)
+    model_for_metadata = getattr(policy, "fast_model", None) or getattr(
+        policy, "model", None
+    )
+    model_action_dim = getattr(model_for_metadata, "action_dim", None)
     if action_bounds is not None:
         policy_meta["action_bounds"] = action_bounds.metadata(
-            action_dim=int(cfg.plan_config.action_block)
-            * int(getattr(envs, "single_action_space", envs).shape[-1])
-            if envs is not None and hasattr(envs, "single_action_space")
-            else None
+            action_dim=(
+                int(model_action_dim)
+                if model_action_dim is not None
+                else None
+            )
         )
-    if mode in {"P0", "P0-shuf"}:
+    if mode == "P1":
+        policy_meta["action_flow_steps"] = None
+        policy_meta["action_flow_integrator"] = "not_applicable"
+    elif mode in {"P0", "P0-shuf"}:
         policy_meta["action_flow_steps"] = int(
             16 if action_flow_steps is None else action_flow_steps
         )
@@ -410,6 +476,12 @@ def run_round4_evaluation(
             16 if action_flow_steps is None else action_flow_steps
         )
         policy_meta["action_flow_integrator"] = str(action_flow_integrator)
+    if action_bounds is not None and action_processor is not None:
+        policy_meta["executed_action_bounds"] = summarize_executed_action_bounds(
+            records,
+            action_bounds,
+            action_processor,
+        )
     policy_meta.update(planning)
     for record in records:
         record.setdefault("planning", dict(policy_meta))
@@ -439,12 +511,20 @@ def run_round4_evaluation(
                 else None
             ),
             "solver_batch_size": int(solver_batch_size),
+            "bf16_proposal": bool(bf16_proposal),
+            "bf16_verifier": bool(bf16_verifier),
+            "optimize_proposal": bool(optimize_proposal),
+            "cache_goal_latent": bool(cache_goal_latent),
+            "bf16_encode": bool(bf16_encode),
             "action_flow_steps": policy_meta.get("action_flow_steps"),
             "actor_warm_start_scale": (
                 float(actor_warm_start_scale) if mode == "P2" else None
             ),
-            "action_flow_integrator": str(action_flow_integrator),
+            "action_flow_integrator": policy_meta.get(
+                "action_flow_integrator", str(action_flow_integrator)
+            ),
             "action_bound_mode": str(action_bound_mode),
+            "cem_protocol": cem_protocol,
         },
         "evaluation_seconds": float(elapsed),
         "success_rate": float(successes.mean()),
@@ -487,4 +567,5 @@ __all__ = [
     "run_round4_evaluation",
     "validate_gpu_visibility",
     "validate_round4_config",
+    "validate_round4_protocol_variant",
 ]

@@ -29,6 +29,7 @@ from source.common.round3_eval import run_round3_evaluation
 from source.common.round4_artifacts import validate_artifact_manifest, validate_leflow_manifest
 from source.common.round4_eval import run_round4_evaluation, validate_gpu_visibility
 from source.common.round4_protocol import (
+    ROUND4_CEM_PROTOCOLS,
     ROUND4_MODES,
     ROUND4_TASKS,
     mode_spec,
@@ -148,10 +149,17 @@ def command_evaluate(args: argparse.Namespace) -> None:
         candidate_count=int(args.candidate_count),
         flow_steps=int(args.flow_steps),
         action_flow_steps=args.action_flow_steps,
-        solver_batch_size=int(args.solver_batch_size),
+        solver_batch_size=args.solver_batch_size,
         candidate_batch_size=args.candidate_batch_size,
         actor_warm_start_scale=float(args.actor_warm_start_scale),
         action_flow_integrator=args.action_flow_integrator,
+        action_bound_mode=args.action_bound_mode,
+        cem_protocol=args.cem_protocol,
+        bf16_proposal=bool(args.bf16_proposal),
+        bf16_verifier=bool(args.bf16_verifier),
+        optimize_proposal=bool(args.optimize_proposal),
+        cache_goal_latent=bool(args.cache_goal_latent),
+        bf16_encode=bool(args.bf16_encode),
     )
     print(json.dumps({"mode": mode, "result": str(target / "result.json"), "success_rate": result["success_rate"]}, sort_keys=True))
 
@@ -318,7 +326,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="override Stage-A action flow steps for P0/P2/P3; P1 is invariant",
     )
-    evaluate.add_argument("--solver-batch-size", type=int, default=1)
+    evaluate.add_argument(
+        "--solver-batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Stage-B candidate-scoring batch over the environment dimension; "
+            "defaults to the frozen Round 4 best-of-N value"
+        ),
+    )
     evaluate.add_argument("--candidate-batch-size", type=int)
     evaluate.add_argument(
         "--actor-warm-start-scale",
@@ -331,6 +347,53 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("euler", "heun"),
         default="euler",
         help="diagnostic-only action flow integrator; default preserves Euler",
+    )
+    evaluate.add_argument(
+        "--cem-protocol",
+        choices=ROUND4_CEM_PROTOCOLS,
+        help=(
+            "CEM candidate protocol: legacy, cem-clip, cem-scale; "
+            "P0/P3 use not_applicable"
+        ),
+    )
+    evaluate.add_argument(
+        "--bf16-proposal",
+        action="store_true",
+        help="diagnostic-only: run Stage-A proposal forwards under bf16 autocast",
+    )
+    evaluate.add_argument(
+        "--bf16-verifier",
+        action="store_true",
+        help="diagnostic-only: run the Stage-B verifier forward under bf16 autocast",
+    )
+    evaluate.add_argument(
+        "--optimize-proposal",
+        action="store_true",
+        help="diagnostic-only: generate candidate noise in the sampler to avoid a copy",
+    )
+    evaluate.add_argument(
+        "--cache-goal-latent",
+        action="store_true",
+        help="diagnostic-only: reuse the per-episode goal latent across replans",
+    )
+    evaluate.add_argument(
+        "--bf16-encode",
+        action="store_true",
+        help="diagnostic-only: run the pixel encoder (ViT) under bf16 autocast",
+    )
+    evaluate.add_argument(
+        "--action-bound-mode",
+        choices=(
+            "none",
+            "warm_start_clip",
+            "candidate_clip",
+            "candidate_scale",
+            "warm_start_scale",
+            "clip",
+            "global_scale",
+        ),
+        default="none",
+        help="internal compatibility name; prefer --cem-protocol",
     )
     evaluate.set_defaults(function=command_evaluate)
 

@@ -13,8 +13,10 @@ from stable_worldmodel.solver.cem import prepare_init_action
 from source.common.round4_action_bounds import (
     NormalizedActionBounds,
     compute_normalized_action_bounds,
+    global_scale_factors,
     normalized_action_stats,
     project_normalized_actions,
+    scale_factor_stats,
 )
 from source.policy.lewm import _to_container
 
@@ -22,6 +24,12 @@ _STAGE_B_Z0 = "_fast_lewam_stage_b_z0"
 _STAGE_B_GOAL = "_fast_lewam_stage_b_goal"
 _STAGE_B_CONTEXT_PIXELS = "_fast_lewam_stage_b_context_pixels"
 _STAGE_B_CONTEXT_GOAL = "_fast_lewam_stage_b_context_goal"
+
+
+def _sync(device: torch.device) -> None:
+    """Synchronize CUDA work around planning timing boundaries."""
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def _validate_action_bound_mode(mode, *, allowed):
@@ -37,6 +45,8 @@ def _projection_summary(
     before: torch.Tensor,
     after: torch.Tensor,
     bounds: NormalizedActionBounds,
+    *,
+    mode: str = "clip",
 ) -> dict:
     """Summarize one normalized-action projection without retaining tensors."""
     if before.shape != after.shape:
@@ -44,12 +54,115 @@ def _projection_summary(
     delta = (after - before).detach().float().abs()
     before_stats = normalized_action_stats(before, bounds)
     after_stats = normalized_action_stats(after, bounds)
-    return {
+    summary = {
+        "mode": str(mode),
         "before": before_stats,
         "after": after_stats,
         "changed_fraction": float((delta > 1e-6).float().mean().cpu()),
         "mean_abs_delta": float(delta.mean().cpu()),
         "max_abs_delta": float(delta.max().cpu()),
+    }
+    if str(mode).lower() == "global_scale":
+        summary["scale_factor_distribution"] = scale_factor_stats(
+            global_scale_factors(before, bounds)
+        )
+    else:
+        summary["scale_factor_distribution"] = None
+    return summary
+
+
+def _new_bound_metric_accumulator() -> dict[str, float | int]:
+    return {
+        "element_count": 0,
+        "element_total": 0,
+        "vector_count": 0,
+        "vector_total": 0,
+        "trajectory_count": 0,
+        "trajectory_total": 0,
+        "legacy_count": 0,
+        "max_violation_amplitude": 0.0,
+    }
+
+
+def _update_bound_metric_accumulator(
+    accumulator: dict[str, float | int],
+    actions: torch.Tensor,
+    bounds: NormalizedActionBounds,
+) -> None:
+    """Accumulate bound statistics on-device without retaining candidates."""
+    low, high = bounds.for_action_dim(int(actions.shape[-1]))
+    low_tensor = torch.as_tensor(
+        low,
+        device=actions.device,
+        dtype=actions.dtype,
+    ).reshape((1,) * (actions.ndim - 1) + (-1,))
+    high_tensor = torch.as_tensor(
+        high,
+        device=actions.device,
+        dtype=actions.dtype,
+    ).reshape((1,) * (actions.ndim - 1) + (-1,))
+    violation = (actions < low_tensor - 1e-6) | (
+        actions > high_tensor + 1e-6
+    )
+    excess = torch.maximum(
+        torch.maximum(low_tensor - actions, actions - high_tensor),
+        torch.zeros_like(actions),
+    )
+    accumulator["element_count"] += int(violation.sum().item())
+    accumulator["element_total"] += int(violation.numel())
+    vector_violation = violation.any(dim=-1)
+    accumulator["vector_count"] += int(vector_violation.sum().item())
+    accumulator["vector_total"] += int(vector_violation.numel())
+    if actions.ndim <= 2:
+        trajectory_violation = vector_violation
+    else:
+        trajectory_violation = violation.any(dim=tuple(range(actions.ndim - 2, actions.ndim)))
+    accumulator["trajectory_count"] += int(trajectory_violation.sum().item())
+    accumulator["trajectory_total"] += int(trajectory_violation.numel())
+    accumulator["legacy_count"] += int(actions.abs().gt(1.0).sum().item())
+    accumulator["max_violation_amplitude"] = max(
+        float(accumulator["max_violation_amplitude"]),
+        float(excess.max().item()),
+    )
+
+
+def _finish_bound_metric_accumulator(
+    accumulator: dict[str, float | int],
+) -> dict[str, float | int]:
+    element_total = max(1, int(accumulator["element_total"]))
+    vector_total = max(1, int(accumulator["vector_total"]))
+    trajectory_total = max(1, int(accumulator["trajectory_total"]))
+    return {
+        "true_normalized_bound_violation_fraction": float(
+            int(accumulator["element_count"]) / element_total
+        ),
+        "true_normalized_bound_violation_count": int(
+            accumulator["element_count"]
+        ),
+        "true_normalized_action_vector_violation_fraction": float(
+            int(accumulator["vector_count"]) / vector_total
+        ),
+        "true_normalized_trajectory_violation_fraction": float(
+            int(accumulator["trajectory_count"]) / trajectory_total
+        ),
+        "normalized_action_vector_violation_fraction": float(
+            int(accumulator["vector_count"]) / vector_total
+        ),
+        "normalized_trajectory_violation_fraction": float(
+            int(accumulator["trajectory_count"]) / trajectory_total
+        ),
+        "legacy_unit_threshold_fraction": float(
+            int(accumulator["legacy_count"]) / element_total
+        ),
+        "max_normalized_bound_violation": float(
+            accumulator["max_violation_amplitude"]
+        ),
+        "element_count": int(accumulator["element_count"]),
+        "element_total": int(accumulator["element_total"]),
+        "action_vector_count": int(accumulator["vector_count"]),
+        "action_vector_total": int(accumulator["vector_total"]),
+        "trajectory_count": int(accumulator["trajectory_count"]),
+        "trajectory_total": int(accumulator["trajectory_total"]),
     }
 
 
@@ -122,11 +235,14 @@ class ProjectedCEMSolver:
     """CEM adapter that projects candidates before scoring and updating elites."""
 
     def __init__(self, solver, *, projection_mode="clip"):
-        if str(projection_mode).lower() != "clip":
-            raise ValueError("ProjectedCEMSolver currently supports clip only")
+        projection_mode = str(projection_mode).lower()
+        if projection_mode not in {"clip", "global_scale"}:
+            raise ValueError(
+                "ProjectedCEMSolver supports only 'clip' or 'global_scale'"
+            )
         self._solver = solver
         self.model = solver.model
-        self.projection_mode = "clip"
+        self.projection_mode = projection_mode
         self.action_bounds = None
         self.last_action_bound_projection = None
 
@@ -176,12 +292,12 @@ class ProjectedCEMSolver:
             low,
             device=candidates.device,
             dtype=candidates.dtype,
-        ).reshape(1, 1, 1, -1)
+        ).reshape((1,) * (candidates.ndim - 1) + (-1,))
         high_tensor = torch.as_tensor(
             high,
             device=candidates.device,
             dtype=candidates.dtype,
-        ).reshape(1, 1, 1, -1)
+        ).reshape((1,) * (candidates.ndim - 1) + (-1,))
         return (candidates < low_tensor - 1e-6) | (
             candidates > high_tensor + 1e-6
         )
@@ -208,7 +324,7 @@ class ProjectedCEMSolver:
         projected_init = project_normalized_actions(
             prepared_init,
             bounds,
-            mode="clip",
+            mode=self.projection_mode,
         )
         initial_projected_init = projected_init.detach().clone()
         mean, var = base.init_action_distrib(total_envs, projected_init)
@@ -218,12 +334,12 @@ class ProjectedCEMSolver:
         for cb in base.callbacks:
             cb.reset()
 
-        raw_violation_count = torch.zeros((), device=mean.device, dtype=torch.float64)
-        projected_violation_count = torch.zeros(
-            (), device=mean.device, dtype=torch.float64
-        )
-        changed_count = torch.zeros((), device=mean.device, dtype=torch.float64)
-        candidate_count = 0
+        raw_metrics = _new_bound_metric_accumulator()
+        projected_metrics = _new_bound_metric_accumulator()
+        elite_metrics = _new_bound_metric_accumulator()
+        changed_count = 0
+        candidate_elements = 0
+        scale_factors = []
 
         for start_idx in range(0, total_envs, base.batch_size):
             end_idx = min(start_idx + base.batch_size, total_envs)
@@ -276,20 +392,30 @@ class ProjectedCEMSolver:
                 candidates = project_normalized_actions(
                     raw_candidates,
                     bounds,
-                    mode="clip",
+                    mode=self.projection_mode,
                 )
                 candidates[:, 0] = project_normalized_actions(
                     batch_mean,
                     bounds,
-                    mode="clip",
+                    mode=self.projection_mode,
                 )
 
-                raw_mask = self._candidate_bound_mask(raw_candidates, bounds)
-                projected_mask = self._candidate_bound_mask(candidates, bounds)
-                raw_violation_count += raw_mask.sum()
-                projected_violation_count += projected_mask.sum()
-                changed_count += (raw_candidates - candidates).abs().gt(1e-6).sum()
-                candidate_count += raw_candidates.numel()
+                _update_bound_metric_accumulator(raw_metrics, raw_candidates, bounds)
+                _update_bound_metric_accumulator(
+                    projected_metrics, candidates, bounds
+                )
+                changed_count += int(
+                    (raw_candidates - candidates).abs().gt(1e-6).sum().item()
+                )
+                candidate_elements += int(raw_candidates.numel())
+                if self.projection_mode == "global_scale":
+                    scale_factors.append(
+                        global_scale_factors(raw_candidates, bounds)
+                        .detach()
+                        .float()
+                        .cpu()
+                        .reshape(-1)
+                    )
 
                 costs = base.model.get_cost(expanded_infos, candidates)
                 if not isinstance(costs, torch.Tensor):
@@ -314,6 +440,9 @@ class ProjectedCEMSolver:
                     device=base.device,
                 ).unsqueeze(1).expand(-1, base.topk)
                 topk_candidates = candidates[batch_indices, topk_indices]
+                _update_bound_metric_accumulator(
+                    elite_metrics, topk_candidates, bounds
+                )
                 prev_mean = batch_mean
                 prev_var = batch_var
                 batch_mean = topk_candidates.mean(dim=1)
@@ -352,6 +481,12 @@ class ProjectedCEMSolver:
             "last_action_bound_projection",
             None,
         )
+        raw_summary = _finish_bound_metric_accumulator(raw_metrics)
+        projected_summary = _finish_bound_metric_accumulator(projected_metrics)
+        if projected_summary["true_normalized_bound_violation_fraction"] != 0.0:
+            raise RuntimeError(
+                "projected CEM candidates still violate normalized action bounds"
+            )
         projection = {
             "mode": self.projection_mode,
             "bounds": bounds.metadata(action_dim=base.action_dim),
@@ -362,16 +497,25 @@ class ProjectedCEMSolver:
                     prepared_init,
                     initial_projected_init,
                     bounds,
+                    mode=self.projection_mode,
                 )
             ),
-            "raw_candidate_violation_fraction": float(
-                (raw_violation_count / max(1, candidate_count)).cpu()
-            ),
-            "projected_candidate_violation_fraction": float(
-                (projected_violation_count / max(1, candidate_count)).cpu()
-            ),
+            "raw_candidate_stats": raw_summary,
+            "projected_candidate_stats": projected_summary,
+            "elite_stats": _finish_bound_metric_accumulator(elite_metrics),
+            "raw_candidate_violation_fraction": raw_summary[
+                "true_normalized_bound_violation_fraction"
+            ],
+            "projected_candidate_violation_fraction": projected_summary[
+                "true_normalized_bound_violation_fraction"
+            ],
             "candidate_changed_fraction": float(
-                (changed_count / max(1, candidate_count)).cpu()
+                changed_count / max(1, candidate_elements)
+            ),
+            "scale_factor_distribution": (
+                scale_factor_stats(torch.cat(scale_factors))
+                if scale_factors
+                else None
             ),
             "final_actions": normalized_action_stats(mean, bounds),
         }
@@ -448,6 +592,7 @@ class ActorWarmStartModelView(StageBModelView):
             actions,
             projected,
             self.action_bounds,
+            mode=self.action_projection,
         )
         return projected
 
@@ -529,7 +674,13 @@ class FastLeWAMStageBPolicy(swm.policy.WorldModelPolicy):
         self.fast_action_block = int(action_block)
         self.action_bound_mode = _validate_action_bound_mode(
             action_bound_mode,
-            allowed=("none", "warm_start_clip", "candidate_clip", "warm_start_scale"),
+            allowed=(
+                "none",
+                "warm_start_clip",
+                "candidate_clip",
+                "candidate_scale",
+                "warm_start_scale",
+            ),
         )
         self.action_bounds = None
 
@@ -724,8 +875,11 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             for key, value in selected.items():
                 if torch.is_tensor(value):
                     selected[key] = value.to(device)
-            timed_projection = self.action_bound_mode != "none"
-            encode_started = time.perf_counter() if timed_projection else None
+            timing_enabled = True
+            if device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(device)
+            _sync(device)
+            encode_started = time.perf_counter() if timing_enabled else None
             current_frames = self.model._last_frame(selected["pixels"])
             goal_latent = None
             if token_goal or guidance_goal:
@@ -743,7 +897,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             else:
                 encode_seconds = 0.0
             generator = self._generator(device)
-            proposal_started = time.perf_counter() if timed_projection else None
+            proposal_started = time.perf_counter() if timing_enabled else None
             with torch.no_grad():
                 if self.mode == "stage_a":
                     chunk = self.model.sample_actions(
@@ -788,6 +942,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                     raw_chunk,
                     chunk,
                     self.action_bounds,
+                    mode=self.action_bound_mode,
                 )
             else:
                 projection = None
@@ -814,6 +969,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                     "verifier": "none",
                     "selection_rule": "direct",
                     "environment_batch_size": len(replan),
+                    "replan_indices": [int(index) for index in replan],
                     "forward_count": int(
                         flow_steps * (2 if self.integrator == "heun" else 1)
                     ),
@@ -838,7 +994,11 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                     "proposal_seconds": float(proposal_seconds),
                     "flow_seconds": float(proposal_seconds),
                     "verify_seconds": 0.0,
-                    "peak_memory_bytes": None,
+                    "peak_memory_bytes": (
+                        int(torch.cuda.max_memory_allocated(device))
+                        if device.type == "cuda"
+                        else None
+                    ),
                 }
             )
             for row, env_index in enumerate(replan):
@@ -891,11 +1051,17 @@ def make_fast_lewam_policy(
     if mode == "stage_b":
         action_bound_mode = _validate_action_bound_mode(
             action_bound_mode,
-            allowed=("none", "warm_start_clip", "candidate_clip", "warm_start_scale"),
+            allowed=(
+                "none",
+                "warm_start_clip",
+                "candidate_clip",
+                "candidate_scale",
+                "warm_start_scale",
+            ),
         )
         if (
             action_bound_mode != "none"
-            and action_bound_mode != "candidate_clip"
+            and action_bound_mode not in {"candidate_clip", "candidate_scale"}
             and not actor_warm_start
         ):
             raise ValueError(
@@ -906,6 +1072,7 @@ def make_fast_lewam_policy(
             "none": "none",
             "warm_start_clip": "clip",
             "candidate_clip": "clip" if actor_warm_start else "none",
+            "candidate_scale": "global_scale" if actor_warm_start else "none",
             "warm_start_scale": "global_scale",
         }[action_bound_mode]
         solver_model = (
@@ -926,8 +1093,11 @@ def make_fast_lewam_policy(
             else StageBModelView(model)
         )
         solver = hydra.utils.instantiate(solver_cfg, model=solver_model)
-        if action_bound_mode == "candidate_clip":
-            solver = ProjectedCEMSolver(solver, projection_mode="clip")
+        if action_bound_mode in {"candidate_clip", "candidate_scale"}:
+            projection_mode = (
+                "clip" if action_bound_mode == "candidate_clip" else "global_scale"
+            )
+            solver = ProjectedCEMSolver(solver, projection_mode=projection_mode)
         return FastLeWAMStageBPolicy(
             solver=solver,
             config=config,
