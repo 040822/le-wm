@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "phase": "round3_phase3",
+  "status": "completed_exploratory_not_mainline",
+  "mainline_status": "not_promoted_after_stage_b_comparison",
+  "protocol": "round3_revised",
+  "base_selection": {
+    "method": "e5_fast",
+    "selection_config": "config/round3/phase1_5_selection.json",
+    "selection_mean_gain_pp": 4.666666666666667,
+    "decision": "user_accepted_near_5pp"
+  },
+  "representation": {
+    "token_encoding": "physical_time_type",
+    "stage_b_timestep_mode": "legacy",
+    "latent_head_dim": 192,
+    "seed": 3072,
+    "train_mode": "stage_ab",
+    "stage_a_goal_injection": "token",
+    "detach_clean_action": false,
+    "latent_action_mix_epochs": 10,
+    "stage_b_dynamics": "parallel_prefix",
+    "stage_b_attention_mode": "strict_causal",
+    "serial_activation_checkpointing": false,
+    "inference_steps": 10,
+    "initialization": "random",
+    "legacy_e5_checkpoint_transfer": "not_attempted_due_to_token_parameter_schema_change"
+  },
+  "training_entrypoint": "scripts/run_round3_phase3_e5_physical_time.sh",
+  "tasks": {
+    "cube": {
+      "run_dir": "outputs/round3/phase3/fast_lewam/cube/e5_physical_time_type_192_seed3072",
+      "checkpoint": "outputs/round3/phase3/fast_lewam/cube/e5_physical_time_type_192_seed3072/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "dev_cohort": "outputs/round3/phase1/cohorts/cube/dev_round3_revised.json",
+      "dev_cohort_sha256": "578f6ea52e56d77461cb5bb2aeb01a004a21b9f6659689596f6f55f25dc17d01"
+    },
+    "pusht": {
+      "run_dir": "outputs/round3/phase3/fast_lewam/pusht/e5_physical_time_type_192_seed3072",
+      "checkpoint": "outputs/round3/phase3/fast_lewam/pusht/e5_physical_time_type_192_seed3072/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "dev_cohort": "outputs/round3/phase1/cohorts/pusht/dev_round3_revised.json",
+      "dev_cohort_sha256": "5b3cd95037c17bc6282bdd29cab4e550aff1a5205d051b2991263a1bac937560"
+    },
+    "reacher": {
+      "run_dir": "outputs/round3/phase3/fast_lewam/reacher/e5_physical_time_type_192_seed3072",
+      "checkpoint": "outputs/round3/phase3/fast_lewam/reacher/e5_physical_time_type_192_seed3072/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "dev_cohort": "outputs/round3/phase1/cohorts/reacher/dev_round3_revised.json",
+      "dev_cohort_sha256": "d18695b2377000ce7dd774fcad78e4bb2d75980fb3ccbd98cc83d09ef50f1d06"
+    },
+    "tworoom": {
+      "run_dir": "outputs/round3/phase3/fast_lewam/tworoom/e5_physical_time_type_192_seed3072",
+      "checkpoint": "outputs/round3/phase3/fast_lewam/tworoom/e5_physical_time_type_192_seed3072/checkpoints/fast_lewam_weights_epoch_10.pt",
+      "dev_cohort": "outputs/round3/phase1/cohorts/tworoom/dev_round3_revised.json",
+      "dev_cohort_sha256": "367aefc82f4c0786992172f535f00b743750108a8614c2d282019e9a78abdc6b"
+    }
+  },
+  "evaluation": {
+    "cohort_kind": "dev",
+    "stage": "stage_b",
+    "stages": ["stage_a", "stage_a_shuffled_goal", "stage_b"],
+    "method": "e5_fast",
+    "result_root": "outputs/round3/phase3/evals",
+    "require_results": true,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "action_block": 5,
+    "cem_num_samples": 300,
+    "cem_iterations": 30,
+    "cem_topk": 30,
+    "save_video": false
+  },
+  "round4": {
+    "continue_current_run": true,
+    "round3_gpu_requires_explicit_idle_gpu0_to_gpu3_window": true
+  }
+}
