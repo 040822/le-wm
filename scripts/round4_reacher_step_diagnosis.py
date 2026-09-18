@@ -837,12 +837,12 @@ Euler step 增大使动作幅度和 normalized action 越界比例持续上升�
 
 ## CEM warm-start 诊断
 
-| 初始化 | median 初始 cost | median 初始越界比例 | median 最终 elite cost |
-|---|---:|---:|---:|
-| P1 / no-warm | {_cem_median(summary, 'p1_no_warm', 'initial_cost'):.4f} | {_cem_median(summary, 'p1_no_warm', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p1_no_warm', 'final_elite_cost'):.4f} |
-| P2 Euler-1 | {_cem_median(summary, 'p2_euler_1', 'initial_cost'):.4f} | {_cem_median(summary, 'p2_euler_1', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p2_euler_1', 'final_elite_cost'):.4f} |
-| P2 Euler-16 | {_cem_median(summary, 'p2_euler_16', 'initial_cost'):.4f} | {_cem_median(summary, 'p2_euler_16', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p2_euler_16', 'final_elite_cost'):.4f} |
-| P2 Euler-16, alpha=0.5 | {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'initial_cost'):.4f} | {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'final_elite_cost'):.4f} |
+| 初始化 | median 初始 cost | median 初始越界比例 | median 最终 elite cost | 对应闭环成功率 |
+|---|---:|---:|---:|---:|
+| P1 / no-warm | {_cem_median(summary, 'p1_no_warm', 'initial_cost'):.4f} | {_cem_median(summary, 'p1_no_warm', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p1_no_warm', 'final_elite_cost'):.4f} | {rate('P1_random')} |
+| P2 Euler-1 | {_cem_median(summary, 'p2_euler_1', 'initial_cost'):.4f} | {_cem_median(summary, 'p2_euler_1', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p2_euler_1', 'final_elite_cost'):.4f} | {rate('P2_euler_1')} |
+| P2 Euler-16 | {_cem_median(summary, 'p2_euler_16', 'initial_cost'):.4f} | {_cem_median(summary, 'p2_euler_16', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p2_euler_16', 'final_elite_cost'):.4f} | {rate('P2_euler_16')} |
+| P2 Euler-16, alpha=0.5 | {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'initial_cost'):.4f} | {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'initial_out_of_range_fraction'):.3f} | {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'final_elite_cost'):.4f} | {rate('P2_alpha_0.5')} |
 
 alpha=0.5 使初始越界比例从 {_cem_median(summary, 'p2_euler_16', 'initial_out_of_range_fraction'):.3f} 降到 {_cem_median(summary, 'p2_euler_16_alpha_0.5', 'initial_out_of_range_fraction'):.3f}，并在闭环中恢复 30 个百分点。CEM 最终 elite cost 的差异很小，说明问题主要发生在初始动作 basin 与真实环境执行，而不是 CEM 最终 latent cost 无法收敛。
 

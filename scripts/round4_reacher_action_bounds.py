@@ -369,7 +369,7 @@ def _render_report(
             "",
             "## 解释规则",
             "",
-            "- P0 比较直接动作路径的 `clip` 和 `global_scale`；P1 比较随机初始化 CEM 的 candidate-clip；P2 保留 warm-start、CEM candidate 和 global-scale 三类处理；P3 比较 A best-of-64 候选的 `clip` 和 `global_scale`。",
+            "- P0 比较直接动作路径的 clip 和 global_scale；P1 比较随机初始化 CEM 的 candidate-clip 和 candidate-scale；P2 比较 warm-start、CEM candidate 的 clip/scale 处理；P3 比较 A best-of-64 候选的 clip 和 global_scale。",
             "- 若真实物理越界下降且成功率提高，动作边界处理可作为后续规划候选，但不覆盖默认 evaluator。",
             "- 若真实越界接近零而成功率不变，则此前主要信号来自 `abs>1` proxy，不能据此断言环境动作越界是根因。",
             "",
@@ -555,6 +555,19 @@ def main(argv: list[str] | None = None) -> None:
             comparison["improved"] - comparison["regressed"]
         )
         paired[f"{name}_vs_{baseline_name}"] = comparison
+
+    for scale_name, clip_name in (
+        ("P1_candidate_scale", "P1_candidate_clip"),
+        ("P2_candidate_scale", "P2_candidate_clip"),
+    ):
+        comparison = paired_comparison(
+            payloads[clip_name].get("episodes", []),
+            payloads[scale_name].get("episodes", []),
+        )
+        comparison["net_success_delta"] = int(
+            comparison["improved"] - comparison["regressed"]
+        )
+        paired[f"{scale_name}_vs_{clip_name}"] = comparison
 
     bounds = None
     for payload in payloads.values():

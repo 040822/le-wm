@@ -54,6 +54,10 @@
       "mode": "P1",
       "action_bound_mode": "candidate_clip"
     },
+    "P1_candidate_scale": {
+      "mode": "P1",
+      "action_bound_mode": "candidate_scale"
+    },
     "P2_none": {
       "mode": "P2",
       "action_bound_mode": "none",
@@ -66,6 +70,10 @@
     "P2_candidate_clip": {
       "mode": "P2",
       "action_bound_mode": "candidate_clip"
+    },
+    "P2_candidate_scale": {
+      "mode": "P2",
+      "action_bound_mode": "candidate_scale"
     },
     "P2_scale": {
       "mode": "P2",
