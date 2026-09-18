@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 4 Phase 4.5-4",
+  "protocol": "round3_revised",
+  "allowed_protocol_variants": [
+    "legacy",
+    "round3_revised"
+  ],
+  "training": {
+    "model": "R4-AB",
+    "seed": 3072,
+    "epoch": 10,
+    "retrain": false,
+    "checkpoints": {
+      "cube": "outputs/round4/ab_seed3072_cube/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "pusht": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "reacher": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "tworoom": "outputs/round4/ab_seed3072_tworoom/checkpoints/r4_ab_seed3072_weights_epoch_10.pt"
+    }
+  },
+  "cohort": {
+    "legacy": {
+      "kind": "dev",
+      "protocol_variant": "legacy",
+      "paths": {
+        "cube": "outputs/round3/phase1/cohorts/cube/legacy_50.json",
+        "pusht": "outputs/round3/phase1/cohorts/pusht/legacy_50.json",
+        "reacher": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+        "tworoom": "outputs/round3/phase1/cohorts/tworoom/legacy_50.json"
+      }
+    },
+    "dev": {
+      "kind": "dev",
+      "protocol_variant": "round3_revised",
+      "results_root": "outputs/round4/phase45_3_seed3072_dev",
+      "paths": {
+        "cube": "outputs/round3/phase1/cohorts/cube/dev_round3_revised.json",
+        "pusht": "outputs/round3/phase1/cohorts/pusht/dev_round3_revised.json",
+        "reacher": "outputs/round3/phase1/cohorts/reacher/dev_round3_revised.json",
+        "tworoom": "outputs/round3/phase1/cohorts/tworoom/dev_round3_revised.json"
+      }
+    }
+  },
+  "evaluation": {
+    "seed": 42,
+    "dev_episodes": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0,
+    "flow_steps": [
+      1,
+      2,
+      5,
+      10,
+      16,
+      32
+    ],
+    "step_reference": 16,
+    "integrators": [
+      "euler"
+    ]
+  },
+  "output_root": "outputs/round4/phase45_4_seed3072_legacy_dev",
+  "report_output": "docs/report/round4/round4_phase45-4_legacy_protocol_comparison_report.md",
+  "gpu_policy": "one task per explicitly selected physical GPU0-3; low-VRAM evaluation may use GPU4-7 only with explicit authorization"
+}
