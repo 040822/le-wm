@@ -794,7 +794,13 @@ class FastOnlineSupervisionAdapter:
         self.optimizer_steps = int(state["optimizer_steps"])
         self.loss_weights = LossWeights(**state.get("loss_weights", {}))
         self.calibration = state.get("calibration")
-        self._torch_generator.set_state(state["torch_generator"])
+        # ``torch.load(..., map_location=device)`` maps every tensor in the
+        # adapter state, including this CPU-owned RNG state, to CUDA.  The
+        # Generator API only accepts a CPU ByteTensor here.
+        generator_state = state["torch_generator"]
+        if isinstance(generator_state, torch.Tensor):
+            generator_state = generator_state.detach().cpu()
+        self._torch_generator.set_state(generator_state)
 
 
 __all__ = [
