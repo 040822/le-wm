@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import hydra
@@ -37,6 +38,24 @@ def freeze(module: torch.nn.Module) -> torch.nn.Module:
     module.eval()
     module.requires_grad_(False)
     return module
+
+
+def validate_gpu_visibility(device: str) -> None:
+    """Require CUDA training to name only the repository-approved GPUs."""
+    if not str(device).startswith("cuda"):
+        return
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is None or not visible.strip():
+        raise RuntimeError(
+            "GPU training requires CUDA_VISIBLE_DEVICES explicitly set to a subset of 0,1,2,3"
+        )
+    values = [item.strip() for item in visible.split(",") if item.strip()]
+    if not values or any(
+        not item.isdigit() or int(item) not in range(4) for item in values
+    ):
+        raise RuntimeError(
+            f"prohibited GPU visibility {visible!r}; only physical GPUs 0,1,2,3 are allowed"
+        )
 
 
 def _split_path(cfg: DictConfig) -> Path:
@@ -186,6 +205,7 @@ def validate(*, loader, lewm, flow, inverse_dynamics, cfg, device):
 @hydra.main(version_base=None, config_path="./config/train", config_name="latent_planner")
 def run(cfg: DictConfig):
     torch.manual_seed(int(cfg.seed))
+    validate_gpu_visibility(str(cfg.device))
     device = torch.device(str(cfg.device) if torch.cuda.is_available() else "cpu")
     train_loader, val_loader = make_loaders(cfg)
     lewm = freeze(load_lewm(cfg.lewm_checkpoint).to(device))

@@ -15,9 +15,16 @@ class GPUEnvironmentTests(unittest.TestCase):
             self.assertEqual(os.environ["MUJOCO_GL"], "egl")
             self.assertEqual(os.environ["PYOPENGL_PLATFORM"], "egl")
 
-    def test_rejects_prohibited_gpu(self):
+    def test_accepts_gpu4_to_gpu7(self):
         with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "6"}, clear=True):
-            with self.assertRaisesRegex(EnvironmentError, "only GPU0-3"):
+            selected = configure_mujoco_egl_device()
+
+            self.assertEqual(selected, 6)
+            self.assertEqual(os.environ["MUJOCO_EGL_DEVICE_ID"], "6")
+
+    def test_rejects_prohibited_gpu(self):
+        with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "8"}, clear=True):
+            with self.assertRaisesRegex(EnvironmentError, "only GPU0-7"):
                 configure_mujoco_egl_device()
 
     def test_rejects_multiple_visible_gpus(self):

@@ -1,5 +1,7 @@
+import os
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
@@ -65,6 +67,10 @@ class TraceTests(unittest.TestCase):
 
         validate_round3_config(compose_eval_config("cube"))
         validate_gpu_visibility("cpu")
+
+    def test_gpu_visibility_accepts_user_authorized_gpu6(self):
+        with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "6"}, clear=True):
+            validate_gpu_visibility("cuda")
 
 if __name__ == "__main__":
     unittest.main()

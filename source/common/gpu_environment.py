@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 
-PERMITTED_PHYSICAL_GPUS = frozenset({0, 1, 2, 3})
+PERMITTED_PHYSICAL_GPUS = frozenset(range(8))
 
 
 def configure_mujoco_egl_device() -> int:
@@ -13,7 +13,7 @@ def configure_mujoco_egl_device() -> int:
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if not visible:
         raise EnvironmentError(
-            "CUDA_VISIBLE_DEVICES must explicitly select exactly one GPU0-3"
+            "CUDA_VISIBLE_DEVICES must explicitly select exactly one GPU0-7"
         )
     try:
         selected = tuple(int(token.strip()) for token in visible.split(","))
@@ -28,7 +28,7 @@ def configure_mujoco_egl_device() -> int:
     physical_gpu = selected[0]
     if physical_gpu not in PERMITTED_PHYSICAL_GPUS:
         raise EnvironmentError(
-            f"prohibited CUDA_VISIBLE_DEVICES={visible!r}; only GPU0-3 are allowed"
+            f"prohibited CUDA_VISIBLE_DEVICES={visible!r}; only GPU0-7 are allowed"
         )
 
     configured = os.environ.get("MUJOCO_EGL_DEVICE_ID")
