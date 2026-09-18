@@ -1,0 +1,152 @@
+\section{Shared Action, Dynamics, and Path Modeling}
+\label{sec:method}
+
+\input{fig/draft_architecture}
+
+\subsection{Problem and representation}
+
+We consider goal-conditioned visual control with observation $o_t$ and goal image $o_g$. An offline trajectory provides aligned observations and executed actions. One action block $a_h\in\mathbb{R}^{d_a}$ concatenates $k$ consecutive environment actions. A training window contains $H+1$ observations separated by $k$ environment steps and $H$ action blocks:
+\begin{equation}
+  (o_0,a_0,o_1,\ldots,a_{H-1},o_H).
+\end{equation}
+The encoder and projector $f_\phi$ produce $z_h=f_\phi(o_h)\in\mathbb{R}^d$. During training, the window goal is $z_g=z_H$. At evaluation, $z_g$ is the encoding of the supplied goal image and remains fixed across replanning.
+
+A transformer $T_\theta$ is shared across four modes, with mode-specific token layouts, attention masks, and output heads. Learned mode embeddings enter the conditioning pathway. Sharing refers to the encoder, projector, and transformer blocks; input projections, positions, query parameters, and output heads need not all be identical.
+The four-mode configuration uses the existing A/B positional encoding; the separately selected physical-time representation for the online study is not silently substituted here.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lll}
+    \toprule
+    Mode & Conditions & Output \\
+    \midrule
+    A & $z_0,z_g$, noisy actions & Action velocity \\
+    B & $z_0$, action sequence & $\hat z_{1:H}$ \\
+    D & $z_0,z_g$, noisy interior & Latent velocity \\
+    E & Complete latent path & Action sequence \\
+    \bottomrule
+  \end{tabular}
+  \caption{Four uses of one shared transformer. B receives neither the goal token nor the generated latent path. Mode E is a deterministic decoder.}
+  \label{tab:modes}
+\end{table}
+
+\subsection{Action generation and causal dynamics}
+
+\paragraph{Action flow (A).}
+Let $\mathbf a=(a_0,\ldots,a_{H-1})$ and $\epsilon_a\sim\mathcal N(0,I)$. For flow time $\tau\sim\mathcal U[0,1]$, define
+\begin{equation}
+  x^a_\tau=(1-\tau)\epsilon_a+\tau\mathbf a.
+\end{equation}
+The action head predicts $v^A_\theta(x^a_\tau,\tau;z_0,z_g)$ and is trained with
+\begin{equation}
+  \mathcal L_A=
+  \mathbb E\!\left[
+  \operatorname{mse}\!\left(v^A_\theta,\mathbf a-\epsilon_a\right)
+  \right].
+  \label{eq:action_loss}
+\end{equation}
+Here $\operatorname{mse}$ averages squared error over all non-batch dimensions. The token layout is $[z_0,z_g,x^a_{\tau,0},\ldots,x^a_{\tau,H-1}]$. Action tokens read both clean anchors and all action tokens; anchor queries cannot read noisy action tokens. Euler integration from noise to flow time one yields a complete action sequence.
+
+\paragraph{Causal prefix dynamics (B).}
+The dynamics mode uses the interleaved layout
+\begin{equation}
+  [z_0,a_0,q_1,a_1,q_2,\ldots,a_{H-1},q_H],
+\end{equation}
+where $q_h$ is a latent query. A lower-triangular attention mask permits $q_h$ to depend on the current latent, the corresponding action prefix, and preceding queries. Future actions cannot affect earlier predictions. A single transformer evaluation predicts all $H$ future embeddings:
+\begin{equation}
+  \hat{\mathbf z}_{1:H}=B_\theta(z_0,\mathbf a;s).
+  \label{eq:dynamics}
+\end{equation}
+The condition $s$ is the legacy timestep condition described below. This is parallel prefix prediction, not a recursive application of a one-step transition model.
+The goal is excluded from B's inputs and is used only for external scoring.
+
+\paragraph{Inherited action--dynamics training.}
+The four-mode model retains the earlier E5 training objective. During fitting, a per-sample Bernoulli variable chooses between recorded actions and the action flow's clean estimate,
+\begin{equation}
+  \tilde{\mathbf a}=x^a_\tau+(1-\tau)v^A_\theta.
+\end{equation}
+The mixing probability is $\min(e/10,0.5)$ for zero-based epoch index $e$. Denote the selected action by $\mathbf a^{\rm in}$, and set $s=\tau$ on predicted-action samples and $s=1$ on recorded-action samples. The loss is
+\begin{equation}
+  \mathcal L_B =
+  \mathbb E\!\left[
+  w(s)\operatorname{mse}\!\left(
+  B_\theta(z_0,\mathbf a^{\rm in};s),\mathbf z_{1:H}
+  \right)\right],
+  \label{eq:dynamics_loss}
+\end{equation}
+where $w(s)=\min(s/0.2,1)$. The prediction target is the recorded future embedding in both branches. The clean action estimate is not detached in E5, so B's loss can update the action head through the predicted-action input. The A/B embedding targets retain the implementation's encoder gradients.
+
+This inherited objective has a limitation: when the predicted action differs from the recorded action, the recorded future is not its observed counterfactual outcome. Thus action mixing is an auxiliary training construction, not supervision from newly executed transitions. At inference B always uses $s=1$. These details are part of the studied configuration and should not be omitted when interpreting its results.
+
+\subsection{Latent path generation and decoding}
+
+\paragraph{Latent path flow (D).}
+Following the planning decomposition of LeFlow~\cite{huang2026leflow}, D generates intermediate latent states while keeping the start and goal fixed. Let $\mathbf z_{\rm int}=(z_1,\ldots,z_{H-1})$ and let $\operatorname{sg}$ denote stop-gradient. With independent flow time $\rho$ and Gaussian noise $\epsilon_z$, define
+\begin{equation}
+  x^z_\rho=(1-\rho)\epsilon_z+
+  \rho\,\operatorname{sg}(\mathbf z_{\rm int}).
+\end{equation}
+D uses the token layout $[z_0,z_g,x^z_{\rho,1},\ldots,x^z_{\rho,H-1}]$. Interior tokens communicate bidirectionally and read the anchors; anchors cannot read the noisy interior. Its objective is
+\begin{equation}
+ \mathcal L_D=\mathbb E\!\left[
+ \operatorname{mse}\!\left(
+ v^D_\theta(x^z_\rho,\rho;z_0,z_g),
+ \operatorname{sg}(\mathbf z_{\rm int})-\epsilon_z
+ \right)\right].
+ \label{eq:path_loss}
+\end{equation}
+Gradients through the clean anchor conditions remain enabled. A separate latent-velocity head reads the interior tokens. At inference, Euler integration generates $\tilde{\mathbf z}_{\rm int}$, and the complete path is assembled as
+\begin{equation}
+  \tilde{\mathbf z}=(z_0,\tilde z_1,\ldots,\tilde z_{H-1},z_g).
+\end{equation}
+Fixing the endpoint defines a goal-conditioned proposal; it does not establish that the path is dynamically realizable.
+
+\paragraph{Inverse dynamics (E).}
+E converts a complete latent path to all $H$ action blocks in one forward pass. State tokens encode the path. The action query for transition $h$ includes a learned projection of
+\begin{equation}
+  [z_h,z_{h+1},z_{h+1}-z_h],
+\end{equation}
+together with learned query content and position. Each action query can read the full state path and all action queries; state queries cannot read action queries. This provides both an adjacent-transition feature and full-path context.
+The decoder is trained on recorded paths and aligned actions:
+\begin{equation}
+  \mathcal L_E=\mathbb E\!\left[
+     \operatorname{mse}\!\left(E_\theta(\mathbf z_{0:H}),\mathbf a\right)
+  \right].
+\end{equation}
+E has its own action-regression head, distinct from A's velocity head, and retains gradients into the visual encoder.
+
+\paragraph{Joint objective.}
+Images are encoded once per training batch, then the four modes are evaluated and their losses are summed:
+\begin{equation}
+  \mathcal L =
+  \mathcal L_A+\lambda_B\mathcal L_B+
+  \lambda_{\rm reg}\mathcal L_{\rm SIGReg}+
+  \lambda_D\mathcal L_D+\lambda_E\mathcal L_E.
+  \label{eq:joint}
+\end{equation}
+The current configuration uses $\lambda_B=\lambda_D=\lambda_E=1$ and $\lambda_{\rm reg}=0.09$. SIGReg follows the latent regularization used by LeWM~\cite{maes2026lewm}. No cycle, path-consistency, or online-learning objective is included in this four-mode run.
+
+\subsection{Planning with a common dynamics scorer}
+\label{sec:planning}
+
+For a state--goal pair, encode $z_0,z_g$ once. Generate $N$ candidates either directly with A or by sampling D and decoding with E:
+\begin{equation}
+ \mathbf a^{(i)}\sim A_\theta(z_0,z_g)
+ \quad\text{or}\quad
+ \mathbf a^{(i)}=E_\theta(\tilde{\mathbf z}^{(i)}).
+\end{equation}
+The dynamics mode independently predicts the outcome of each action sequence. We select
+\begin{equation}
+ \begin{split}
+ J_i&=\operatorname{mse}\!\left(
+ B_\theta(z_0,\mathbf a^{(i)};1)_H,z_g\right),\\
+ i^\star&=\operatorname*{arg\,min}_{i\in\{1,\ldots,N\}}J_i.
+ \end{split}
+ \label{eq:score}
+\end{equation}
+The action normalization and legality processing used for scoring must agree with those used for execution. We execute the configured prefix of $\mathbf a^{(i^\star)}$, obtain a new observation, and replan. In the present protocol the execution prefix is all five action blocks, or 25 environment steps, within a 50-step episode budget.
+
+Scoring the generated endpoint $\tilde z_H=z_g$ would assign every candidate zero endpoint error. Equation~\eqref{eq:score} instead evaluates the consequences of decoded actions. B is a learned scorer sharing parameters with the generators, not an independent physical verifier or a safety certificate.
+
+The same checkpoint also supports random-initialized CEM, actor-initialized CEM, and direct action execution. Candidate generation by A or D uses 16 Euler steps and $N=64$ in the fixed-budget comparison. E and B each require one logical batched pass for latent proposals; candidate splitting may require multiple physical calls. This reduces the number of sequential search rounds relative to iterative CEM, but actual latency depends on batch size and must be measured.

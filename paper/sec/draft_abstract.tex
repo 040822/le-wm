@@ -1,0 +1,9 @@
+\begin{abstract}
+Latent world models support visual control by predicting the consequences of candidate actions, while generative policies directly produce actions from observations and goals. Combining these capabilities raises a practical question: can a shared model support both direct control and explicit planning, and when does planning improve on its action generator?
+We study this question with Fast-LeWAM, which shares a visual encoder and transformer across action generation, causal future prediction, latent path generation, and inverse dynamics.
+The model can propose actions directly or generate a goal-conditioned latent path and decode it into actions. A common dynamics predictor scores both types of candidate by their predicted terminal distance to the goal.
+This design enables comparisons between proposal spaces within the same trained model.
+Completed experiments on an earlier action--dynamics model show that the benefits of joint training and actor-initialized planning depend strongly on the task. Under a revised evaluation protocol, action supervision improves planning on Cube across three training seeds but degrades it on Push-T.
+These findings motivate separating candidate generation from candidate selection when evaluating shared world-action models.
+\textbf{Working-draft status:} the four-mode model has intermediate development results; final performance, efficiency, and controlled training comparisons remain pending.
+\end{abstract}

@@ -1,3 +1,11 @@
+# Fast-LeWAM paper draft
+
+The working manuscript starts at [main.tex](main.tex). See the [Chinese writing guide](DRAFT_GUIDE.md) for the narrative, claim--evidence map, result provenance, pending experiments, and build instructions.
+
+The draft distinguishes completed A/B experiments from the ongoing four-mode study. TBD entries are missing results, not zero. Original author-kit examples are retained below and in the unused template sections.
+
+## Original template provenance
+
 # Official LaTeX template for CVPR/ICCV/3DV 
 
 **Note:** as per PC decision, the Microsoft Word version of the template is no longer supported.

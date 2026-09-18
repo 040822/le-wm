@@ -21,44 +21,35 @@
 \usepackage[pagebackref,breaklinks,colorlinks,allcolors=cvprblue]{hyperref}
 
 %%%%%%%%% PAPER ID  - PLEASE UPDATE
-\def\paperID{*****} % *** Enter the Paper ID here
+\def\paperID{DRAFT} % Replace only after registering a submission.
 \def\confName{CVPR}
 \def\confYear{2026}
 
 %%%%%%%%% TITLE - PLEASE UPDATE
-\title{\LaTeX\ Author Guidelines for \confName~Proceedings}
+\title{Fast-LeWAM: Shared Latent Modeling\\for Action Generation and Planning}
 
 %%%%%%%%% AUTHORS - PLEASE UPDATE
-\author{First Author\\
-Institution1\\
-Institution1 address\\
-{\tt\small firstauthor@i1.org}
-% For a paper whose authors are all at the same institution,
-% omit the following lines up until the closing ``}''.
-% Additional authors and addresses can be added with ``\and'',
-% just like the second author.
-% To save space, use either the email address or home page, not both
-\and
-Second Author\\
-Institution2\\
-First line of institution2 address\\
-{\tt\small secondauthor@i2.org}
-}
+\author{Anonymous Authors}
 
 \begin{document}
 \maketitle
-\input{fig/teaser}
-\input{sec/0_abstract}    
-\input{sec/1_intro}
-\input{sec/2_formatting}
-\input{sec/3_finalcopy}
+\input{sec/draft_abstract}
+\input{sec/draft_intro}
+\input{sec/draft_related}
+\input{sec/draft_method}
+\input{sec/draft_experiments}
+\input{sec/draft_discussion}
 {
     \small
     \bibliographystyle{ieeenat_fullname}
-    \bibliography{main}
+    \bibliography{references}
 }
 
 % WARNING: do not forget to delete the supplementary pages from your submission 
 % \input{sec/X_suppl}
+% Working appendix: includes intermediate results, not final performance.
+% \clearpage
+% \appendix
+% \input{sec/draft_appendix}
 
 \end{document}

@@ -1,0 +1,101 @@
+\section{Experiments}
+\label{sec:experiments}
+
+We organize evaluation around three questions: whether joint action--dynamics training improves control, whether latent proposals outperform action proposals within a shared model, and whether any performance benefit justifies its planning cost. Completed historical results and pending four-mode results are reported separately.
+
+\subsection{Tasks and evaluation protocol}
+
+We use Cube, Push-T, Reacher, and TwoRoom. Each action block contains five environment actions and the planning horizon is five blocks. Cube has a 25-dimensional action block; the remaining tasks have 10-dimensional blocks. The visual input resolution is $224\times224$ and the latent dimension is 192.
+
+The revised protocol fixes 50 development episodes and 200 final episodes per task, with evaluation seed 42, goal offset 25 environment steps, and a 50-step execution budget. Cohorts are stratified by physical start--goal distance and exclude initially successful starts. Development, final, and online-pool cohorts are disjoint at the source-episode level.
+Success requires Cube position error $\leq0.04$ m; Reacher error $<0.05$ rad for every joint under the existing joint-position predicate; Push-T position error $<20$ pixels and circular orientation error $<\pi/9$; and TwoRoom position error $<16$ pixels. These are the audited local predicates, not a claim of matching every published evaluation setting.
+
+\paragraph{Data exposure and comparability.}
+Disjoint evaluation cohorts do not imply that existing pretrained weights have never seen their source episodes. Historical model exposure is recorded separately. The current four-mode run is also designated exploratory because its training configuration may have accessed cohort episodes. We therefore do not present it as an evaluation of unseen-data generalization. A strict training-exclusion protocol is specified for clean experiments, but it cannot be retroactively attributed to the ongoing run.
+
+\paragraph{Statistics.}
+We report per-task success rates and match episode identities and start indices for paired comparisons. Reported $\pm$ values below are sample standard deviations over three training seeds, not confidence intervals. Primary-checkpoint results are otherwise single-training-seed measurements. We do not average success rates or physical distances across tasks.
+\TODO{Statistics: insert Wilson intervals and paired improved/regressed episode counts from accepted artifacts for final four-mode results.}
+
+\subsection{Completed action--dynamics study}
+
+We first study the earlier A/B model. E0 denotes local LeWM with CEM; E1 trains B only; E2 trains A only; E3 trains A+B with recorded-action inputs to B; E4 mixes predicted actions but detaches them before B; E5 permits the corresponding cross-head gradient. E6 evaluates the E5 checkpoint with actor-initialized CEM and introduces no additional training.
+Random and actor-initialized CEM both use 300 samples, 30 iterations, 30 elites, and initial variance scale one.
+
+\begin{table*}[t]
+ \centering
+ \small
+ \begin{tabular}{lrrrrrrrr}
+  \toprule
+  Task & E0 B & E1 B & E2 A & E3 B & E4 B & E5 A & E5 B & E6 B \\
+  \midrule
+  Cube    & 48.0 & 36.0 & 100.0 & 46.0 & 53.5 & 99.5 & 49.5 & 97.5 \\
+  Push-T  & 93.0 & 89.0 & 90.5  & 84.5 & 85.5 & 93.0 & 89.0 & 93.0 \\
+  Reacher & 84.5 & 84.0 & 69.5  & 84.5 & 84.5 & 79.5 & 84.5 & 68.5 \\
+  TwoRoom & 84.5 & 89.0 & 92.5  & 90.5 & 96.5 & 95.0 & 95.5 & 96.5 \\
+  \bottomrule
+ \end{tabular}
+ \caption{Completed historical A/B study under the revised protocol: success (\%) over 200 final episodes per entry, using the primary checkpoints. These are not results of the four-mode model. TwoRoom E1--E4 come from supplemental training; their addition does not rewrite the earlier frozen canonical registry. Checkpoints use the designated final weights; E6 reuses E5.}
+ \label{tab:historical}
+\end{table*}
+
+\paragraph{Does action supervision improve dynamics planning?}
+Table~\ref{tab:historical} gives the primary-checkpoint results. The stronger training-seed comparison is E3 minus E1: Cube improves by $7.8\pm2.6$ percentage points, with paired differences of $10.0$, $8.5$, and $5.0$ points. Push-T decreases by $3.8\pm0.6$ points, with differences of $-4.5$, $-3.5$, and $-3.5$. Reacher changes by only $0.5$ points in the single-seed comparison. Thus the auxiliary action objective does not provide a task-independent planning gain.
+
+\paragraph{Do cross-head gradients help?}
+On Push-T, E5 improves over E4 by $2.2\pm1.6$ points in A and $1.5\pm1.7$ points in B across three seeds. These small effects do not support universal bidirectional transfer. For example, the primary Cube B checkpoint decreases from 53.5\% to 49.5\%.
+E5 was selected as the subsequent global Fast baseline using the common development tasks, where its average B improvement over E3 was 4.67 points. That operational selection is not evidence of statistical significance.
+
+\paragraph{Does an actor initialization help search?}
+E6 minus E5 B is $+48$, $+4$, $-16$, and $+1$ points on Cube, Push-T, Reacher, and TwoRoom, respectively. For Push-T E5 B, we use the extended evaluation artifact's 89.0\%, which agrees with the multi-seed difference calculation. The summary document's canonical-reference table instead lists 89.5\%; this discrepancy must remain visible until the two result records are reconciled.
+\TODO{Provenance: reconcile the Push-T E5 canonical 89.5\% and extended 89.0\% records before submission; do not mix their paired statistics.}
+On Cube, E6 nearly reaches direct actor performance. On Reacher, E6 is worse than both random-initialized planning and direct E5 action execution. A good proposal mechanism therefore does not by itself establish that subsequent optimization is beneficial.
+
+\paragraph{Goal dependence.}
+For the primary E5 checkpoints, shuffled-goal A success is 9.0\%, 7.0\%, 9.0\%, and 44.0\% in the same task order. The large drops relative to normal A show that the actors use their goals. The residual TwoRoom success also cautions against interpreting high aggregate success as evidence of precise goal discrimination on every episode.
+
+\subsection{Diagnostics motivating the four-mode study}
+
+Earlier simulator-grounded diagnostics restored a common physical state, executed shared candidate actions, and compared model scores with actual outcomes. In a small Reacher actor-centered panel, successful candidates existed at every tested state but the predicted best candidate succeeded at only 62.5\% of states. These historical diagnostics use a different protocol from Table~\ref{tab:historical}; they motivate a mechanism hypothesis rather than supply a matched quantitative explanation of the revised results.
+
+Other historical experiments improved local ranking metrics without improving control. For example, a Push-T streaming-adaptation pilot improved the measured ranking and regret on its diagnostic panels while its paired 50-episode success decreased from 86\% to 78\%. This controlled adaptation pilot is not a completed deployment-style online-learning experiment.
+Together these observations motivate measuring candidate coverage, selection quality, and closed-loop behavior separately. They do not establish that latent proposals will correct any particular failure.
+
+\subsection{Four-mode evaluation: final results pending}
+
+The shared A+B+D+E model is trained from scratch with a ViT-Tiny encoder, a projector, and six shared transformer blocks of width 192, six attention heads, and MLP width 768. The registered configuration uses a true batch of 128, AdamW with learning rate $5\times10^{-5}$ and weight decay $10^{-3}$, gradient clipping at 1.0, and BF16 training for 10 epochs. The first seed is 3072. Architecture and budget are specified here; a training schedule is not evidence that all final runs have completed.
+\TODO{Training: record the resolved learning-rate schedule, dataset split hashes, actual exposure, completed epochs, parameter count, and GPU-hours for each accepted run.}
+
+\begin{table*}[t]
+ \centering
+ \small
+ \begin{tabular}{llrrrr}
+  \toprule
+  ID & Inference from the same four-mode checkpoint & Cube & Push-T & Reacher & TwoRoom \\
+  \midrule
+  P0 & Direct A execution & TBD & TBD & TBD & TBD \\
+  P0-shuf & A with shuffled goals & TBD & TBD & TBD & TBD \\
+  P1 & B with random-initialized CEM & TBD & TBD & TBD & TBD \\
+  P2 & A-initialized CEM with B & TBD & TBD & TBD & TBD \\
+  P3 & A proposals, best-of-64 by B & TBD & TBD & TBD & TBD \\
+  P4 & D$\rightarrow$E proposals, best-of-64 by B & TBD & TBD & TBD & TBD \\
+  \bottomrule
+ \end{tabular}
+ \caption{Reserved final matrix for the four-mode model: epoch 10, revised 200-episode final cohort. Every TBD is unreported, not zero. Historical E5/E6 and independent LeFlow belong in separately identified reference rows after their artifacts are verified. P4-first is a development-only control.}
+ \label{tab:fourmode}
+\end{table*}
+
+P3 and P4 use 64 candidates and 16 Euler steps; P0 also uses 16 steps, while P2 retains the registered 10-step actor initialization. Comparing P3/P4 with P2 consequently compares complete planning procedures, not CEM in isolation.
+
+The primary proposal comparison is P4 versus P3, which holds the trained checkpoint, B scorer, candidate count, and integration steps fixed. P4-first executes the first latent proposal without B selection on the development cohort. After different actions have been executed, later states and candidate sets can diverge; their subsequent closed-loop trajectories are not identical-state selection tests.
+
+The currently documented intermediate experiment evaluates P0, P3, and P4 at epoch 2 on 50 development episodes. Its mixed task-dependent results establish that the control pathways run, but neither fill Table~\ref{tab:fourmode} nor determine seed expansion. The working appendix records these values for continuity.
+
+\paragraph{Efficiency.}
+Measure full planning latency on fixed development states, with matched hardware, precision, warm-up, synchronization, and no concurrent work on the timed device. Report median and P95, with separate encoding, generation, inverse-dynamics, and B-scoring times, as well as peak memory and candidate batch size.
+The earlier A/B model has approximately 10.49M parameters versus 18.03M for the local LeWM checkpoints. This count does not include the four-mode extension. An earlier cache repair accelerated that Fast implementation's controlled CEM call by about $45\times$ relative to its own redundant-encoding path; it is not a measured $45\times$ advantage over LeWM.
+\TODO{Efficiency: insert accepted latency and memory measurements alongside per-task success. Add candidate-budget curves only as a separately registered experiment.}
+
+\paragraph{What the present comparison cannot identify.}
+The current four-mode study has no matched A+B retraining group or independent D/E training control. Historical A/B checkpoints differ in training conditions, and turning D/E off during inference does not remove their training influence. Therefore these experiments cannot establish that D/E supervision improves A/B or that sharing is better than separate modules.
+\TODO{Conditional follow-up: if the final study motivates a sharing or transfer claim, add the corresponding matched training controls under an explicit new experiment registration.}

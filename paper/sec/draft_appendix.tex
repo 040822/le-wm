@@ -1,0 +1,30 @@
+\section{Working Record of Intermediate Evidence}
+\label{app:intermediate}
+
+This appendix is a working record, not a substitute for the final experimental matrix. The September 12, 2026 report evaluates the common epoch-2 checkpoint for each task, training seed 3072, and 50 development episodes under the revised protocol.
+
+\begin{table}[h]
+ \centering
+ \begin{tabular}{lrrr}
+  \toprule
+  Task & P0 & P3 & P4 \\
+  \midrule
+  Cube & 98 & 98 & 94 \\
+  Push-T & 80 & 68 & 78 \\
+  Reacher & 28 & 44 & 32 \\
+  TwoRoom & 46 & 42 & 56 \\
+  \bottomrule
+ \end{tabular}
+ \caption{Intermediate development success (\%), not final performance. P3/P4 use 64 candidates and 16 flow steps; B verification is split into batches of eight.}
+ \label{tab:epoch2}
+\end{table}
+
+P4 minus P3 is $-4,+10,-12,+14$ percentage points across the four tasks. The signs are mixed. P4 minus direct P0 execution is $-4,-2,+4,+10$ points. No cross-task improvement, statistical significance, or seed-expansion decision follows from these intermediate values. No latency result is available in the source report.
+
+\section{Training and Evaluation Details to Complete}
+
+\TODO{Appendix artifacts: insert run identity, dataset hashes, exclusion audit, software versions, checkpoint hashes, optimizer schedule, per-seed results, Wilson intervals, paired flips, and timing boundaries.}
+
+The fitting-time predicted-action probability reaches at most 0.5. The inherited non-fitting A/B loss path instead uses predicted actions with probability one. Validation loss is therefore not interchangeable with the training mixture, nor is it used to select an intermediate test-success peak.
+
+\TODO{Figures: architecture with attention and gradient boundaries; candidate coverage versus selected-candidate success; paired failure examples; and accepted success--latency curves. Real execution traces are needed for qualitative outcome figures.}
