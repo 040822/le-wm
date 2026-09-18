@@ -331,6 +331,6 @@ R4-AB 只作为用户决定后的模型起点复验：
 ## 本轮执行记录
 
 E1/E2 前置诊断已完成，实际数值、采集预算、artifact 路径和下一轮待决策事项
-记录在 [Round3 Online Supervision 实验报告](round3_online_supervision_experiment_report.md)。
-在用户确认每个任务的 guidance collector 前，不启动 fixed replay、T0–T6 或
-200 optimizer-update success-rate 曲线。
+记录在 [Round3 Online Supervision 实验报告](../report/round3/online_supervision/round3_online_supervision_experiment_report.md)。
+用户已确认 Reacher 使用 `post_opt`、Push-T 使用 `guided_flow`，下一步启动 fixed
+replay、T0–T6 和 200 optimizer-update success-rate 曲线。
