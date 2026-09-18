@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "phase": "round3_phase2_fast_e5_legacy",
+  "task": "cube",
+  "method": "e5_fast",
+  "status": "completed_no_online_gain",
+  "seed": 3072,
+  "protocol": "round3_revised",
+  "training_regime": "post_training_finetune",
+  "starting_checkpoint_semantics": "historical_e5_legacy_epoch_10",
+  "from_scratch_training": false,
+  "checkpoint": {
+    "path": "outputs/fast_lewam/cube/0803_e5_cross_head_grad/checkpoints/fast_lewam_weights_epoch_10.pt",
+    "final_epoch": 10,
+    "token_encoding": "legacy",
+    "stage_b_timestep_mode": "legacy"
+  },
+  "cohorts": {
+    "dev": {
+      "path": "outputs/round3/phase1/cohorts/cube/dev_round3_revised.json",
+      "episodes": 50,
+      "sha256": "34a5fb7894c41009b005b6c11a83704af1dc29e038cdc7643aecb03dcd0297d0"
+    },
+    "final": {
+      "path": "outputs/round3/phase1/cohorts/cube/final.json",
+      "episodes": 200,
+      "sha256": "f6e0ec2038cc8274bf2aa92b454bb4b17016d50051d5feb32575c2a6d2426feb"
+    },
+    "online": {
+      "path": "outputs/round3/phase2/cube_online_pool.json",
+      "episodes": 9750,
+      "source": "all_raw_episodes_excluding_dev_and_final"
+    }
+  },
+  "model_geometry": {
+    "latent_dim": 192,
+    "action_dim": 25,
+    "action_horizon": 5,
+    "replay_observations": 6,
+    "replay_action_blocks": 5
+  },
+  "arms": {
+    "freeze": {
+      "update": false
+    },
+    "offline_continue": {
+      "data_source": "original_e5_training_data",
+      "update_schedule": "match_online_update_count"
+    },
+    "online_adapt": {
+      "data_source": "executed_environment_transitions_plus_original_replay",
+      "offline_fraction": 0.5,
+      "online_fraction": 0.5
+    }
+  },
+  "collection": {
+    "max_environment_steps": 20000,
+    "update_interval_environment_steps": 100,
+    "optimizer_updates_per_interval": 1,
+    "optimizer_minibatch_size": 64,
+    "online_arm_offline_samples_per_update": 32,
+    "online_arm_online_samples_per_update": 32,
+    "evaluation_steps": [0, 5000, 10000, 20000],
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "action_block": 5,
+    "cem": {
+      "num_samples": 300,
+      "iterations": 30,
+      "topk": 30,
+      "var_scale": 1.0
+    }
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "learning_rate": 1e-5,
+    "weight_decay": 1e-3,
+    "gradient_clip_norm": 1.0,
+    "batch_size": 64,
+    "frozen_modules": ["encoder", "projector"]
+  },
+  "gpu_runner": {
+    "script": "scripts/run_round3_phase2_fast_e5_cube.sh",
+    "physical_gpu_allowlist": [0, 1, 2, 3],
+    "shared_compute_allowed": true,
+    "preflight_minimum_free_mib": 16000,
+    "output_root": "outputs/round3/phase2/cube_e5_legacy_three_arms_100step"
+  },
+  "smoke_validation": {
+    "fast_model_and_adapter": "passed",
+    "fast_replay_shape": "[2,6,3,224,224] observations + [2,5,25] actions",
+    "fast_collection_target_50": "passed",
+    "fast_collection_smoke_replay_count": 5
+  },
+  "result": {
+    "status": "ok",
+    "evaluation_cohort_sha256": "578f6ea52e56d77461cb5bb2aeb01a004a21b9f6659689596f6f55f25dc17d01",
+    "final_environment_steps": 20000,
+    "optimizer_updates": 200,
+    "replay_shards": 174,
+    "replay_rows": 999,
+    "collection_intervals_without_complete_window": 26,
+    "dev_success_rate": {
+      "freeze": {
+        "0": 0.48,
+        "5000": 0.48,
+        "10000": 0.48,
+        "20000": 0.48
+      },
+      "offline_continue": {
+        "0": 0.48,
+        "5000": 0.42,
+        "10000": 0.38,
+        "20000": 0.48
+      },
+      "online_adapt": {
+        "0": 0.48,
+        "5000": 0.58,
+        "10000": 0.56,
+        "20000": 0.44
+      }
+    },
+    "final_delta_pp": {
+      "online_minus_freeze": -4.0,
+      "online_minus_offline_continue": -4.0
+    },
+    "expansion_gate_passed": false,
+    "next_action": "stop_round3_online_expansion"
+  },
+  "decision_rule": {
+    "trigger": "E0 Phase2 did not improve Online over both controls by 5pp",
+    "scope": "one_task_one_seed",
+    "next_if_positive": "consider additional legacy E5 seeds and independent test",
+    "next_if_not_positive": "stop Round3 online expansion"
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "phase": "round3_phase2",
+  "task": "cube",
+  "status": "completed_no_e0_online_gain",
+  "seed": 3072,
+  "protocol": "round3_revised",
+  "training_regime": "post_training_finetune",
+  "starting_checkpoint_semantics": "trained_e0_epoch_10",
+  "from_scratch_training": false,
+  "e0_checkpoint": {
+    "path": "outputs/lewm/cube/0803_e0_lewm_baseline_bs128/checkpoints/lewm_weights_epoch_10.pt",
+    "sha256": "4dc10633e053c11632f456cded0970ca186ccfe1a0c7ddd8ebb93e0315b78938"
+  },
+  "cohorts": {
+    "dev": {
+      "path": "outputs/round3/phase1/cohorts/cube/dev_round3_revised.json",
+      "episodes": 50,
+      "sha256": "34a5fb7894c41009b005b6c11a83704af1dc29e038cdc7643aecb03dcd0297d0"
+    },
+    "final": {
+      "path": "outputs/round3/phase1/cohorts/cube/final.json",
+      "episodes": 200,
+      "sha256": "f6e0ec2038cc8274bf2aa92b454bb4b17016d50051d5feb32575c2a6d2426feb"
+    },
+    "online": {
+      "path": "outputs/round3/phase2/cube_online_pool.json",
+      "episodes": 9750,
+      "sha256": "b927b12a9174398309e3806ab66679ce360fe1eb9ce2ace88aa40abccfda15e6",
+      "source": "all_raw_episodes_excluding_dev_and_final",
+      "manifest_status": "derived_and_disjoint_checked"
+    }
+  },
+  "arms": {
+    "freeze": {
+      "update": false
+    },
+    "offline_continue": {
+      "data_source": "original_e0_training_data",
+      "update_schedule": "match_online_update_count"
+    },
+    "online_adapt": {
+      "data_source": "executed_environment_transitions_plus_original_replay",
+      "offline_fraction": 0.5,
+      "online_fraction": 0.5
+    }
+  },
+  "collection": {
+    "max_environment_steps": 20000,
+    "update_interval_environment_steps": 100,
+    "update_semantics": {
+      "optimizer_updates_per_interval": 1,
+      "optimizer_minibatch_size": 64,
+      "online_arm_offline_samples_per_update": 32,
+      "online_arm_online_samples_per_update": 32,
+      "all_interval_transitions_persisted_to_replay": true,
+      "all_interval_transitions_used_in_current_update": false
+    },
+    "evaluation_steps": [0, 5000, 10000, 20000],
+    "cem": {
+      "num_samples": 300,
+      "iterations": 30,
+      "topk": 30,
+      "var_scale": 1.0
+    },
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "action_block": 5
+  },
+  "schedule_ambiguity": {
+    "conflicting_plan_phrases": [
+      "历史草案：采集1,000环境步→更新",
+      "历史草案：每新增50环境步对应一次更新"
+    ],
+    "current_execution_choice": "one_optimizer_update_per_100_environment_steps",
+    "environment_steps_per_update": 100,
+    "updates_over_20000_environment_steps": 200,
+    "environment_step_interval_is_batch_size": false,
+    "historical_50_step_schedule_updates_over_20000_steps": 400,
+    "user_confirmation_required_before_gpu_run": false
+  },
+  "optimizer": {
+    "type": "AdamW",
+    "learning_rate": 1e-5,
+    "weight_decay": 1e-3,
+    "gradient_clip_norm": 1.0,
+    "batch_size": 64
+  },
+  "checkpoint_policy": {
+    "source_model_version_required": true,
+    "encoder_projector_frozen": true,
+    "cross_episode_windows_forbidden": true,
+    "failure_transitions_retained": true,
+    "naming_pattern": "{task}_{arm}_envsteps_{environment_steps:06d}.ckpt"
+  },
+  "cpu_dry_run": {
+    "report_path": "outputs/round3/phase2/cpu_dry_run/cube/phase2_cpu_dry_run_report.json",
+    "report_sha256": "198596f3b8db373a508c34b058fa3891db7288643ca84729de22438f1b373274",
+    "offline_manifest_path": "outputs/round3/phase2/cpu_dry_run/cube/offline_manifest.json",
+    "offline_manifest_sha256": "56d83b925b6260e4d12155812cf6a711e82c5469afd4d835c818ca42158fd441",
+    "arms": ["freeze", "offline_continue", "online_adapt"],
+    "status": "passed"
+  },
+  "exact_target_collection_smoke": {
+    "command": "collect-online --target-environment-steps 50 --chunk-size 1 --device cpu --solver-samples 4 --solver-steps 1 --solver-topk 2",
+    "report_path": "outputs/round3/phase2/smoke_cpu/target50_replay.json",
+    "report_sha256": "a781d24bb2a3dd698707e403aa3356071320b8975ae8eb3fe1b7dfdd9b8aaea4",
+    "replay_path": "outputs/round3/phase2/smoke_cpu/target50_replay.pt",
+    "replay_file_sha256": "3967c80624a13e306856fbcd66d0d1704a9c30898e778dde3318c3cc361ad08a",
+    "reported_environment_steps": 50,
+    "status": "passed"
+  },
+  "runner_validation": {
+    "test": "tests/test_round3_phase2_runner.py",
+    "mock_boundaries": 2,
+    "mock_update_counts_per_adaptive_arm": 2,
+    "resume_path": "passed",
+    "status": "passed"
+  },
+  "gpu_runner": {
+    "script": "scripts/run_round3_phase2_cube.sh",
+    "logical_device": "cuda:0",
+    "physical_gpu": 1,
+    "physical_gpu_allowlist": [0, 1, 2, 3],
+    "shared_compute_allowed": true,
+    "preflight_minimum_free_mib": 24000,
+    "resource_window_confirmed": true,
+    "resource_window_required": true,
+    "output_root": "outputs/round3/phase2/cube_e0_three_arms_100step"
+  },
+  "result": {
+    "run_state": "outputs/round3/phase2/cube_e0_three_arms_100step/run_state.json",
+    "status": "ok",
+    "current_environment_steps": 20000,
+    "update_records": 200,
+    "replay_shards": 200,
+    "total_replay_rows": 2070,
+    "evaluation_episodes_per_arm_per_boundary": 50,
+    "evaluation_cohort_sha256": "578f6ea52e56d77461cb5bb2aeb01a004a21b9f6659689596f6f55f25dc17d01",
+    "success_rate": {
+      "freeze": {"0": 0.54, "5000": 0.54, "10000": 0.54, "20000": 0.54},
+      "offline_continue": {"0": 0.54, "5000": 0.62, "10000": 0.56, "20000": 0.48},
+      "online_adapt": {"0": 0.54, "5000": 0.60, "10000": 0.56, "20000": 0.48}
+    },
+    "final_delta_pp": {
+      "online_vs_freeze": -6.0,
+      "online_vs_offline_continue": 0.0
+    },
+    "decision": "no_e0_expansion_gate"
+  },
+  "next_actions": [
+    "legacy_e5_single_task_single_seed_validation_started",
+    "do_not_expand_e0_online_train_after_final_online_minus_6pp_vs_freeze",
+    "evaluate_dev_at_0_5000_10000_20000_environment_steps"
+  ]
+}

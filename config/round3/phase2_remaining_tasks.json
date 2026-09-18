@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "phase": "round3_phase2_remaining_tasks",
+  "protocol": "round3_revised",
+  "status": "completed",
+  "training": {
+    "environment_steps": 20000,
+    "update_interval_environment_steps": 100,
+    "optimizer_updates": 200,
+    "optimizer_minibatch_size": 64,
+    "online_offline_samples_per_update": [32, 32],
+    "evaluation_steps": [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000, 18000, 19000, 20000]
+  },
+  "evaluation": {
+    "episodes_per_point": 200,
+    "batch_size": 50,
+    "batch_count": 4,
+    "save_video": false,
+    "aggregate_results": 252
+  },
+  "tasks": {
+    "reacher": {
+      "e0_checkpoint": {
+        "path": "outputs/lewm/reacher/0721_/checkpoints/lewm_weights_epoch_10.pt",
+        "sha256": "b675ee4fb6cbdcb694bec720b0e44cbe087f63eb0890cc02cf6b181d6ad9b04b"
+      },
+      "e5_checkpoint": {
+        "path": "outputs/fast_lewam/reacher/0717_/checkpoints/fast_lewam_weights_epoch_10.pt",
+        "sha256": "c5a6f55354aded51a1e7e2ed052b6b2c8e1c2ea1f65427bf6964465226f6145f"
+      },
+      "online_pool": {
+        "path": "outputs/round3/phase2/reacher_online_pool.json",
+        "sha256": "ebd7d39cf63909444a57a53d7791030ac73190a7100cbada60cfa3e975b564ef"
+      },
+      "final_cohort": {
+        "path": "outputs/round3/phase1/cohorts/reacher/final.json",
+        "sha256": "244c6ac96c3188c1450348cb1d17e3be1c92ec7f019b6461b8ff9674e5f115a6"
+      },
+      "training_outputs": {
+        "e0": "outputs/round3/phase2/reacher_e0_three_arms_100step_threads4_retry1",
+        "e5": "outputs/round3/phase2/reacher_e5_legacy_three_arms_100step_threads4_retry1"
+      },
+      "curve_outputs": "outputs/round3/phase2/reacher_curve_200ep_1k"
+    },
+    "pusht": {
+      "e0_checkpoint": {
+        "path": "outputs/lewm/pusht/0803_e0_lewm_baseline_bs128/checkpoints/lewm_weights_epoch_10.pt",
+        "sha256": "3f8e8e9005e7590ec73d71140b5ee99ed3582a0470d85b64fd3f77bad13fc55d"
+      },
+      "e5_checkpoint": {
+        "path": "outputs/fast_lewam/pusht/0803_e5_cross_head_grad/checkpoints/fast_lewam_weights_epoch_10.pt",
+        "sha256": "be384ae18e1f41d75c1e047002a3e2d4dd3db46c1aaed784753b8caa7b93fc71"
+      },
+      "online_pool": {
+        "path": "outputs/round3/phase2/pusht_online_pool.json",
+        "sha256": "595b8bc5c5b0409dc9af6b53e8b77279f92f546c3666dc3114124b2aa7981384"
+      },
+      "final_cohort": {
+        "path": "outputs/round3/phase1/cohorts/pusht/final.json",
+        "sha256": "0e0659f41bd9339d44ee560c2e46fef464a6277f54798ffb501701e46048eca6"
+      },
+      "training_outputs": {
+        "e0": "outputs/round3/phase2/pusht_e0_three_arms_100step_threads4_retry1",
+        "e5": "outputs/round3/phase2/pusht_e5_legacy_three_arms_100step_threads4_retry1"
+      },
+      "curve_outputs": "outputs/round3/phase2/pusht_curve_200ep_1k"
+    },
+    "tworoom": {
+      "e0_checkpoint": {
+        "path": "outputs/lewm/tworoom/0721_/checkpoints/lewm_weights_epoch_10.pt",
+        "sha256": "8e75c0c6ce712b4508525e22763e3aa5b34d85944a5e55ee0725b4e5de9783d6"
+      },
+      "e5_checkpoint": {
+        "path": "outputs/fast_lewam/tworoom/0717_/checkpoints/fast_lewam_weights_epoch_10.pt",
+        "sha256": "949ceb8051f4c98c85c5d8f73cfc35a40032c61df20f34778a566cfc73759115"
+      },
+      "online_pool": {
+        "path": "outputs/round3/phase2/tworoom_online_pool.json",
+        "sha256": "7792ea989e1a3de8904dbece7f76df6be9986065ce41d334d77a2eeccd4ff472"
+      },
+      "final_cohort": {
+        "path": "outputs/round3/phase1/cohorts/tworoom/final.json",
+        "sha256": "1320bd476722b120749de2db1706edbfab0a4bd02f078c63c0046e1515c9d3ec"
+      },
+      "training_outputs": {
+        "e0": "outputs/round3/phase2/tworoom_e0_three_arms_100step_threads4_retry1",
+        "e5": "outputs/round3/phase2/tworoom_e5_legacy_three_arms_100step_threads4_retry1"
+      },
+      "curve_outputs": "outputs/round3/phase2/tworoom_curve_200ep_1k"
+    }
+  },
+  "combined_plot": "outputs/round3/phase2/round3_phase2_remaining_tasks_success_curves.png",
+  "validation_script": "scripts/validate_round3_phase2_all.py"
+}
