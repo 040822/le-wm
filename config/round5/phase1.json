@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 1",
+  "protocol": "legacy",
+  "allowed_protocol_variants": [
+    "legacy"
+  ],
+  "training": {
+    "model": "R4-AB",
+    "seed": 3072,
+    "epoch": 10,
+    "retrain": false,
+    "checkpoints": {
+      "cube": "outputs/round4/ab_seed3072_cube/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "pusht": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "reacher": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "tworoom": "outputs/round4/ab_seed3072_tworoom/checkpoints/r4_ab_seed3072_weights_epoch_10.pt"
+    },
+    "checkpoint_sha256": {
+      "cube": "2748151a2c43c7841246a5fb8ee1fd7915ebbc00bfc27aa1a32b0f9080d92956",
+      "pusht": "62d00096a34e9f0b6da4ceb6a3c61eb350701a7aade5f5e4d2c1ee528b06015e",
+      "reacher": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553",
+      "tworoom": "48d1ed2520ec7142327969eacf1c37b144faec51cfd6c9ce72701a8421bf57c2"
+    }
+  },
+  "cohort": {
+    "legacy": {
+      "kind": "dev",
+      "protocol_variant": "legacy",
+      "paths": {
+        "cube": "outputs/round3/phase1/cohorts/cube/legacy_50.json",
+        "pusht": "outputs/round3/phase1/cohorts/pusht/legacy_50.json",
+        "reacher": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+        "tworoom": "outputs/round3/phase1/cohorts/tworoom/legacy_50.json"
+      },
+      "sha256": {
+        "cube": "b9054ebb327665142befac1b3ec36b2500de5dcdadc4008da322e2d0e4c721bb",
+        "pusht": "b110bee6afa2f7be372d57b3ef1247a44048c8b1e336491d74a53401ad479b0c",
+        "reacher": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45",
+        "tworoom": "d452befec00361add056c880e09e9ef2cb68060e7ad599535d8ce83a875e9091"
+      }
+    },
+    "baseline_results_root": "outputs/round4/phase45_4_seed3072_legacy_dev"
+  },
+  "evaluation": {
+    "seed": 42,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0,
+    "best_of_n_candidates": 64,
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "flow_steps": [
+      1,
+      2,
+      5,
+      10,
+      16,
+      32
+    ],
+    "step_reference": 16,
+    "integrator": "euler"
+  },
+  "guidance": {
+    "step_size": 0.01,
+    "last_steps": 5,
+    "inner_steps": 5,
+    "max_rms_offset": 0.2,
+    "p3_proposal_chunk_size": 512
+  },
+  "reuse_baseline": true,
+  "output_root": "outputs/round5/phase1_seed3072_legacy",
+  "report_output": "docs/report/round5/round5_phase1_report.md",
+  "gpu_policy": "one task per explicitly selected physical GPU0-7; low-VRAM evaluation; avoid GPU4-7 10:00-23:00 Beijing when possible"
+}
