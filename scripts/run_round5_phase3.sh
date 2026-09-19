@@ -21,7 +21,7 @@ GPUS=(2 0 1)
 
 gpu_free_mib() {
   local gpu="$1"
-  nvidia-smi --id="$gpu" \
+  CUDA_VISIBLE_DEVICES="$gpu" nvidia-smi --id="$gpu" \
     --query-gpu=memory.free --format=csv,noheader,nounits | tr -d '[:space:]'
 }
 

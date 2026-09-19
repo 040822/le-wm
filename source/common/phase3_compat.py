@@ -8,14 +8,13 @@ This module keeps those differences explicit and local to Phase 3 jobs.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
 
 from .round3_phase1 import CohortEntry, CohortManifest
-from .round3_protocol import PHASE3_TASKS, ROUND3_PROTOCOL
+from .round3_protocol import PHASE3_TASKS
 
 
 ROOT = Path(__file__).resolve().parents[2]

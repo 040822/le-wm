@@ -52,10 +52,6 @@ def _normalise_pixels(pixels: torch.Tensor, device: torch.device) -> torch.Tenso
     return pixels
 
 
-def _cpu_state(module: torch.nn.Module) -> dict[str, torch.Tensor]:
-    return {key: value.detach().cpu() for key, value in module.state_dict().items()}
-
-
 def train(args: argparse.Namespace) -> None:
     task = str(args.task)
     if task not in PHASE3_TASKS:
