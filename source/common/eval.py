@@ -593,6 +593,13 @@ def get_episodes_length(dataset, episodes):
 
 def get_dataset(cfg, dataset_name):
     dataset_path = Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+    local_path = Path(dataset_name).expanduser()
+    if local_path.is_file() and local_path.suffix in {".h5", ".lance"}:
+        return swm.data.HDF5Dataset(
+            path=local_path,
+            keys_to_cache=cfg.dataset.keys_to_cache,
+            cache_dir=dataset_path,
+        )
     return swm.data.HDF5Dataset(
         dataset_name,
         keys_to_cache=cfg.dataset.keys_to_cache,

@@ -26,6 +26,7 @@ from .round3_protocol import (
     PREDICATE_VERSION,
     PROTOCOL_VARIANTS,
     ROUND3_PROTOCOL,
+    PHASE3_TASKS,
     TASKS,
     TRACE_SCHEMA_VERSION,
 )
@@ -171,7 +172,7 @@ def validate_cohort_manifest(
             f"unsupported cohort schema version {parsed.schema_version!r}; "
             f"expected {COHORT_SCHEMA_VERSION}"
         )
-    if _normalise_task(parsed.task) not in TASKS:
+    if _normalise_task(parsed.task) not in (*TASKS, *PHASE3_TASKS):
         raise ValueError(f"unknown cohort task {parsed.task!r}")
     if task is not None and _normalise_task(parsed.task) != _normalise_task(task):
         raise ValueError(

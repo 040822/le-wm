@@ -1,0 +1,42 @@
+defaults:
+  - launcher: local
+  - solver: cem
+  - _self_
+
+world:
+  env_name: swm/HumanoidDMControl-v0
+  num_envs: ${eval.num_eval}
+  max_episode_steps: ???
+  task: walk
+
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+    - action
+
+seed: 42
+policy: random
+
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+
+eval:
+  task_name: humanoid
+  num_eval: 50
+  goal_offset_steps: 25
+  eval_budget: 50
+  img_size: 224
+  dataset_name: data/datasets/dmcontrol/humanoid_walk.h5
+  benchmark_dataset_name: dmc/humanoid_walk
+  callables:
+    - method: set_state
+      args:
+        qpos:
+          value: qpos
+        qvel:
+          value: qvel
+
+output:
+  save_video: false

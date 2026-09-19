@@ -8,10 +8,22 @@ from stable_pretraining import data as dt
 
 def load_dataset(dataset_name, cache_dir=None, **kwargs):
     """Load a stable-worldmodel dataset across supported API versions."""
+    # ``stable_worldmodel.data.load_dataset`` treats every string as a
+    # registry/HuggingFace name in newer releases.  Phase 3 stores the HDF5
+    # files directly under ``data/datasets``; resolve an existing local file
+    # before delegating so training and evaluation never attempt a network
+    # lookup for an already-downloaded dataset.
+    local_path = Path(dataset_name).expanduser()
+    if local_path.is_file() and local_path.suffix in {".h5", ".lance"}:
+        return swm.data.HDF5Dataset(
+            path=local_path,
+            cache_dir=cache_dir,
+            **kwargs,
+        )
     if hasattr(swm.data, "load_dataset"):
         return swm.data.load_dataset(dataset_name, cache_dir=cache_dir, **kwargs)
 
-    path = Path(dataset_name)
+    path = local_path
     if path.suffix in {".h5", ".lance"}:
         dataset_name = str(path.with_suffix(""))
 

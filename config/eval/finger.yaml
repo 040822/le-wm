@@ -1,0 +1,46 @@
+defaults:
+  - launcher: local
+  - solver: cem
+  - _self_
+
+world:
+  env_name: swm/FingerDMControl-v0
+  num_envs: ${eval.num_eval}
+  max_episode_steps: ???
+  task: turn_hard
+
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+    - action
+
+seed: 42
+policy: random
+
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+
+eval:
+  task_name: finger
+  num_eval: 50
+  goal_offset_steps: 25
+  eval_budget: 50
+  img_size: 224
+  dataset_name: data/datasets/dmcontrol/finger_turn_hard.h5
+  benchmark_dataset_name: dmc/finger_turn_hard
+  callables:
+    - method: set_state
+      args:
+        qpos:
+          value: qpos
+        qvel:
+          value: qvel
+    - method: set_target_position
+      args:
+        target_position:
+          value: goal_target_position
+
+output:
+  save_video: false

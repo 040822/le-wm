@@ -1,0 +1,66 @@
+defaults:
+  - launcher: local
+  - solver: cem
+  - _self_
+
+world:
+  env_name: swm/OGBScene-v0
+  num_envs: ${eval.num_eval}
+  max_episode_steps: ???
+  env_type: scene
+  ob_type: states
+  multiview: false
+  width: 224
+  height: 224
+  visualize_info: false
+  terminate_at_goal: true
+
+dataset:
+  stats: ${eval.dataset_name}
+  keys_to_cache:
+    - action
+
+seed: 42
+policy: random
+
+plan_config:
+  horizon: 5
+  receding_horizon: 5
+  action_block: 5
+
+eval:
+  task_name: scene
+  num_eval: 50
+  goal_offset_steps: 25
+  eval_budget: 50
+  img_size: 224
+  dataset_name: data/datasets/ogbench/scene.h5
+  benchmark_dataset_name: ogbench/scene_expert
+  callables:
+    - method: set_state
+      args:
+        qpos:
+          value: qpos
+        qvel:
+          value: qvel
+        button_states:
+          value: button_states
+    - method: set_phase3_scene_goal
+      args:
+        target_task:
+          value: goal_privileged_target_task
+        target_block_pos:
+          value: goal_privileged_target_block_pos
+        target_button:
+          value: goal_privileged_target_button
+        target_button_state:
+          value: goal_privileged_target_button_state
+        goal_button_states:
+          value: goal_button_states
+        target_drawer_pos:
+          value: goal_privileged_target_drawer_pos
+        target_window_pos:
+          value: goal_privileged_target_window_pos
+
+output:
+  save_video: false

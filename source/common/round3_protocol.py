@@ -27,6 +27,10 @@ TRACE_SCHEMA_VERSION = 1
 ARTIFACT_REGISTRY_SCHEMA_VERSION = 1
 
 TASKS = ("cube", "pusht", "reacher", "tworoom")
+# Phase 3 keeps its task namespace separate from the original Round 3 matrix.
+# This lets the old reports retain their four-task denominators while sharing
+# the cohort/result validation machinery with the newly added environments.
+PHASE3_TASKS = ("scene", "finger", "humanoid")
 METHODS = ("e0_lewm", "e3_fast", "e5_fast")
 PROTOCOL_VARIANTS = (
     "legacy",
@@ -403,6 +407,7 @@ __all__ = [
     "ROUND3_EVAL_DEFAULTS",
     "ROUND3_PROTOCOL",
     "TASKS",
+    "PHASE3_TASKS",
     "TASK_PREDICATES",
     "TRACE_SCHEMA_VERSION",
     "TaskPredicate",
