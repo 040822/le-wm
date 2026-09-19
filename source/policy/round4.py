@@ -106,6 +106,12 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         optimize_proposal: bool = False,
         cache_goal_latent: bool = False,
         bf16_encode: bool = False,
+        guidance_mode: str = "none",
+        guidance_step_size: float = 0.01,
+        guidance_last_steps: int = 5,
+        guidance_inner_steps: int = 5,
+        guidance_max_rms_offset: float = 0.20,
+        proposal_chunk_size: int | None = None,
     ):
         super().__init__()
         if proposal_source not in {"action", "latent"}:
@@ -120,6 +126,39 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             raise ValueError("first selection must disable the verifier")
         if action_block < 1 or receding_horizon_blocks < 1:
             raise ValueError("action_block and receding_horizon_blocks must be positive")
+        self.guidance_mode = str(guidance_mode).lower()
+        if self.guidance_mode not in {
+            "none",
+            "guided_flow",
+            "post_opt",
+            "post_opt_refine",
+        }:
+            raise ValueError(
+                "guidance_mode must be 'none', 'guided_flow', 'post_opt', or "
+                "'post_opt_refine'"
+            )
+        if self.guidance_mode != "none" and proposal_source != "action":
+            raise ValueError("guidance is only defined for action proposals")
+        if self.guidance_mode == "post_opt_refine" and verifier == "none":
+            raise ValueError("post_opt_refine requires the Stage-B verifier")
+        self.guidance_step_size = float(guidance_step_size)
+        self.guidance_last_steps = int(guidance_last_steps)
+        self.guidance_inner_steps = int(guidance_inner_steps)
+        self.guidance_max_rms_offset = float(guidance_max_rms_offset)
+        if self.guidance_mode != "none":
+            if self.guidance_step_size <= 0.0:
+                raise ValueError("guidance_step_size must be positive")
+            if self.guidance_last_steps < 1:
+                raise ValueError("guidance_last_steps must be positive")
+            if self.guidance_inner_steps < 1:
+                raise ValueError("guidance_inner_steps must be positive")
+            if self.guidance_max_rms_offset <= 0.0:
+                raise ValueError("guidance_max_rms_offset must be positive")
+        self.proposal_chunk_size = (
+            None if proposal_chunk_size is None else int(proposal_chunk_size)
+        )
+        if self.proposal_chunk_size is not None and self.proposal_chunk_size < 1:
+            raise ValueError("proposal_chunk_size must be positive")
         self.type = "round4_best_of_n"
         self.model = model.eval()
         self.model.requires_grad_(False)
@@ -239,49 +278,124 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
                 cache[index] = goal_latent[row].detach()
         return current_latent, goal_latent
 
+    def _sample_action_chunk(self, flat_start, flat_goal, noise, generator):
+        """Sample one action-proposal chunk, applying guidance when enabled."""
+        if self.guidance_mode in {"guided_flow", "post_opt"}:
+            return self.model.sample_actions(
+                flat_start,
+                noise=noise,
+                num_steps=self.action_flow_steps,
+                goal_latent=flat_goal,
+                integrator=self.action_flow_integrator,
+                guidance_mode=self.guidance_mode,
+                guidance_step_size=self.guidance_step_size,
+                guidance_last_steps=self.guidance_last_steps,
+                guidance_inner_steps=self.guidance_inner_steps,
+                guidance_max_rms_offset=self.guidance_max_rms_offset,
+            )
+        return self.model.sample_actions(
+            flat_start,
+            noise=noise,
+            num_steps=self.action_flow_steps,
+            goal_latent=flat_goal,
+            integrator=self.action_flow_integrator,
+        )
+
+    def _propose_actions(self, z_start, z_goal, generator):
+        """Generate ``[B,S,H,A]`` action candidates with optional chunking.
+
+        The full candidate noise tensor is drawn up front, so execution
+        chunking is purely a memory detail: it never changes the candidate set
+        or the comparison against the unguided baseline.  Guidance builds an
+        autograd graph per candidate, hence the flattened dimension is split
+        into ``proposal_chunk_size`` chunks to bound peak memory.
+        """
+        batch = z_start.shape[0]
+        total = batch * self.num_candidates
+        flat_start = (
+            z_start[:, None]
+            .expand(batch, self.num_candidates, -1)
+            .reshape(-1, z_start.shape[-1])
+        )
+        flat_goal = (
+            z_goal[:, None]
+            .expand(batch, self.num_candidates, -1)
+            .reshape(-1, z_goal.shape[-1])
+        )
+        started = time.perf_counter()
+        with self._autocast(self.bf16_proposal):
+            if self.optimize_proposal and self.guidance_mode == "none":
+                actions = self.model.sample_actions(
+                    flat_start,
+                    num_steps=self.action_flow_steps,
+                    goal_latent=flat_goal,
+                    integrator=self.action_flow_integrator,
+                    generator=generator,
+                )
+            else:
+                # Draw the whole candidate noise tensor first so execution
+                # chunking never changes the candidate set.  Chunking is a
+                # memory detail, not part of the condition identity.
+                all_noise = torch.randn(
+                    total,
+                    self.model.action_horizon,
+                    self.model.action_dim,
+                    device=z_start.device,
+                    dtype=z_start.dtype,
+                    generator=generator,
+                )
+                chunk = (
+                    total
+                    if self.proposal_chunk_size is None
+                    else self.proposal_chunk_size
+                )
+                pieces = []
+                for start in range(0, total, chunk):
+                    end = min(start + chunk, total)
+                    rows = (
+                        torch.arange(start, end, device=z_start.device)
+                        // self.num_candidates
+                    )
+                    pieces.append(
+                        self._sample_action_chunk(
+                            flat_start[start:end],
+                            flat_goal[start:end],
+                            all_noise[start:end],
+                            generator,
+                        )
+                    )
+                actions = torch.cat(pieces, dim=0)
+        flow_seconds = time.perf_counter() - started
+        guided_steps = (
+            min(self.guidance_last_steps, self.action_flow_steps)
+            if self.guidance_mode == "guided_flow"
+            else 0
+        )
+        inner = self.guidance_inner_steps if self.guidance_mode != "none" else 0
+        per_candidate_backward = (
+            int(guided_steps * inner)
+            if self.guidance_mode == "guided_flow"
+            else (int(inner) if self.guidance_mode == "post_opt" else 0)
+        )
+        return actions.reshape(
+            batch, self.num_candidates, self.model.action_horizon, self.model.action_dim
+        ), {
+            "flow_steps": self.action_flow_steps,
+            "idm_type": "none",
+            "forward_count": self.action_flow_steps * (
+                2 if self.action_flow_integrator == "heun" else 1
+            ),
+            "flow_seconds": float(flow_seconds),
+            "idm_seconds": 0.0,
+            "guidance_mode": self.guidance_mode,
+            "guidance_backward_count": int(per_candidate_backward * total),
+            "proposal_chunk_size": self.proposal_chunk_size,
+        }
+
     def _propose(self, z_start, z_goal, generator):
         batch = z_start.shape[0]
         if self.proposal_source == "action":
-            flat_start = z_start[:, None].expand(batch, self.num_candidates, -1).reshape(-1, z_start.shape[-1])
-            flat_goal = z_goal[:, None].expand(batch, self.num_candidates, -1).reshape(-1, z_goal.shape[-1])
-            started = time.perf_counter()
-            with self._autocast(self.bf16_proposal):
-                if self.optimize_proposal:
-                    actions = self.model.sample_actions(
-                        flat_start,
-                        num_steps=self.action_flow_steps,
-                        goal_latent=flat_goal,
-                        integrator=self.action_flow_integrator,
-                        generator=generator,
-                    )
-                else:
-                    noise = torch.randn(
-                        batch * self.num_candidates,
-                        self.model.action_horizon,
-                        self.model.action_dim,
-                        device=z_start.device,
-                        dtype=z_start.dtype,
-                        generator=generator,
-                    )
-                    actions = self.model.sample_actions(
-                        flat_start,
-                        noise=noise,
-                        num_steps=self.action_flow_steps,
-                        goal_latent=flat_goal,
-                        integrator=self.action_flow_integrator,
-                    )
-            flow_seconds = time.perf_counter() - started
-            return actions.reshape(
-                batch, self.num_candidates, self.model.action_horizon, self.model.action_dim
-            ), {
-                "flow_steps": self.action_flow_steps,
-                "idm_type": "none",
-                "forward_count": self.action_flow_steps * (
-                    2 if self.action_flow_integrator == "heun" else 1
-                ),
-                "flow_seconds": float(flow_seconds),
-                "idm_seconds": 0.0,
-            }
+            return self._propose_actions(z_start, z_goal, generator)
         started = time.perf_counter()
         paths = self.model.sample_latent_paths(
             z_start,
@@ -368,6 +482,12 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             "optimize_proposal": self.optimize_proposal,
             "cache_goal_latent": self.cache_goal_latent,
             "bf16_encode": self.bf16_encode,
+            "guidance_mode": self.guidance_mode,
+            "guidance_step_size": self.guidance_step_size,
+            "guidance_last_steps": self.guidance_last_steps,
+            "guidance_inner_steps": self.guidance_inner_steps,
+            "guidance_max_rms_offset": self.guidance_max_rms_offset,
+            "proposal_chunk_size": self.proposal_chunk_size,
         }
         if self.action_bounds is not None:
             metadata["action_bounds"] = self.action_bounds.metadata(
@@ -445,6 +565,26 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             selected_actions = candidates[
                 torch.arange(len(replan), device=candidates.device), selected_indices
             ]
+            refine_seconds = 0.0
+            if self.guidance_mode == "post_opt_refine":
+                started = time.perf_counter()
+                selected_actions = self.model.post_optimize_actions(
+                    z_start,
+                    z_goal,
+                    selected_actions,
+                    step_size=self.guidance_step_size,
+                    inner_steps=self.guidance_inner_steps,
+                    max_rms_offset=self.guidance_max_rms_offset,
+                )
+                _sync(device)
+                refine_seconds = time.perf_counter() - started
+                proposal_meta = {
+                    **proposal_meta,
+                    "guidance_backward_count": int(
+                        self.guidance_inner_steps * len(replan)
+                    ),
+                    "guidance_refine_seconds": float(refine_seconds),
+                }
             keep_blocks = min(self.receding_horizon_blocks, self.model.action_horizon)
             base_action_dim = self.model.action_dim // self.action_block
             plan = selected_actions[:, :keep_blocks].reshape(
@@ -457,8 +597,9 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
                 "replan_indices": [int(index) for index in replan],
                 "selected_indices": selected_indices.detach().cpu().tolist(),
                 "verify_seconds": float(verify_seconds),
-                "proposal_seconds": float(proposal_seconds),
+                "proposal_seconds": float(proposal_seconds + refine_seconds),
                 "encode_seconds": float(encode_seconds),
+                "refine_seconds": float(refine_seconds),
                 "costs": None if costs is None else costs.detach().cpu().tolist(),
                 "forward_count": int(proposal_meta["forward_count"] + verifier_forward_count),
                 "peak_memory_bytes": peak_memory,
@@ -503,6 +644,12 @@ def make_round4_policy(
     optimize_proposal: bool = False,
     cache_goal_latent: bool = False,
     bf16_encode: bool = False,
+    guidance_mode: str = "none",
+    guidance_step_size: float = 0.01,
+    guidance_last_steps: int = 5,
+    guidance_inner_steps: int = 5,
+    guidance_max_rms_offset: float = 0.20,
+    proposal_chunk_size: int | None = None,
 ):
     """Build one of the frozen Round 4 P0--P4 policy variants."""
     if mode not in ROUND4_MODES:
@@ -511,6 +658,23 @@ def make_round4_policy(
         raise ValueError("action_flow_steps must be positive")
     if mode in {"P4", "P4-first"} and action_flow_steps is not None:
         raise ValueError("action_flow_steps is only valid for action proposals")
+    guidance_mode = str(guidance_mode).lower()
+    if guidance_mode not in {"none", "guided_flow", "post_opt", "post_opt_refine"}:
+        raise ValueError(
+            "guidance_mode must be 'none', 'guided_flow', 'post_opt', or "
+            "'post_opt_refine'"
+        )
+    if guidance_mode == "post_opt_refine" and mode != "P3":
+        raise ValueError("post_opt_refine guidance is only defined for P3")
+    if guidance_mode != "none" and mode in {"P0-shuf", "P1"}:
+        raise ValueError(f"guidance is not defined for {mode}")
+    guidance_kwargs = dict(
+        guidance_mode=guidance_mode,
+        guidance_step_size=guidance_step_size,
+        guidance_last_steps=guidance_last_steps,
+        guidance_inner_steps=guidance_inner_steps,
+        guidance_max_rms_offset=guidance_max_rms_offset,
+    )
     resolved_action_flow_steps = (
         None if action_flow_steps is None else int(action_flow_steps)
     )
@@ -531,6 +695,7 @@ def make_round4_policy(
             seed=seed,
             action_flow_integrator=action_flow_integrator,
             action_bound_mode=action_bound_mode,
+            **guidance_kwargs,
         )
     if mode == "P0-shuf":
         return make_fast_lewam_policy(
@@ -574,6 +739,7 @@ def make_round4_policy(
             actor_warm_start_scale=actor_warm_start_scale,
             action_flow_integrator=action_flow_integrator,
             action_bound_mode=action_bound_mode,
+            **guidance_kwargs,
         )
         if mode == "P2":
             policy.actor_warm_start_scale = float(actor_warm_start_scale)
@@ -618,6 +784,12 @@ def make_round4_policy(
         optimize_proposal=optimize_proposal,
         cache_goal_latent=cache_goal_latent,
         bf16_encode=bf16_encode,
+        guidance_mode=guidance_mode,
+        guidance_step_size=guidance_step_size,
+        guidance_last_steps=guidance_last_steps,
+        guidance_inner_steps=guidance_inner_steps,
+        guidance_max_rms_offset=guidance_max_rms_offset,
+        proposal_chunk_size=proposal_chunk_size,
     )
 
 

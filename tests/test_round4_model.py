@@ -154,6 +154,30 @@ class Round4ModelTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             restored.load_state_dict(legacy.state_dict(), strict=True)
 
+    def test_post_optimize_actions_reduces_latent_cost_within_trust_region(self):
+        model = make_round4_model().eval()
+        torch.manual_seed(3)
+        z0 = torch.randn(2, 8)
+        zg = torch.randn(2, 8)
+        actions = torch.randn(2, 5, 4)
+        before = model.get_cost_from_latents(z0, zg, actions[:, None])[:, 0]
+        refined = model.post_optimize_actions(
+            z0, zg, actions, step_size=0.05, inner_steps=3, max_rms_offset=0.2
+        )
+        after = model.get_cost_from_latents(z0, zg, refined[:, None])[:, 0]
+        self.assertEqual(refined.shape, actions.shape)
+        self.assertTrue(torch.isfinite(refined).all())
+        self.assertLessEqual(float((refined - actions).pow(2).mean()), 0.2 + 1e-6)
+        self.assertLessEqual(float(after.mean()), float(before.mean()) + 1e-6)
+        self.assertEqual(model.last_guidance_stats["mode"], "post_opt_refine")
+
+    def test_post_optimize_actions_rejects_bad_shapes(self):
+        model = make_round4_model().eval()
+        with self.assertRaises(ValueError):
+            model.post_optimize_actions(
+                torch.randn(2, 8), torch.randn(2, 8), torch.randn(5, 4)
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

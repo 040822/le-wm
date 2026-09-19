@@ -271,10 +271,26 @@ def run_round4_evaluation(
     optimize_proposal: bool = False,
     cache_goal_latent: bool = False,
     bf16_encode: bool = False,
+    guidance_mode: str = "none",
+    guidance_step_size: float = 0.01,
+    guidance_last_steps: int = 5,
+    guidance_inner_steps: int = 5,
+    guidance_max_rms_offset: float = 0.20,
+    proposal_chunk_size: int | None = None,
     allowed_protocol_variants: Sequence[str] = ("round3_revised",),
 ) -> dict[str, Any]:
     """Run a Round 4 mode and publish cohort-bound result and trace artifacts."""
     mode = validate_round4_mode(mode)
+    guidance_mode = str(guidance_mode).lower()
+    if guidance_mode not in {"none", "guided_flow", "post_opt", "post_opt_refine"}:
+        raise ValueError(
+            "guidance_mode must be 'none', 'guided_flow', 'post_opt', or "
+            "'post_opt_refine'"
+        )
+    if guidance_mode != "none" and mode in {"P0-shuf", "P1"}:
+        raise ValueError(f"guidance is not defined for {mode}")
+    if guidance_mode == "post_opt_refine" and mode != "P3":
+        raise ValueError("post_opt_refine guidance is only defined for P3")
     cem_protocol, action_bound_mode = resolve_cem_protocol(
         mode,
         cem_protocol,
@@ -344,6 +360,12 @@ def run_round4_evaluation(
         optimize_proposal=optimize_proposal,
         cache_goal_latent=cache_goal_latent,
         bf16_encode=bf16_encode,
+        guidance_mode=guidance_mode,
+        guidance_step_size=guidance_step_size,
+        guidance_last_steps=guidance_last_steps,
+        guidance_inner_steps=guidance_inner_steps,
+        guidance_max_rms_offset=guidance_max_rms_offset,
+        proposal_chunk_size=proposal_chunk_size,
     )
     _time_cem_policy(policy, mode)
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
@@ -444,6 +466,14 @@ def run_round4_evaluation(
     policy_meta.update(getattr(policy, "metadata", lambda: {})())
     policy_meta["cem_protocol"] = cem_protocol
     policy_meta["action_bound_mode"] = str(action_bound_mode)
+    policy_meta["guidance_mode"] = str(guidance_mode)
+    policy_meta["guidance_step_size"] = float(guidance_step_size)
+    policy_meta["guidance_last_steps"] = int(guidance_last_steps)
+    policy_meta["guidance_inner_steps"] = int(guidance_inner_steps)
+    policy_meta["guidance_max_rms_offset"] = float(guidance_max_rms_offset)
+    policy_meta["proposal_chunk_size"] = (
+        None if proposal_chunk_size is None else int(proposal_chunk_size)
+    )
     action_bounds = action_bounds or getattr(policy, "action_bounds", None)
     model_for_metadata = getattr(policy, "fast_model", None) or getattr(
         policy, "model", None

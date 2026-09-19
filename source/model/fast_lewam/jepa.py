@@ -744,6 +744,68 @@ class FastLeWAM(nn.Module):
             ).detach()
         return current
 
+    def post_optimize_actions(
+        self,
+        z0: torch.Tensor,
+        goal_latent: torch.Tensor,
+        actions: torch.Tensor,
+        *,
+        step_size: float = 0.01,
+        inner_steps: int = 5,
+        max_rms_offset: float = 0.20,
+        task_condition: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Refine an existing clean action chunk with Stage-B cost descent.
+
+        This is the select-then-refine companion to ``sample_actions`` guidance:
+        the caller already picked an action chunk and only needs the bounded
+        post-optimisation step, without re-running the action flow sampler.
+        """
+        if z0.ndim != 2:
+            raise ValueError("z0 must have leading batch and latent dimensions")
+        if tuple(goal_latent.shape) != tuple(z0.shape):
+            raise ValueError(
+                f"goal_latent must have shape {tuple(z0.shape)}, "
+                f"got {tuple(goal_latent.shape)}"
+            )
+        if actions.ndim != 3:
+            raise ValueError("actions must have shape [B,H,A]")
+        if actions.shape[0] != z0.shape[0]:
+            raise ValueError("actions and z0 batch sizes differ")
+        if not torch.isfinite(z0).all() or not torch.isfinite(goal_latent).all():
+            raise ValueError("z0 and goal_latent must be finite")
+        if float(step_size) <= 0.0:
+            raise ValueError("step_size must be positive")
+        if int(inner_steps) < 1:
+            raise ValueError("inner_steps must be positive")
+        if float(max_rms_offset) <= 0.0:
+            raise ValueError("max_rms_offset must be positive")
+        stats: dict[str, int] = {
+            "stage_b_forward_count": 0,
+            "backward_count": 0,
+            "zero_gradient_count": 0,
+        }
+        with torch.enable_grad():
+            refined = self._apply_post_opt_guidance(
+                z0,
+                actions.detach(),
+                goal_latent,
+                task_condition=task_condition,
+                step_size=float(step_size),
+                inner_steps=int(inner_steps),
+                max_rms_offset=float(max_rms_offset),
+                stats=stats,
+            )
+        self.last_guidance_stats = {
+            "mode": "post_opt_refine",
+            "guidance_inner_steps": int(inner_steps),
+            "guidance_step_size": float(step_size),
+            "guidance_max_rms_offset": float(max_rms_offset),
+            "stage_b_forward_count": int(stats["stage_b_forward_count"]),
+            "backward_count": int(stats["backward_count"]),
+        }
+        return refined.detach()
+
     def _euler_sample_base(
         self,
         z0,

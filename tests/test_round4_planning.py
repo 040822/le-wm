@@ -512,6 +512,137 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(policy.planning_events[-1]["candidate_count"], 4)
         self.assertGreater(policy.planning_events[-1]["forward_count"], 0)
 
+    def test_guidance_mode_is_threaded_and_validated(self):
+        model = make_round4_model().eval()
+        plan_config = {"horizon": 5, "receding_horizon": 5, "action_block": 1}
+        p0 = make_round4_policy(
+            model,
+            mode="P0",
+            plan_config=plan_config,
+            device="cpu",
+            action_flow_steps=2,
+            guidance_mode="guided_flow",
+            guidance_last_steps=2,
+            guidance_inner_steps=2,
+        )
+        self.assertEqual(p0.guidance_mode, "guided_flow")
+        self.assertEqual(p0.guidance_last_steps, 2)
+
+        p3 = make_round4_policy(
+            model,
+            mode="P3",
+            plan_config=plan_config,
+            device="cpu",
+            action_flow_steps=2,
+            candidate_count=4,
+            guidance_mode="post_opt_refine",
+            proposal_chunk_size=3,
+        )
+        self.assertEqual(p3.guidance_mode, "post_opt_refine")
+        self.assertEqual(p3.proposal_chunk_size, 3)
+        self.assertEqual(p3.metadata()["guidance_mode"], "post_opt_refine")
+
+        with self.assertRaises(ValueError):
+            make_round4_policy(
+                model,
+                mode="P1",
+                plan_config=plan_config,
+                device="cpu",
+                guidance_mode="guided_flow",
+            )
+        with self.assertRaises(ValueError):
+            make_round4_policy(
+                model,
+                mode="P0",
+                plan_config=plan_config,
+                device="cpu",
+                guidance_mode="post_opt_refine",
+            )
+        with self.assertRaises(ValueError):
+            make_round4_policy(
+                model,
+                mode="P3",
+                plan_config=plan_config,
+                device="cpu",
+                candidate_count=4,
+                guidance_mode="unknown",
+            )
+
+    def test_p3_guidance_per_candidate_runs_and_counts_backwards(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        def run(guidance):
+            policy = make_round4_policy(
+                make_round4_model().eval(),
+                mode="P3",
+                plan_config={"horizon": 5, "receding_horizon": 5, "action_block": 1},
+                device="cpu",
+                action_flow_steps=2,
+                candidate_count=4,
+                candidate_batch_size=4,
+                guidance_mode=guidance,
+                guidance_last_steps=2,
+                guidance_inner_steps=2,
+                proposal_chunk_size=3,
+            )
+            policy.set_env(FakeEnv())
+            action = policy.get_action(
+                {
+                    "pixels": torch.randn(1, 1, 3, 8, 8),
+                    "goal": torch.randn(1, 1, 3, 8, 8),
+                }
+            )
+            self.assertTrue(np.isfinite(action).all())
+            return policy.planning_events[-1]
+
+        guided = run("guided_flow")
+        self.assertEqual(guided["guidance_mode"], "guided_flow")
+        self.assertEqual(guided["guidance_backward_count"], 2 * 2 * 4)
+        post = run("post_opt")
+        self.assertEqual(post["guidance_backward_count"], 2 * 4)
+        refine = run("post_opt_refine")
+        self.assertEqual(refine["guidance_backward_count"], 2)
+        self.assertEqual(refine["guidance_mode"], "post_opt_refine")
+
+    def test_p3_post_opt_refine_calls_model_refinement(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        model = make_round4_model().eval()
+        calls = {}
+        original = model.post_optimize_actions
+
+        def spy(z0, goal_latent, actions, **kwargs):
+            calls["batch"] = int(actions.shape[0])
+            calls["kwargs"] = kwargs
+            return original(z0, goal_latent, actions, **kwargs)
+
+        model.post_optimize_actions = spy
+        policy = make_round4_policy(
+            model,
+            mode="P3",
+            plan_config={"horizon": 5, "receding_horizon": 5, "action_block": 1},
+            device="cpu",
+            action_flow_steps=2,
+            candidate_count=4,
+            guidance_mode="post_opt_refine",
+            guidance_inner_steps=2,
+        )
+        policy.set_env(FakeEnv())
+        policy.get_action(
+            {
+                "pixels": torch.randn(1, 1, 3, 8, 8),
+                "goal": torch.randn(1, 1, 3, 8, 8),
+            }
+        )
+        self.assertEqual(calls["batch"], 1)
+        self.assertEqual(calls["kwargs"]["inner_steps"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
