@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 1 intermediate epoch curve",
+  "protocol": "legacy",
+  "allowed_protocol_variants": [
+    "legacy"
+  ],
+  "training": {
+    "model": "R4-AB",
+    "seed": 3072,
+    "epoch_range": [
+      1,
+      10
+    ],
+    "checkpoint_patterns": {
+      "cube": "outputs/round4/ab_seed3072_cube/checkpoints/r4_ab_seed3072_weights_epoch_{epoch}.pt",
+      "pusht": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_{epoch}.pt",
+      "reacher": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_{epoch}.pt",
+      "tworoom": "outputs/round4/ab_seed3072_tworoom/checkpoints/r4_ab_seed3072_weights_epoch_{epoch}.pt"
+    },
+    "checkpoint_sha256": {
+      "cube": {
+        "10": "2748151a2c43c7841246a5fb8ee1fd7915ebbc00bfc27aa1a32b0f9080d92956"
+      },
+      "pusht": {
+        "10": "62d00096a34e9f0b6da4ceb6a3c61eb350701a7aade5f5e4d2c1ee528b06015e"
+      },
+      "reacher": {
+        "10": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553"
+      },
+      "tworoom": {
+        "10": "48d1ed2520ec7142327969eacf1c37b144faec51cfd6c9ce72701a8421bf57c2"
+      }
+    }
+  },
+  "cohort": {
+    "legacy": {
+      "kind": "dev",
+      "protocol_variant": "legacy",
+      "paths": {
+        "cube": "outputs/round3/phase1/cohorts/cube/legacy_50.json",
+        "pusht": "outputs/round3/phase1/cohorts/pusht/legacy_50.json",
+        "reacher": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+        "tworoom": "outputs/round3/phase1/cohorts/tworoom/legacy_50.json"
+      }
+    }
+  },
+  "epoch10_reuse": {
+    "baseline_results_root": "outputs/round4/phase45_4_seed3072_legacy_dev",
+    "source": "round4_phase45_4_legacy"
+  },
+  "evaluation": {
+    "seed": 42,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0,
+    "candidate_count": 64,
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "flow_steps": [
+      1,
+      2,
+      5,
+      10,
+      16,
+      32
+    ],
+    "integrator": "euler"
+  },
+  "condition_matrix": {
+    "cube": [
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P1", "cem_protocol": "legacy", "action_flow_steps": null, "action_flow_integrator": "not_applicable", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "legacy", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"}
+    ],
+    "pusht": [
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 2, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P1", "cem_protocol": "legacy", "action_flow_steps": null, "action_flow_integrator": "not_applicable", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "legacy", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "legacy", "action_flow_steps": 2, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 2, "action_flow_integrator": "euler", "guidance": "none"}
+    ],
+    "reacher": [
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 2, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 5, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 10, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 16, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 32, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P1", "cem_protocol": "cem-clip", "action_flow_steps": null, "action_flow_integrator": "not_applicable", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "cem-clip", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "cem-clip", "action_flow_steps": 2, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "cem-clip", "action_flow_steps": 5, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "cem-clip", "action_flow_steps": 10, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "cem-clip", "action_flow_steps": 16, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "cem-clip", "action_flow_steps": 32, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 2, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 5, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 10, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 16, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 32, "action_flow_integrator": "euler", "guidance": "none"}
+    ],
+    "tworoom": [
+      {"mode": "P0", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P1", "cem_protocol": "legacy", "action_flow_steps": null, "action_flow_integrator": "not_applicable", "guidance": "none"},
+      {"mode": "P2", "cem_protocol": "legacy", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"},
+      {"mode": "P3", "cem_protocol": "not_applicable", "action_flow_steps": 1, "action_flow_integrator": "euler", "guidance": "none"}
+    ]
+  },
+  "output_root": "outputs/round5/phase1_epoch_curve_seed3072_legacy",
+  "report_output": "docs/report/round5/round5_phase1_epoch_curve_report.md",
+  "gpu_policy": "prefer GPU0-3; every worker explicitly binds one physical GPU and retains at least 3500 MiB free"
+}
