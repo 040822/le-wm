@@ -354,6 +354,8 @@ def validate_result_payload_for_curve(
     if str(payload.get("checkpoint")) != str(checkpoint.resolve()):
         raise ValueError(f"checkpoint path mismatch in {path}")
     recorded_hash = payload.get("checkpoint_sha256")
+    if payload.get("epoch_curve_source") == "evaluated" and recorded_hash is None:
+        raise ValueError(f"evaluated result is missing checkpoint_sha256: {path}")
     if recorded_hash is not None and str(recorded_hash) != str(checkpoint_sha256):
         raise ValueError(f"checkpoint hash mismatch in result: {path}")
     if payload.get("cohort_id") != manifest.cohort_id:

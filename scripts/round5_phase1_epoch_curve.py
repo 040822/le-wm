@@ -24,10 +24,7 @@ if str(ROOT) not in sys.path:
 # evaluation process.  This does not change the frozen evaluation protocol.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-from source.common.checkpoint import load_policy_or_model
-from source.common.eval import EvaluationIdentity, compose_eval_config
 from source.common.round3_phase1 import CohortManifest
-from source.common.round4_eval import run_round4_evaluation, validate_gpu_visibility
 from source.common.round5_phase1_epoch_curve import (
     CURVE_EPOCHS,
     CURVE_NEW_EPOCHS,
@@ -128,6 +125,8 @@ def _configure_device(device: str, gpu: str | None, minimum_free_mib: int) -> No
     if str(device).startswith("cuda"):
         if gpu is None:
             raise ValueError("CUDA execution requires --gpu")
+        from source.common.round4_eval import validate_gpu_visibility
+
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
         validate_gpu_visibility(device)
         _gpu_preflight(gpu, minimum_free_mib)
@@ -147,6 +146,8 @@ def _load_manifests(config: Mapping[str, Any]) -> dict[str, CohortManifest]:
 
 
 def _compose(task: str, manifest: CohortManifest, device: str):
+    from source.common.eval import compose_eval_config
+
     cfg = compose_eval_config(
         task,
         overrides=[
@@ -385,6 +386,9 @@ def _run_job(
         )
         return existing
     _ensure_target_is_safe(target)
+    from source.common.eval import EvaluationIdentity
+    from source.common.round4_eval import run_round4_evaluation
+
     cfg = _compose(task, manifest, device)
     mode = str(condition["mode"])
     identity = EvaluationIdentity(
@@ -473,6 +477,8 @@ def _select_jobs(
 
 
 def run_worker(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+    from source.common.checkpoint import load_policy_or_model
+
     task = str(args.task)
     output_root = _resolve(args.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
