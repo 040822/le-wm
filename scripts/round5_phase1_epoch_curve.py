@@ -476,6 +476,15 @@ def run_worker(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     task = str(args.task)
     output_root = _resolve(args.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
+    dump_json_atomic(
+        output_root / "job_manifest.json",
+        {
+            "schema_version": CURVE_SCHEMA_VERSION,
+            "jobs": job_specs(config),
+            "new_jobs": sum(int(job["epoch"]) in CURVE_NEW_EPOCHS for job in job_specs(config)),
+            "epoch10_reuse_points": sum(int(job["epoch"]) == 10 for job in job_specs(config)),
+        },
+    )
     _configure_device(args.device, args.gpu, int(args.min_free_mib))
     manifests = _load_manifests(config)
     checkpoints = checkpoint_paths(config, root=ROOT)
