@@ -151,6 +151,45 @@ def patch_phase3_environments() -> None:
     from stable_worldmodel.envs.dmcontrol.finger import FingerDMControlWrapper
     from stable_worldmodel.envs.dmcontrol.humanoid import HumanoidDMControlWrapper
     from stable_worldmodel.envs.ogbench.scene_env import SceneEnv
+    from stable_worldmodel.world import world as world_module
+
+    # The installed stable-worldmodel extractor ignores scalar string columns.
+    # Scene stores ``privileged_target_task`` as one string per episode, so
+    # restore that field into the goal state before applying the Phase 3 goal
+    # callable.  Numeric columns continue through the upstream extractor.
+    if not getattr(world_module, "_phase3_string_goal_patched", False):
+        original_extract_init_goal = world_module._extract_init_goal
+
+        def extract_init_goal_with_scene_task(
+            dataset, episodes_idx, start_steps, goal_offset
+        ):
+            init_state, goal_state, dataset_videos = original_extract_init_goal(
+                dataset, episodes_idx, start_steps, goal_offset
+            )
+            if (
+                "privileged_target_task" in dataset.column_names
+                and "goal_privileged_target_task" not in goal_state
+            ):
+                chunks = dataset.load_chunk(
+                    np.asarray(episodes_idx),
+                    np.asarray(start_steps),
+                    np.asarray(start_steps) + int(goal_offset) + 1,
+                )
+                values = []
+                for chunk in chunks:
+                    value = chunk["privileged_target_task"]
+                    if isinstance(value, (bytes, bytearray)):
+                        value = value.decode("utf-8")
+                    elif not isinstance(value, str):
+                        value = np.asarray(value).reshape(-1)[0].item()
+                    values.append(value)
+                task_values = np.asarray(values, dtype=object)
+                init_state["privileged_target_task"] = task_values
+                goal_state["goal_privileged_target_task"] = task_values.copy()
+            return init_state, goal_state, dataset_videos
+
+        world_module._extract_init_goal = extract_init_goal_with_scene_task
+        world_module._phase3_string_goal_patched = True
 
     if not getattr(SceneEnv, "_phase3_patched", False):
         original_set_state = SceneEnv.set_state

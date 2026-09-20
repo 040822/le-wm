@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import replace
 import hashlib
 import json
 import math
@@ -52,7 +53,10 @@ def _sha256(path: Path) -> str:
 
 
 def _dataset_keys(task: str) -> list[str]:
-    common = ["pixels", "action", "qpos", "qvel"]
+    # Evaluation validation needs the episode/step columns in addition to the
+    # model inputs; the frozen cohort uses these same identifiers to verify
+    # every sampled start/goal pair.
+    common = ["ep_idx", "step_idx", "pixels", "action", "qpos", "qvel"]
     if task == "scene":
         return common + [
             "button_states",
@@ -93,14 +97,14 @@ def _ensure_manifest(task: str, output_root: Path = OUTPUT_ROOT) -> CohortManife
     return manifest
 
 
-def _compose(task: str):
+def _compose(task: str, *, num_eval: int = NUM_EVAL, save_video: bool = False):
     return compose_eval_config(
         task,
         overrides=[
-            f"eval.num_eval={NUM_EVAL}",
+            f"eval.num_eval={int(num_eval)}",
             f"eval.goal_offset_steps={GOAL_OFFSET}",
             f"eval.eval_budget={EVAL_BUDGET}",
-            "output.save_video=false",
+            f"output.save_video={'true' if save_video else 'false'}",
             "solver.num_samples=300",
             "solver.topk=30",
             "solver.n_steps=30",
@@ -130,6 +134,7 @@ def _gpu_preflight(gpu: str) -> dict[str, Any]:
         ],
         cwd=ROOT,
         env=env,
+        stdin=subprocess.DEVNULL,
         check=True,
         capture_output=True,
         text=True,
@@ -203,6 +208,33 @@ def fast_conditions(task: str) -> list[dict[str, Any]]:
 
 def _condition_dir(output_root: Path, task: str, spec: Mapping[str, Any]) -> Path:
     return output_root / "fastlewam" / task / _condition_name(spec)
+
+
+def _video_manifest(manifest: CohortManifest) -> CohortManifest:
+    """Make a one-entry view of the frozen cohort for representative videos."""
+    entry = manifest.entries[0]
+    return replace(
+        manifest,
+        cohort_id=f"{manifest.cohort_id}_video_0",
+        entries=(entry,),
+        episode_split={"selected": (entry.episode_id,)},
+        candidate_counts=(1,),
+        selected_counts=(1,),
+        sampling_rule={
+            **dict(manifest.sampling_rule),
+            "video_source_cohort_sha256": manifest.computed_sha256,
+            "video_entry_index": 0,
+        },
+        diagnostics={
+            **dict(manifest.diagnostics),
+            "video_source_cohort_sha256": manifest.computed_sha256,
+        },
+        cohort_sha256=None,
+    )
+
+
+def _video_dir(output_root: Path, method: str, task: str, condition: str) -> Path:
+    return output_root / "videos" / method / task / condition
 
 
 def _result_complete(path: Path) -> bool:
@@ -332,6 +364,103 @@ def command_eval_fast(args: argparse.Namespace) -> None:
         )
         (target / "result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"status": "ok", "task": task, "condition": _condition_name(spec), "success_rate": result["success_rate"]}, sort_keys=True), flush=True)
+
+
+def command_eval_video(args: argparse.Namespace) -> None:
+    """Generate one representative video while preserving the 50-episode evals."""
+    task = args.task
+    method = args.method
+    condition = args.condition
+    if method == "fastlewam" and condition not in {"p1_step_1", "p3_step_1"}:
+        raise ValueError("FastLeWAM video condition must be p1_step_1 or p3_step_1")
+    if method != "fastlewam" and condition != "standard":
+        raise ValueError("LeWM and LeFlow video condition must be standard")
+
+    output_root = Path(args.output_root).resolve()
+    source_manifest = _ensure_manifest(task, output_root)
+    source_hash = source_manifest.computed_sha256
+    manifest = _video_manifest(source_manifest)
+    target = _video_dir(output_root, method, task, condition)
+    video_path = target / "videos" / "env_0.mp4"
+    result_path = target / "result.json"
+    if _result_complete(target) and video_path.is_file():
+        print(json.dumps({"status": "reused", "path": str(video_path)}, sort_keys=True), flush=True)
+        return
+    if target.exists() and any(target.iterdir()):
+        raise FileExistsError(f"refusing to overwrite partial video artifact: {target}")
+
+    patch_phase3_environments()
+    _configure_gpu(args.gpu, args.device)
+    cfg = _compose(task, num_eval=1, save_video=True)
+    dataset = _load_dataset(task)
+    checkpoint = Path(args.checkpoint).resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(checkpoint)
+    policy_or_model, resolved = load_policy_or_model(str(checkpoint))
+
+    if method == "fastlewam":
+        mode = "P1" if condition == "p1_step_1" else "P3"
+        result = run_round4_evaluation(
+            cfg,
+            task=task,
+            policy_or_model=policy_or_model,
+            mode=mode,
+            identity={
+                "entrypoint": "round5_phase3_video",
+                "policy_kind": "fast_lewam",
+                "checkpoint": str(resolved or checkpoint),
+                "epoch": 10,
+                "stage": mode,
+                "guidance_mode": "none",
+            },
+            manifest=manifest,
+            output_dir=target,
+            dataset=dataset,
+            device=args.device,
+            trace=False,
+            candidate_count=64,
+            flow_steps=16,
+            action_flow_steps=1 if mode == "P3" else None,
+            action_flow_integrator="euler",
+            cem_protocol=p2_protocol(task) if mode == "P1" else "not_applicable",
+            action_bound_mode=None,
+            guidance_mode="none",
+            proposal_chunk_size=512,
+            allowed_protocol_variants=("legacy",),
+        )
+    else:
+        identity = EvaluationIdentity(
+            entrypoint="round5_phase3_video",
+            policy_kind=method,
+            checkpoint=str(resolved or checkpoint),
+            epoch=10,
+            stage=None,
+        )
+        session = DatasetEvaluationSession(
+            cfg,
+            task=task,
+            dataset=dataset,
+            cohort=manifest.to_evaluation_cohort(),
+        )
+        result = session.evaluate(
+            policy_or_model,
+            identity=identity,
+            output_dir=target,
+            device=args.device,
+        )
+
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    payload["phase3_video"] = {
+        "method": method,
+        "task": task,
+        "condition": condition,
+        "source_cohort_sha256": source_hash,
+        "source_cohort_id": source_manifest.cohort_id,
+        "source_entry_index": 0,
+        "video": str(video_path.relative_to(target)),
+    }
+    result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"status": "ok", "task": task, "method": method, "condition": condition, "video": str(video_path)}, sort_keys=True), flush=True)
 
 
 def _baseline_dir(output_root: Path, method: str, task: str) -> Path:
@@ -612,6 +741,14 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--gpu", type=_gpu)
     evaluate.add_argument("--condition-index", type=int, action="append")
     evaluate.set_defaults(function=command_eval_fast)
+    video = sub.add_parser("eval-video")
+    video.add_argument("task", choices=PHASE3_TASKS)
+    video.add_argument("method", choices=("fastlewam", "lewm", "leflow"))
+    video.add_argument("--condition", required=True, choices=("p1_step_1", "p3_step_1", "standard"))
+    video.add_argument("--checkpoint", required=True)
+    video.add_argument("--device", default="cuda")
+    video.add_argument("--gpu", type=_gpu)
+    video.set_defaults(function=command_eval_video)
     baseline = sub.add_parser("eval-baseline")
     baseline.add_argument("task", choices=PHASE3_TASKS)
     baseline.add_argument("method", choices=("lewm", "leflow"))
