@@ -110,8 +110,12 @@
   - 验收条件：
       - 三个训练任务均产生 epoch 10 checkpoint，配置和 seed 可追溯。
       - 183 个 FastLeWAM 条件和 6 个基线条件全部完成，每项正好 50 episodes。
-      - 所有方法的 cohort hash 完全一致，无 NaN 成功指标或遗漏 episode。
-      - DMC 成功率来自环境 termination，Scene 主结果采用论文 all-component 判据。
+  - 所有方法的 cohort hash 完全一致，无 NaN 成功指标或遗漏 episode。
+  - DMC 成功率来自环境 termination，Scene 主结果采用论文 all-component 判据。
+
+  - 额外生成可视化产物：每个任务从冻结 cohort 的第一个 start–goal 对生成 FastLeWAM
+    P1（invariant，标记 step 1）和 P3/flow step 1 各一段视频；LeWM 与 LeFlow 各生成一段标准
+    条件视频。视频放在 `outputs/round5/phase3/videos/`，不改变 50-episode 结果统计。
 
   - 将本方案替换 docs/plan/round5_experiment_plan.md 中的 Phase 3 占位；执行产物统一写入
     outputs/round5/phase3，最终报告写入 docs/report/round5/

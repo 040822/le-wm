@@ -720,7 +720,7 @@ def _render_report(analysis: Mapping[str, Any], report_path: Path, output_root: 
     lines.extend(["", "## 条件矩阵验收", "", f"- 结果数：{analysis['result_count']} / {analysis['expected_result_count']}。", "- 每个结果：50 episodes；成功率来自 runtime termination。", "- 三个任务共享各自固定 cohort；cohort hash 见 `analysis/analysis.json`。", "- DMC 的 NaN `success` 列未被用作指标。", "", "## Scene target_task 分组", ""])
     for group in analysis["scene_target_task_groups"]:
         lines.append(f"- `{group['method']}` / `{group['condition']}`：" + ", ".join(f"{name}={value['successes']}/{value['episodes']} ({value['success_rate_percent']:.1f}%)" for name, value in sorted(group["groups"].items())))
-    lines.extend(["", "## 产物", "", f"- 输出根目录：`{output_root}`", f"- 条件明细：`{output_root / 'analysis' / 'conditions.csv'}`", f"- 分析 JSON：`{output_root / 'analysis' / 'analysis.json'}`", f"- 本报告：`{report_path}`", ""])
+    lines.extend(["", "## 产物", "", f"- 输出根目录：`{output_root}`", f"- 条件明细：`{output_root / 'analysis' / 'conditions.csv'}`", f"- 分析 JSON：`{output_root / 'analysis' / 'analysis.json'}`", f"- 代表视频：`{output_root / 'videos'}`（每任务 FastLeWAM P1/P3 step 1、LeWM、LeFlow 各一段）", f"- 本报告：`{report_path}`", ""])
     return "\n".join(lines)
 
 
