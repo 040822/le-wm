@@ -80,6 +80,7 @@ start() {
 status() {
   echo "== running epoch-curve workers =="
   pgrep -af "round5_phase1_epoch_curve.py worker" || echo "(none)"
+  echo "active atomic claims: $(find "$OUTPUT_ROOT/claims" -name '*.claim' 2>/dev/null | wc -l)"
   echo
   echo "== result counts =="
   python - "$OUTPUT_ROOT" "$CONFIG" <<'PY'
