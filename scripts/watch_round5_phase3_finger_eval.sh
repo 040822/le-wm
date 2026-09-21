@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 OUTPUT_ROOT="$ROOT/outputs/round5/phase3"
 RAW_RUN="$ROOT/outputs/20260920_120937_078324_lewm_data_datasets_dmcontrol_finger_turn_hard_2853076"
+RESUME_RUN="$ROOT/outputs/round5_phase3_lewm_finger_resume_epoch9"
 ARCHIVE="$OUTPUT_ROOT/training/lewm/finger"
 LEWM_CHECKPOINT="$ARCHIVE/checkpoints/lewm_weights_epoch_10.pt"
 LOG_ROOT="$OUTPUT_ROOT/logs"
@@ -29,17 +30,38 @@ if [[ -f "$DONE_MARKER" ]]; then
   exit 0
 fi
 
-while [[ ! -f "$RAW_RUN/checkpoints/lewm_weights_epoch_10.pt" ]]; do
+SOURCE_RUN=""
+while :; do
+  if [[ -f "$RAW_RUN/checkpoints/lewm_weights_epoch_10.pt" ]]; then
+    SOURCE_RUN="$RAW_RUN"
+    break
+  fi
+  if [[ -f "$RESUME_RUN/checkpoints/lewm_weights_epoch_10.pt" ]]; then
+    SOURCE_RUN="$RESUME_RUN"
+    break
+  fi
   echo "[$(date -Iseconds)] waiting for Finger LeWM epoch10 checkpoint"
   sleep "$POLL_SECONDS"
 done
 
-echo "[$(date -Iseconds)] epoch10 checkpoint found"
+echo "[$(date -Iseconds)] epoch10 checkpoint found in $SOURCE_RUN"
 
 # The raw run is written outside the stable Phase 3 layout.  Archive it only
 # after epoch10 exists, then evaluate the archived checkpoint for traceability.
 mkdir -p "$ARCHIVE"
-cp -a "$RAW_RUN/." "$ARCHIVE/"
+cp -a "$SOURCE_RUN/." "$ARCHIVE/"
+# Keep the original run directory discoverable by the existing Phase 3
+# launchers as well.  The resume run is explicitly recorded in the archive's
+# metadata and does not overwrite earlier epoch files.
+if [[ "$SOURCE_RUN" != "$RAW_RUN" ]]; then
+  cp -f "$SOURCE_RUN/checkpoints/lewm_weights_epoch_10.pt" "$RAW_RUN/checkpoints/"
+  for artifact in lewm_policy.ckpt lewm_object.ckpt; do
+    if [[ -f "$SOURCE_RUN/checkpoints/$artifact" ]]; then
+      cp -f "$SOURCE_RUN/checkpoints/$artifact" "$RAW_RUN/checkpoints/$artifact"
+    fi
+  done
+  printf '{"source_run":"%s","initial_epoch":9,"optimizer_state_restored":false}\n' "$SOURCE_RUN" >"$ARCHIVE/resume_metadata.json"
+fi
 test -f "$LEWM_CHECKPOINT"
 echo "[$(date -Iseconds)] archived checkpoint to $LEWM_CHECKPOINT"
 
