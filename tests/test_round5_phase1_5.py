@@ -217,15 +217,16 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
 
     def test_selection_reports_oracle_and_selection_regret(self):
         records = [
-            {"state_id": "a", "predicted_cost": 0.2, "true_distance": 2.0, "physical_state": [2, 0], "goal_state": [0, 0]},
-            {"state_id": "a", "predicted_cost": 0.1, "true_distance": 1.0, "physical_state": [1, 0], "goal_state": [0, 0]},
-            {"state_id": "b", "predicted_cost": 0.1, "true_distance": 3.0, "physical_state": [3, 0], "goal_state": [0, 0]},
-            {"state_id": "b", "predicted_cost": 0.2, "true_distance": 1.0, "physical_state": [1, 0], "goal_state": [0, 0]},
+            {"state_id": "a", "predicted_cost": 0.2, "true_distance": 2.0, "physical_state": [2, 0], "goal_state": [0, 0], "milestones": {"25": {"future_latent_cost": 2.0}}},
+            {"state_id": "a", "predicted_cost": 0.1, "true_distance": 1.0, "physical_state": [1, 0], "goal_state": [0, 0], "milestones": {"25": {"future_latent_cost": 1.0}}},
+            {"state_id": "b", "predicted_cost": 0.1, "true_distance": 3.0, "physical_state": [3, 0], "goal_state": [0, 0], "milestones": {"25": {"future_latent_cost": 3.0}}},
+            {"state_id": "b", "predicted_cost": 0.2, "true_distance": 1.0, "physical_state": [1, 0], "goal_state": [0, 0], "milestones": {"25": {"future_latent_cost": 1.0}}},
         ]
         result = candidate_selection_metrics(records, task="tworoom", random_draws=8)
         self.assertEqual(result["states"], 2)
         self.assertAlmostEqual(result["selection_regret"], 1.0)
         self.assertEqual(result["predicted_true_distance_correlation"], 0.0)
+        self.assertAlmostEqual(result["selected_latent_cost"], 2.0)
 
     def test_candidate_pool_requires_complete_state_by_flow_grid(self):
         records = []

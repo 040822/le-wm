@@ -1182,6 +1182,22 @@ def candidate_selection_metrics(
         costs = np.asarray([float(record["predicted_cost"]) for record in candidates], dtype=np.float64)
         if not np.all(np.isfinite(distances)) or not np.all(np.isfinite(costs)):
             raise ValueError("candidate distances and predicted costs must be finite")
+        latent_costs: np.ndarray | None = None
+        candidate_latent_values = []
+        for record in candidates:
+            value = (
+                record.get("milestones", {})
+                .get("25", {})
+                .get("future_latent_cost")
+            )
+            if value is None:
+                candidate_latent_values = []
+                break
+            candidate_latent_values.append(float(value))
+        if candidate_latent_values:
+            latent_costs = np.asarray(candidate_latent_values, dtype=np.float64)
+            if not np.all(np.isfinite(latent_costs)):
+                raise ValueError("candidate latent costs must be finite")
         selected_index = int(np.argmin(costs))
         oracle_index = int(np.argmin(distances))
         random_values = np.asarray(
@@ -1207,6 +1223,8 @@ def candidate_selection_metrics(
                 "random_distance": float(np.mean(random_values)),
                 "predicted_true_distance_correlation": safe_correlation(costs, distances),
                 "selected_index": selected_index,
+                "oracle_latent_cost": None if latent_costs is None else float(np.min(latent_costs)),
+                "selected_latent_cost": None if latent_costs is None else float(latent_costs[selected_index]),
             }
         )
     def mean(field: str) -> float | None:
@@ -1227,6 +1245,8 @@ def candidate_selection_metrics(
         "oracle_best_physical_distance": mean("oracle_distance"),
         "selected_physical_distance": mean("selected_distance"),
         "selection_regret": mean("selection_regret"),
+        "oracle_best_latent_cost": mean("oracle_latent_cost"),
+        "selected_latent_cost": mean("selected_latent_cost"),
         "predicted_true_distance_correlation": (
             None if not correlations else float(np.mean(correlations))
         ),
@@ -1337,6 +1357,15 @@ def candidate_pool_metrics(
             seed=int(seed) + offset,
         )
         state_rows = metrics["state_rows"]
+        bootstrap_fields = [
+            "oracle_success",
+            "selected_success",
+            "selection_regret",
+            "oracle_distance",
+            "selected_distance",
+        ]
+        if all(row.get("oracle_latent_cost") is not None for row in state_rows):
+            bootstrap_fields.extend(("oracle_latent_cost", "selected_latent_cost"))
         metrics["bootstrap"] = {
             field: cluster_bootstrap(
                 state_rows,
@@ -1344,9 +1373,7 @@ def candidate_pool_metrics(
                 samples=bootstrap_samples,
                 seed=int(seed) + offset * 101 + index,
             )
-            for index, field in enumerate(
-                ("oracle_success", "selected_success", "selection_regret", "oracle_distance", "selected_distance")
-            )
+            for index, field in enumerate(bootstrap_fields)
         }
         by_flow[str(flow)] = metrics
     return {
@@ -1471,7 +1498,7 @@ def paired_guidance_metrics(
                 "random_action_rms_displacement": values["random_action_rms_displacement"],
             }
         )
-    return {
+    result = {
         "schema_version": "round5_phase1_5_paired_guidance_metrics_v1",
         "records": len(rows),
         "states": len({canonical_json(row["state_id"]) for row in rows}),
@@ -1495,6 +1522,45 @@ def paired_guidance_metrics(
         },
         "state_rows": rows,
     }
+    latent_records = [
+        record
+        for record in records
+        if all(
+            field in record
+            for field in (
+                "guided_true_latent_cost_before",
+                "guided_true_latent_cost_after",
+                "random_true_latent_cost_before",
+                "random_true_latent_cost_after",
+            )
+        )
+    ]
+    if latent_records:
+        guided = np.asarray(
+            [
+                float(record["guided_true_latent_cost_before"])
+                - float(record["guided_true_latent_cost_after"])
+                for record in latent_records
+            ],
+            dtype=np.float64,
+        )
+        random = np.asarray(
+            [
+                float(record["random_true_latent_cost_before"])
+                - float(record["random_true_latent_cost_after"])
+                for record in latent_records
+            ],
+            dtype=np.float64,
+        )
+        result.update(
+            {
+                "true_latent_records": len(latent_records),
+                "guided_true_latent_improvement_mean": float(np.mean(guided)),
+                "random_true_latent_improvement_mean": float(np.mean(random)),
+                "paired_true_latent_advantage_mean": float(np.mean(guided - random)),
+            }
+        )
+    return result
 
 
 def cluster_bootstrap(

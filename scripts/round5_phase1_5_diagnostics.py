@@ -402,6 +402,29 @@ def _extract_pixel_batch(value: Any, expected_count: int) -> Any | None:
     return value
 
 
+def _encode_goal_latents(
+    dataset: Any,
+    manifest: CohortManifest,
+    transform: Any,
+    model: Any,
+    device: str,
+) -> np.ndarray:
+    """Encode the fixed dataset goals used as true image-latent references."""
+    if any(entry.goal_row_index is None for entry in manifest.entries):
+        raise ValueError("candidate diagnostics require a goal row for every cohort entry")
+    rows = [int(entry.goal_row_index) for entry in manifest.entries]
+    if any(row < 0 for row in rows):
+        raise ValueError("candidate diagnostics require non-negative goal rows")
+    raw = dataset.get_row_data(rows)
+    pixels = np.asarray(raw["pixels"])
+    if len(pixels) != len(rows):
+        raise ValueError("goal pixel batch does not match the cohort")
+    image_batch = torch.stack([transform(pixel) for pixel in pixels]).to(device)
+    model = getattr(model, "model", model).to(device).eval()
+    with torch.inference_mode():
+        return model.encode_pixels(image_batch).float().detach().cpu().numpy()
+
+
 def _run_fixed_candidate(
     *,
     cfg: Any,
@@ -415,6 +438,7 @@ def _run_fixed_candidate(
     output_dir: Path,
     dataset: Any | None = None,
     branch_state: dict[str, Any] | None = None,
+    goal_latents: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     """Execute one captured candidate for all 50 states and retain true outcomes."""
     session = DatasetEvaluationSession(
@@ -446,7 +470,12 @@ def _run_fixed_candidate(
     original_step = envs.step
     step_counter = {"value": 0}
     future_latents: dict[int, dict[str, list[float]]] = {index: {} for index in range(len(manifest.entries))}
+    future_latent_costs: dict[int, dict[str, float]] = {index: {} for index in range(len(manifest.entries))}
     model = getattr(model, "model", model).to(device).eval()
+    if goal_latents is not None:
+        goal_latents = np.asarray(goal_latents, dtype=np.float64)
+        if goal_latents.ndim != 2 or goal_latents.shape[0] != len(manifest.entries):
+            raise ValueError("goal_latents do not match the diagnostic cohort")
     replay_state = branch_state if branch_state is not None else {}
 
     def replay_initial_state() -> None:
@@ -492,6 +521,12 @@ def _run_fixed_candidate(
                     encoded = model.encode_pixels(image_batch).float().detach().cpu().numpy()
                 for index, latent in enumerate(encoded):
                     future_latents[index][str(step_counter["value"])] = latent.tolist()
+                    if goal_latents is not None:
+                        future_latent_costs[index][str(step_counter["value"])] = float(
+                            np.linalg.norm(
+                                np.asarray(latent, dtype=np.float64) - goal_latents[index]
+                            )
+                        )
         infos = result[-1] if isinstance(result, tuple) and result else result
         collector.record_step(actions, infos, raw_env_step=step_counter["value"])
         return result
@@ -516,6 +551,7 @@ def _run_fixed_candidate(
     episodes = collector.finalize(successes.tolist(), eval_budget=int(cfg.eval.eval_budget))
     for index, episode in enumerate(episodes):
         episode["future_latents"] = future_latents[index]
+        episode["future_latent_costs"] = future_latent_costs[index]
     return episodes
 
 
@@ -555,10 +591,18 @@ def _attach_candidate_outcomes(
                 "future_latent": episode.get("future_latents", {}).get(
                     str(raw_step)
                 ),
+                "future_latent_cost": episode.get("future_latent_costs", {}).get(
+                    str(raw_step)
+                ),
             }
             if milestone["future_latent"] is None:
                 raise RuntimeError(
                     "candidate branch did not expose a future pixel encoding at "
+                    f"raw_env_step={milestone['raw_env_step']}"
+                )
+            if episode.get("future_latent_costs") and milestone["future_latent_cost"] is None:
+                raise RuntimeError(
+                    "candidate branch did not expose a true image-latent cost at "
                     f"raw_env_step={milestone['raw_env_step']}"
                 )
             milestones[str(target)] = milestone
@@ -856,6 +900,13 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         branch_session = DatasetEvaluationSession(
             cfg, task=args.task, cohort=manifest.to_evaluation_cohort()
         )
+        goal_latents = _encode_goal_latents(
+            branch_session.dataset,
+            manifest,
+            branch_session.transform["pixels"],
+            model,
+            args.device,
+        )
         branch_replay: dict[str, Any] = {}
         branches = {
             kind: _run_fixed_candidate(
@@ -870,6 +921,7 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                 output_dir=output_root / f"{args.guidance}_s{int(flow_step)}" / kind,
                 dataset=branch_session.dataset,
                 branch_state=branch_replay,
+                goal_latents=goal_latents,
             )
             for kind in ("baseline", "guided", "random")
         }
@@ -896,6 +948,18 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                 or random["true_distance"] is None
             ):
                 raise RuntimeError(f"guidance branch missed a physical outcome for slot {slot}")
+            def latent_cost(outcome: Mapping[str, Any]) -> float:
+                milestone = outcome.get("milestones", {}).get("25", {})
+                value = milestone.get("future_latent_cost")
+                if value is None:
+                    raise RuntimeError(
+                        f"guidance branch missed a true image-latent cost for slot {slot}"
+                    )
+                return float(value)
+
+            baseline_latent = latent_cost(base)
+            guided_latent = latent_cost(guided)
+            random_latent = latent_cost(random)
             completed.append(
                 {
                     **row,
@@ -903,6 +967,11 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                     "guided_true_cost_after": float(guided["true_distance"]),
                     "random_true_cost_before": float(base["true_distance"]),
                     "random_true_cost_after": float(random["true_distance"]),
+                    "guided_true_latent_cost_before": baseline_latent,
+                    "guided_true_latent_cost_after": guided_latent,
+                    "random_true_latent_cost_before": baseline_latent,
+                    "random_true_latent_cost_after": random_latent,
+                    "true_latent_improvement": baseline_latent - guided_latent,
                     "outcome_status": "completed",
                 }
             )
@@ -1480,6 +1549,13 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     )
     session = DatasetEvaluationSession(cfg, task=args.task, cohort=manifest.to_evaluation_cohort())
     process = session.process
+    goal_latents = _encode_goal_latents(
+        session.dataset,
+        manifest,
+        session.transform["pixels"],
+        model,
+        args.device,
+    )
     completed_files: list[Path] = []
     branch_limit = proposal_count if args.limit_candidates is None else min(proposal_count, int(args.limit_candidates))
     if branch_limit <= 0:
@@ -1515,6 +1591,7 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                     output_dir=branch_path.parent / f"candidate_{candidate_index:04d}",
                     dataset=session.dataset,
                     branch_state=branch_replay,
+                    goal_latents=goal_latents,
                 )
                 outcomes = _attach_candidate_outcomes(rows, episodes, task=args.task)
                 _write_jsonl(branch_path, outcomes)
@@ -1579,6 +1656,7 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                 output_dir=control_path.parent / control_path.stem,
                 dataset=session.dataset,
                 branch_state=branch_replay,
+                goal_latents=goal_latents,
             )
             _write_jsonl(control_path, _attach_candidate_outcomes(rows, episodes, task=args.task))
             control_files.append(control_path)
