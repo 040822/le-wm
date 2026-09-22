@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+import copy
 import hashlib
 import json
 import os
@@ -1070,6 +1071,22 @@ def _collect_features(
     return np.concatenate(features, axis=0), np.concatenate(targets, axis=0)
 
 
+def _random_encoder(model: Any, *, seed: int, device: torch.device) -> Any:
+    """Make a deterministic, frozen random-weight encoder baseline."""
+    baseline = copy.deepcopy(model).to(device)
+    cuda_devices = []
+    if device.type == "cuda" and device.index is not None:
+        cuda_devices = [int(device.index)]
+    with torch.random.fork_rng(devices=cuda_devices):
+        torch.manual_seed(int(seed))
+        for module in baseline.modules():
+            reset = getattr(module, "reset_parameters", None)
+            if callable(reset):
+                reset()
+    baseline.requires_grad_(False)
+    return baseline.eval()
+
+
 def _fit_mlp(
     features: np.ndarray,
     targets: np.ndarray,
@@ -1212,6 +1229,24 @@ def probe(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
             "target_schema": target_schema,
             "ridge": _jsonable_metrics(ridge),
         }
+        random_model = _random_encoder(model, seed=int(args.seed), device=device)
+        random_features, _ = _collect_features(
+            dataset,
+            random_model,
+            transform,
+            rows=rows,
+            target_column=_target_column(task),
+            device=device,
+            batch_size=int(args.batch_size),
+        )
+        random_ridge = fit_ridge_probe(
+            random_features,
+            targets,
+            trajectory_ids,
+            split=split,
+            seed=int(args.seed),
+        )
+        result["random_encoder_ridge"] = _jsonable_metrics(random_ridge)
         if args.candidate_records is not None:
             candidate_path = _candidate_records_path(args.candidate_records, task)
             candidate_records = _read_records(candidate_path)
