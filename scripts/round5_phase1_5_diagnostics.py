@@ -56,6 +56,8 @@ from source.common.round5_phase1_5 import (
     PHASE15_TASKS,
     atomic_write_json,
     candidate_pool_metrics,
+    control_action_metrics,
+    make_control_actions,
     guidance_effect_metrics,
     fit_ridge_probe,
     make_probe_split,
@@ -385,11 +387,13 @@ def _run_fixed_candidate(
     transform: Any,
     device: str,
     output_dir: Path,
+    dataset: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Execute one captured candidate for all 50 states and retain true outcomes."""
     session = DatasetEvaluationSession(
         cfg,
         task=task,
+        dataset=dataset,
         cohort=manifest.to_evaluation_cohort(),
     )
     policy = FixedCandidatePolicy(
@@ -523,6 +527,96 @@ def _attach_candidate_outcomes(
             }
         )
     return result
+
+
+def _dataset_anchor_actions(
+    dataset: Any,
+    manifest: CohortManifest,
+    process: Mapping[str, Any],
+    *,
+    primitive_steps: int = 25,
+) -> np.ndarray:
+    """Read and normalize the data-trajectory anchor for every cohort state."""
+    processor = process.get("action")
+    if processor is None or not hasattr(processor, "transform"):
+        raise ValueError("control pool requires a fitted action processor")
+    rows: list[np.ndarray] = []
+    episode_column = "episode_idx" if "episode_idx" in dataset.column_names else "ep_idx"
+    episode_values = np.asarray(dataset.get_col_data(episode_column))
+    for entry in manifest.entries:
+        indices = np.arange(
+            int(entry.row_index), int(entry.row_index) + int(primitive_steps), dtype=np.int64
+        )
+        if int(indices[-1]) >= len(episode_values):
+            raise ValueError(f"data anchor runs past dataset end for slot {entry.row_index}")
+        if not np.all(episode_values[indices] == entry.episode_id):
+            raise ValueError(
+                "data anchor crosses an episode boundary for "
+                f"episode={entry.episode_id}, row={entry.row_index}"
+            )
+        raw = np.asarray(dataset.get_row_data(indices)["action"], dtype=np.float64)
+        if raw.ndim != 2 or raw.shape[0] != int(primitive_steps):
+            raise ValueError(f"data action rows have unexpected shape {raw.shape}")
+        normalized = np.asarray(processor.transform(raw), dtype=np.float64)
+        rows.append(normalized)
+    return np.stack(rows, axis=0)
+
+
+def _control_pool_actions(
+    *,
+    dataset: Any,
+    manifest: CohortManifest,
+    process: Mapping[str, Any],
+    proposals: Sequence[Mapping[str, Any]],
+    seed: int,
+    action_block: int,
+) -> tuple[np.ndarray, list[dict[str, Any]]]:
+    """Build per-state controls from data, S=1, and S=2 proposal anchors."""
+    data = _dataset_anchor_actions(dataset, manifest, process)
+    by_flow: dict[int, dict[int, Mapping[str, Any]]] = {1: {}, 2: {}}
+    for row in proposals:
+        flow = int(row["flow_steps"])
+        if flow in by_flow and int(row["candidate_index"]) == 0:
+            by_flow[flow][int(row["slot"])] = row
+    missing = {
+        flow: sorted(set(range(len(manifest.entries))) - set(rows))
+        for flow, rows in by_flow.items()
+        if len(rows) != len(manifest.entries)
+    }
+    if missing:
+        raise RuntimeError(f"control pool is missing first proposals: {missing}")
+    anchors: list[np.ndarray] = []
+    for slot in range(len(manifest.entries)):
+        first_s1 = np.asarray(by_flow[1][slot]["action"], dtype=np.float64)
+        first_s2 = np.asarray(by_flow[2][slot]["action"], dtype=np.float64)
+        if first_s1.shape != data[slot].shape or first_s2.shape != data[slot].shape:
+            raise ValueError(
+                "proposal and data anchors have different shapes: "
+                f"data={data[slot].shape}, s1={first_s1.shape}, s2={first_s2.shape}"
+            )
+        anchors.append(np.stack((data[slot], first_s1, first_s2), axis=0))
+    values: list[np.ndarray] = []
+    metadata: list[dict[str, Any]] | None = None
+    for slot_anchors in anchors:
+        physical_zero = np.asarray(
+            process["action"].transform(np.zeros((1, slot_anchors.shape[-1]), dtype=np.float64)),
+            dtype=np.float64,
+        )
+        physical_zero = np.broadcast_to(physical_zero, slot_anchors.shape[1:]).copy()
+        actions, current_metadata = make_control_actions(
+            slot_anchors,
+            seed=int(seed),
+            action_block=int(action_block),
+            physical_zero=physical_zero,
+        )
+        if metadata is None:
+            metadata = current_metadata
+        elif current_metadata != metadata:
+            raise AssertionError("control metadata changed between cohort states")
+        values.append(actions)
+    if metadata is None:
+        raise RuntimeError("control pool did not produce metadata")
+    return np.stack(values, axis=1), metadata
 
 
 def _first_guidance_records(
@@ -1212,8 +1306,15 @@ def summarize(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
             records,
             bootstrap_samples=int(args.bootstrap_samples),
         )
+    if args.control_records is not None:
+        records = _read_records(args.control_records)
+        result["inputs"]["control_records"] = str(_resolve(args.control_records))
+        result["controls"] = control_action_metrics(records)
     if len(result["inputs"]) == 0:
-        raise ValueError("summarize requires --candidate-records or --guidance-records")
+        raise ValueError(
+            "summarize requires --candidate-records, --guidance-records, or "
+            "--control-records"
+        )
     output = _resolve(args.output_root) / "diagnostics" / "summary.json"
     atomic_write_json(output, result)
     print(json.dumps({"summary": str(output), "inputs": result["inputs"]}, ensure_ascii=False, sort_keys=True))
@@ -1291,44 +1392,109 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     branch_limit = proposal_count if args.limit_candidates is None else min(proposal_count, int(args.limit_candidates))
     if branch_limit <= 0:
         raise ValueError("--limit-candidates must be positive")
-    for flow_step in flow_steps:
-        flow_proposals = [row for row in proposals if int(row["flow_steps"]) == int(flow_step)]
-        by_candidate: dict[int, list[dict[str, Any]]] = {}
-        for row in flow_proposals:
-            by_candidate.setdefault(int(row["candidate_index"]), []).append(row)
-        for candidate_index in range(branch_limit):
-            branch_path = task_root / "branches" / f"s{int(flow_step)}" / f"candidate_{candidate_index:04d}.jsonl"
-            if branch_path.is_file():
-                completed_files.append(branch_path)
-                continue
-            rows = sorted(by_candidate.get(candidate_index, []), key=lambda item: int(item["slot"]))
-            if len(rows) != len(manifest.entries):
-                raise RuntimeError(
-                    f"candidate {candidate_index} at S={flow_step} has {len(rows)} states; "
-                    f"expected {len(manifest.entries)}"
+    if not args.controls_only:
+        for flow_step in flow_steps:
+            flow_proposals = [row for row in proposals if int(row["flow_steps"]) == int(flow_step)]
+            by_candidate: dict[int, list[dict[str, Any]]] = {}
+            for row in flow_proposals:
+                by_candidate.setdefault(int(row["candidate_index"]), []).append(row)
+            for candidate_index in range(branch_limit):
+                branch_path = task_root / "branches" / f"s{int(flow_step)}" / f"candidate_{candidate_index:04d}.jsonl"
+                if branch_path.is_file():
+                    completed_files.append(branch_path)
+                    continue
+                rows = sorted(by_candidate.get(candidate_index, []), key=lambda item: int(item["slot"]))
+                if len(rows) != len(manifest.entries):
+                    raise RuntimeError(
+                        f"candidate {candidate_index} at S={flow_step} has {len(rows)} states; "
+                        f"expected {len(manifest.entries)}"
+                    )
+                actions = np.asarray([row["action"] for row in rows], dtype=np.float64)
+                episodes = _run_fixed_candidate(
+                    cfg=cfg,
+                    task=args.task,
+                    manifest=manifest,
+                    normalized_actions=actions,
+                    process=process,
+                    model=model,
+                    transform=session.transform["pixels"],
+                    device=args.device,
+                    output_dir=branch_path.parent / f"candidate_{candidate_index:04d}",
+                    dataset=session.dataset,
                 )
-            actions = np.asarray([row["action"] for row in rows], dtype=np.float64)
-            episodes = _run_fixed_candidate(
-                cfg=cfg,
-                task=args.task,
-                manifest=manifest,
-                normalized_actions=actions,
-                process=process,
-                model=model,
-                transform=session.transform["pixels"],
-                device=args.device,
-                output_dir=branch_path.parent / f"candidate_{candidate_index:04d}",
-            )
-            outcomes = _attach_candidate_outcomes(rows, episodes, task=args.task)
-            _write_jsonl(branch_path, outcomes)
-            completed_files.append(branch_path)
+                outcomes = _attach_candidate_outcomes(rows, episodes, task=args.task)
+                _write_jsonl(branch_path, outcomes)
+                completed_files.append(branch_path)
     aggregate = task_root / "records.jsonl"
     temporary = aggregate.with_name(f".{aggregate.name}.{os.getpid()}.tmp")
     with temporary.open("w", encoding="utf-8") as stream:
         for path in sorted(completed_files):
             stream.write(path.read_text(encoding="utf-8"))
     temporary.replace(aggregate)
-    complete = branch_limit == proposal_count
+
+    if not args.controls_only and not {1, 2}.issubset({int(value) for value in flow_steps}):
+        raise ValueError("control-pool execution requires flow steps 1 and 2")
+    control_files: list[Path] = []
+    control_metadata: list[dict[str, Any]] = []
+    control_aggregate = task_root / "controls.jsonl"
+    if not args.proposal_only:
+        control_actions, control_metadata = _control_pool_actions(
+            dataset=session.dataset,
+            manifest=manifest,
+            process=process,
+            proposals=proposals,
+            seed=int(config.get("diagnostics", {}).get("pool_seed", 2026)),
+            action_block=int(cfg.plan_config.action_block),
+        )
+        control_root = task_root / "controls"
+        for control_index, metadata in enumerate(control_metadata):
+            control_path = control_root / f"control_{control_index:04d}.jsonl"
+            if control_path.is_file():
+                control_files.append(control_path)
+                continue
+            rows = []
+            for slot, action in enumerate(control_actions[control_index]):
+                entry = manifest.entries[slot]
+                rows.append(
+                    {
+                        "task": args.task,
+                        "state_id": _candidate_state_id(entry),
+                        "slot": slot,
+                        "episode_id": entry.episode_id,
+                        "start_step": int(entry.start_step),
+                        "row_index": int(entry.row_index),
+                        "flow_steps": "control",
+                        "candidate_index": None,
+                        "control_index": control_index,
+                        "control_kind": metadata["kind"],
+                        "control_metadata": metadata,
+                        "predicted_cost": None,
+                        "action": np.asarray(action, dtype=np.float64).tolist(),
+                        "outcome_status": "pending",
+                    }
+                )
+            episodes = _run_fixed_candidate(
+                cfg=cfg,
+                task=args.task,
+                manifest=manifest,
+                normalized_actions=np.asarray(control_actions[control_index], dtype=np.float64),
+                process=process,
+                model=model,
+                transform=session.transform["pixels"],
+                device=args.device,
+                output_dir=control_path.parent / control_path.stem,
+                dataset=session.dataset,
+            )
+            _write_jsonl(control_path, _attach_candidate_outcomes(rows, episodes, task=args.task))
+            control_files.append(control_path)
+        control_temp = control_aggregate.with_name(f".{control_aggregate.name}.{os.getpid()}.tmp")
+        with control_temp.open("w", encoding="utf-8") as stream:
+            for path in sorted(control_files):
+                stream.write(path.read_text(encoding="utf-8"))
+        control_temp.replace(control_aggregate)
+    candidate_complete = args.controls_only or branch_limit == proposal_count
+    controls_complete = args.proposal_only or len(control_files) == len(control_metadata) == 240
+    complete = candidate_complete and controls_complete
     atomic_write_json(
         task_root / "manifest.json",
         {
@@ -1340,13 +1506,16 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
             "executed_candidates_per_flow_step": branch_limit,
             "states": len(manifest.entries),
             "records": str(aggregate),
+            "controls_records": None if args.proposal_only else str(control_aggregate),
+            "control_actions": len(control_metadata),
+            "control_status": "completed" if controls_complete else "partial",
             "checkpoint": str(checkpoint.resolve()),
             "checkpoint_sha256": checkpoint_sha256,
             "cohort_id": manifest.cohort_id,
             "cohort_sha256": manifest.computed_sha256,
         },
     )
-    print(json.dumps({"candidate_pool": str(task_root), "records": str(aggregate), "status": "completed" if complete else "partial"}, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"candidate_pool": str(task_root), "records": str(aggregate), "controls": None if args.proposal_only else str(control_aggregate), "status": "completed" if complete else "partial"}, ensure_ascii=False, sort_keys=True))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1369,11 +1538,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--mlp", action="store_true")
     parser.add_argument("--candidate-records")
+    parser.add_argument("--control-records")
     parser.add_argument("--guidance-records")
     parser.add_argument("--flow-steps", type=int, nargs="+")
     parser.add_argument("--candidates-per-flow-step", type=int)
     parser.add_argument("--bootstrap-samples", type=int, default=10_000)
     parser.add_argument("--proposal-only", action="store_true")
+    parser.add_argument("--controls-only", action="store_true")
     parser.add_argument("--limit-candidates", type=int)
     parser.add_argument("--guidance", choices=("post_opt", "guided_flow"), default="post_opt")
     parser.add_argument("--guidance-step-size", type=float, default=0.01)

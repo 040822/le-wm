@@ -27,6 +27,7 @@ from source.common.round5_phase1_5 import (
     normalized_physical_distance,
     candidate_pool_metrics,
     condition_lock,
+    control_action_metrics,
     paired_guidance_metrics,
     phase15_scan_slot,
     primary_condition_specs,
@@ -151,6 +152,31 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         unique, duplicates = deduplicate_actions(first)
         self.assertEqual(len(unique) + len(duplicates), len(first))
         self.assertGreater(len(duplicates), 0)
+
+    def test_control_pool_has_the_planned_240_actions_and_provenance(self):
+        anchors = np.zeros((3, 25, 2), dtype=np.float64)
+        actions, metadata = make_control_actions(anchors, seed=7)
+        self.assertEqual(actions.shape, (240, 25, 2))
+        self.assertEqual(len(metadata), 240)
+        self.assertEqual(sum(item["kind"] == "anchor" for item in metadata), 3)
+        self.assertEqual(sum(item["kind"] == "rms_perturbation" for item in metadata), 144)
+        self.assertEqual(sum(item["kind"] == "block_transform" for item in metadata), 27)
+        self.assertEqual(sum(item["kind"] == "standard_gaussian" for item in metadata), 64)
+        self.assertEqual(sum(item["kind"] == "physical_zero" for item in metadata), 1)
+        self.assertEqual(sum(item["kind"] == "normalized_zero" for item in metadata), 1)
+        self.assertTrue(all("direction" in item for item in metadata if item["kind"] == "rms_perturbation"))
+        self.assertTrue(all("permutation" in item for item in metadata if item["kind"] == "block_transform"))
+
+    def test_control_metrics_keep_zero_action_kinds_separate(self):
+        result = control_action_metrics(
+            [
+                {"control_kind": "physical_zero", "state_id": "a", "true_distance": 1.0, "success": False},
+                {"control_kind": "normalized_zero", "state_id": "a", "true_distance": 2.0, "success": True},
+            ]
+        )
+        self.assertTrue(result["physical_zero_is_separate"])
+        self.assertTrue(result["normalized_zero_is_separate"])
+        self.assertEqual(set(result["kinds"]), {"physical_zero", "normalized_zero"})
 
     def test_controls_keep_physical_and_normalized_zero_distinct(self):
         anchors = np.zeros((1, 5, 2), dtype=np.float64)

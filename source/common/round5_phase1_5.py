@@ -1023,9 +1023,14 @@ def make_control_actions(
     rng = np.random.default_rng(int(seed))
     actions: list[np.ndarray] = []
     metadata: list[dict[str, Any]] = []
-    def add(value: np.ndarray, kind: str, anchor: int | None) -> None:
+    def add(
+        value: np.ndarray,
+        kind: str,
+        anchor: int | None,
+        **details: Any,
+    ) -> None:
         actions.append(np.asarray(value, dtype=np.float64))
-        metadata.append({"kind": kind, "anchor": anchor})
+        metadata.append({"kind": kind, "anchor": anchor, **details})
     if include_anchors:
         for index, anchor in enumerate(values):
             add(anchor, "anchor", index)
@@ -1033,8 +1038,22 @@ def make_control_actions(
         for direction_index in range(8):
             direction = _unit_direction(rng, anchor.shape)
             for scale in (0.03, 0.1, 0.3):
-                add(anchor + direction * scale, "rms_perturbation", anchor_index)
-                add(anchor - direction * scale, "rms_perturbation", anchor_index)
+                add(
+                    anchor + direction * scale,
+                    "rms_perturbation",
+                    anchor_index,
+                    direction=direction_index,
+                    scale=float(scale),
+                    sign=1,
+                )
+                add(
+                    anchor - direction * scale,
+                    "rms_perturbation",
+                    anchor_index,
+                    direction=direction_index,
+                    scale=float(scale),
+                    sign=-1,
+                )
         blocks = max(1, values.shape[1] // int(action_block))
         block_view = anchor[: blocks * action_block].reshape(blocks, action_block, -1)
         permutations = (
@@ -1042,16 +1061,30 @@ def make_control_actions(
             np.roll(np.arange(blocks), 1),
             rng.permutation(blocks),
         )
-        for permutation in permutations:
+        for permutation_index, permutation in enumerate(permutations):
             transformed = anchor.copy()
             transformed[: blocks * action_block] = block_view[permutation].reshape(
                 blocks * action_block, -1
             )
-            add(transformed, "block_transform", anchor_index)
-            add(np.roll(transformed, int(action_block), axis=0), "block_transform", anchor_index)
-            add(np.roll(transformed, -int(action_block), axis=0), "block_transform", anchor_index)
+            for shift, shifted in (
+                (0, transformed),
+                (1, np.roll(transformed, int(action_block), axis=0)),
+                (-1, np.roll(transformed, -int(action_block), axis=0)),
+            ):
+                add(
+                    shifted,
+                    "block_transform",
+                    anchor_index,
+                    permutation=permutation_index,
+                    shift=shift,
+                )
     for index in range(64):
-        add(_unit_direction(rng, values[0].shape), "standard_gaussian", None)
+        add(
+            _unit_direction(rng, values[0].shape),
+            "standard_gaussian",
+            None,
+            sample=index,
+        )
     physical_zero_value = np.zeros_like(values[0]) if physical_zero is None else np.asarray(physical_zero, dtype=np.float64)
     if physical_zero_value.shape != values[0].shape or not np.all(np.isfinite(physical_zero_value)):
         raise ValueError("physical_zero must be finite and match one anchor shape")
@@ -1075,6 +1108,38 @@ def deduplicate_actions(actions: np.ndarray) -> tuple[np.ndarray, list[int]]:
             seen[key] = index
             keep.append(index)
     return values[keep], duplicates
+
+
+def control_action_metrics(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Summarize physical outcomes for the fixed-pool control actions."""
+    if not records:
+        raise ValueError("control records cannot be empty")
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for record in records:
+        kind = str(record.get("control_kind", record.get("kind", "unknown")))
+        if record.get("true_distance") is None:
+            raise ValueError("control records must contain true_distance")
+        grouped.setdefault(kind, []).append(record)
+    by_kind: dict[str, Any] = {}
+    for kind, rows in sorted(grouped.items()):
+        distances = np.asarray([float(row["true_distance"]) for row in rows], dtype=np.float64)
+        successes = np.asarray([bool(row.get("success", False)) for row in rows], dtype=np.float64)
+        if not np.all(np.isfinite(distances)):
+            raise ValueError("control true distances must be finite")
+        by_kind[kind] = {
+            "rows": int(len(rows)),
+            "states": int(len({row.get("state_id", row.get("slot")) for row in rows})),
+            "control_indices": int(len({row.get("control_index") for row in rows})),
+            "success_rate": float(np.mean(successes)),
+            "mean_true_distance": float(np.mean(distances)),
+            "median_true_distance": float(np.median(distances)),
+        }
+    return {
+        "rows": int(len(records)),
+        "kinds": by_kind,
+        "physical_zero_is_separate": "physical_zero" in by_kind,
+        "normalized_zero_is_separate": "normalized_zero" in by_kind,
+    }
 
 
 def _rankdata(values: np.ndarray) -> np.ndarray:
@@ -1722,6 +1787,7 @@ __all__ = [
     "condition_identity",
     "condition_lock",
     "condition_slug",
+    "control_action_metrics",
     "deduplicate_actions",
     "grid_counts",
     "guidance_effect_metrics",
