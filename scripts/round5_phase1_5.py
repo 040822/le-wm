@@ -68,6 +68,8 @@ DEFAULT_CONFIG = ROOT / "config" / "round5" / "phase1_5.json"
 DEFAULT_OUTPUT = ROOT / "outputs" / "round5" / "phase1_5_seed3072_legacy"
 DEFAULT_REPORT = ROOT / "docs" / "report" / "round5" / "round5_phase1_5_report.md"
 DEFAULT_MIN_FREE_MIB = 3500
+DEFAULT_MAX_LOAD_PER_CPU = 0.75
+DEFAULT_MIN_AVAILABLE_MIB = 8192
 
 
 def _resolve(value: str | Path) -> Path:
@@ -171,10 +173,83 @@ def _gpu_preflight(gpu: str, minimum_free_mib: int) -> dict[str, Any]:
     return snapshot
 
 
-def _configure_device(device: str, gpu: str | None, minimum_free_mib: int) -> None:
+def _meminfo_mib() -> dict[str, int]:
+    values: dict[str, int] = {}
+    try:
+        lines = Path("/proc/meminfo").read_text(encoding="ascii").splitlines()
+    except OSError as exc:
+        raise RuntimeError("cannot inspect host memory before Phase1.5 startup") from exc
+    for line in lines:
+        name, separator, raw_value = line.partition(":")
+        if not separator:
+            continue
+        fields = raw_value.strip().split()
+        if not fields or not fields[0].isdigit():
+            continue
+        # Linux reports /proc/meminfo sizes in KiB.  Keep the conversion
+        # explicit so the startup record is comparable with nvidia-smi MiB.
+        values[name] = int(fields[0]) // 1024
+    return values
+
+
+def _host_preflight(
+    *,
+    max_load_per_cpu: float,
+    minimum_available_mib: int,
+) -> dict[str, Any]:
+    if max_load_per_cpu <= 0:
+        raise ValueError("--max-load-per-cpu must be positive")
+    if minimum_available_mib < 0:
+        raise ValueError("--min-available-mib cannot be negative")
+    cpu_count = max(1, int(os.cpu_count() or 1))
+    try:
+        load_1, load_5, load_15 = os.getloadavg()
+    except OSError as exc:
+        raise RuntimeError("cannot inspect host CPU load before Phase1.5 startup") from exc
+    memory = _meminfo_mib()
+    available_mib = memory.get("MemAvailable")
+    if available_mib is None:
+        raise RuntimeError("/proc/meminfo does not provide MemAvailable")
+    snapshot = {
+        "cpu_count": cpu_count,
+        "load_1": float(load_1),
+        "load_5": float(load_5),
+        "load_15": float(load_15),
+        "load_per_cpu": float(load_1) / cpu_count,
+        "max_load_per_cpu": float(max_load_per_cpu),
+        "memory_total_mib": memory.get("MemTotal"),
+        "memory_available_mib": int(available_mib),
+        "minimum_available_mib": int(minimum_available_mib),
+    }
+    if snapshot["load_per_cpu"] > float(max_load_per_cpu):
+        raise RuntimeError(
+            "host CPU load is above the Phase1.5 startup limit: "
+            f"load1={load_1:.2f}, cpus={cpu_count}, "
+            f"ratio={snapshot['load_per_cpu']:.3f} > {max_load_per_cpu:.3f}"
+        )
+    if int(available_mib) < int(minimum_available_mib):
+        raise RuntimeError(
+            "host memory headroom is below the Phase1.5 startup limit: "
+            f"available={available_mib} MiB < {minimum_available_mib} MiB"
+        )
+    print(json.dumps({"host_preflight": snapshot}, sort_keys=True))
+    return snapshot
+
+
+def _configure_device(
+    device: str,
+    gpu: str | None,
+    minimum_free_mib: int,
+    max_load_per_cpu: float,
+    minimum_available_mib: int,
+) -> None:
     if str(device).startswith("cuda"):
         if gpu is None:
             raise ValueError("CUDA Phase1.5 runs require --gpu")
+        _host_preflight(
+            max_load_per_cpu=max_load_per_cpu,
+            minimum_available_mib=minimum_available_mib,
+        )
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu
         validate_gpu_visibility(device)
         _gpu_preflight(gpu, minimum_free_mib)
@@ -362,7 +437,13 @@ def _scan_unbounded(args: argparse.Namespace, config: Mapping[str, Any]) -> None
         raise ValueError("no Phase1.5 conditions selected")
     manifests = _load_manifests(config)
     checkpoints, checkpoint_hashes = _checkpoint_paths(config)
-    _configure_device(args.device, args.gpu, args.min_free_mib)
+    _configure_device(
+        args.device,
+        args.gpu,
+        args.min_free_mib,
+        args.max_load_per_cpu,
+        args.min_available_mib,
+    )
     output_root = _resolve(args.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     grouped: dict[str, list[Mapping[str, Any]]] = {}
@@ -754,7 +835,13 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     tasks = PHASE15_TASKS if args.task == "all" else (args.task,)
     manifests = _load_manifests(config)
     checkpoints, checkpoint_hashes = _checkpoint_paths(config)
-    _configure_device(args.device, args.gpu, args.min_free_mib)
+    _configure_device(
+        args.device,
+        args.gpu,
+        args.min_free_mib,
+        args.max_load_per_cpu,
+        args.min_available_mib,
+    )
     calibration_specs = [
         {
             "name": "P0_s1",
@@ -914,7 +1001,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--gpu", type=_gpu)
     parser.add_argument("--min-free-mib", type=int, default=DEFAULT_MIN_FREE_MIB)
-    parser.add_argument("--max-concurrent-scans", type=int, default=4)
+    parser.add_argument("--min-available-mib", type=int, default=DEFAULT_MIN_AVAILABLE_MIB)
+    parser.add_argument("--max-load-per-cpu", type=float, default=DEFAULT_MAX_LOAD_PER_CPU)
+    parser.add_argument("--max-concurrent-scans", type=int, default=1)
     return parser
 
 

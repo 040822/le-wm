@@ -1,11 +1,13 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import gymnasium as gym
 from sklearn.preprocessing import StandardScaler
 
+from scripts.round5_phase1_5 import _host_preflight, build_parser
 from scripts.round5_phase1_5_diagnostics import FixedCandidatePolicy
 
 from source.common.round5_phase1_5 import (
@@ -55,6 +57,38 @@ class Round5Phase15GridTests(unittest.TestCase):
                 for item in specs
             )
         )
+
+    def test_scan_defaults_to_one_route(self):
+        args = build_parser().parse_args(["scan"])
+        self.assertEqual(args.max_concurrent_scans, 1)
+
+    def test_host_preflight_checks_load_and_memory_headroom(self):
+        with patch("scripts.round5_phase1_5.os.cpu_count", return_value=8), patch(
+            "scripts.round5_phase1_5.os.getloadavg", return_value=(2.0, 1.5, 1.0)
+        ), patch(
+            "scripts.round5_phase1_5._meminfo_mib",
+            return_value={"MemTotal": 1024, "MemAvailable": 512},
+        ):
+            snapshot = _host_preflight(max_load_per_cpu=0.5, minimum_available_mib=256)
+        self.assertEqual(snapshot["cpu_count"], 8)
+        self.assertEqual(snapshot["memory_available_mib"], 512)
+        self.assertAlmostEqual(snapshot["load_per_cpu"], 0.25)
+
+        with patch("scripts.round5_phase1_5.os.cpu_count", return_value=2), patch(
+            "scripts.round5_phase1_5.os.getloadavg", return_value=(2.0, 1.5, 1.0)
+        ), patch(
+            "scripts.round5_phase1_5._meminfo_mib",
+            return_value={"MemTotal": 1024, "MemAvailable": 512},
+        ), self.assertRaisesRegex(RuntimeError, "CPU load"):
+            _host_preflight(max_load_per_cpu=0.5, minimum_available_mib=256)
+
+        with patch("scripts.round5_phase1_5.os.cpu_count", return_value=8), patch(
+            "scripts.round5_phase1_5.os.getloadavg", return_value=(0.5, 0.5, 0.5)
+        ), patch(
+            "scripts.round5_phase1_5._meminfo_mib",
+            return_value={"MemTotal": 1024, "MemAvailable": 128},
+        ), self.assertRaisesRegex(RuntimeError, "memory headroom"):
+            _host_preflight(max_load_per_cpu=0.5, minimum_available_mib=256)
 
 
 class Round5Phase15DiagnosticsTests(unittest.TestCase):
