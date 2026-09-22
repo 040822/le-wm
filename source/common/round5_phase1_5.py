@@ -438,12 +438,31 @@ def atomic_write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
 
 @contextmanager
 def condition_lock(result: str | Path) -> Iterator[Path]:
-    """Acquire an exclusive sibling lock without overwriting an active worker."""
+    """Acquire an exclusive sibling lock without overwriting an active worker.
+
+    A killed evaluator can leave its lock file behind.  Reclaim only locks
+    whose recorded owner PID is no longer alive; an active lock still fails
+    immediately so two evaluators cannot write the same condition.
+    """
     lock_path = Path(result).with_name(".condition.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd: int | None = None
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        while fd is None:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError as exc:
+                try:
+                    content = lock_path.read_text(encoding="ascii").strip()
+                    owner_pid = int(content.split("=", 1)[1].split()[0])
+                except (OSError, ValueError, IndexError):
+                    owner_pid = None
+                if owner_pid is None or _pid_is_alive(owner_pid):
+                    raise RuntimeError(f"condition is locked: {lock_path}") from exc
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
         os.write(fd, f"pid={os.getpid()}\n".encode("ascii"))
         yield lock_path
     except FileExistsError as exc:

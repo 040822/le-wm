@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,7 @@ from source.common.round5_phase1_5 import (
     make_probe_split,
     normalized_physical_distance,
     candidate_pool_metrics,
+    condition_lock,
     paired_guidance_metrics,
     phase15_scan_slot,
     primary_condition_specs,
@@ -278,6 +280,16 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
             self.assertFalse(
                 (Path(directory) / "locks" / "scan_slots" / "slot_0.lock").exists()
             )
+
+    def test_condition_lock_reclaims_dead_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory) / "condition" / "result.json"
+            lock = result.with_name(".condition.lock")
+            lock.parent.mkdir(parents=True)
+            lock.write_text("pid=999999999\n", encoding="ascii")
+            with condition_lock(result):
+                self.assertEqual(lock.read_text(encoding="ascii"), f"pid={os.getpid()}\n")
+            self.assertFalse(lock.exists())
 
     def test_adaptive_stability_picks_two_per_category(self):
         rows = []
