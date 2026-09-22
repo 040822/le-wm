@@ -4,19 +4,19 @@
 
 - 配置：`/data/users/wenxin/pre-exp/le-wm/config/round5/phase1_5.json`
 - 输出根目录：`/data/users/wenxin/pre-exp/le-wm/outputs/round5/phase1_5_seed3072_legacy`
-- 条件状态：`{"completed": 437, "pending": 1987}`
+- 条件状态：`{"completed": 483, "pending": 1941}`
 
 ## 主扫描验收
 
 | group | planned | indexed | pending |
 |---|---:|---:|---:|
-| A1 | 144 | 100 | 44 |
-| A2 | 432 | 66 | 366 |
-| A3 | 864 | 57 | 807 |
-| A4 | 432 | 65 | 367 |
-| A5 | 96 | 74 | 22 |
-| A6 | 240 | 50 | 190 |
-| A7 | 216 | 25 | 191 |
+| A1 | 144 | 110 | 34 |
+| A2 | 432 | 77 | 355 |
+| A3 | 864 | 66 | 798 |
+| A4 | 432 | 75 | 357 |
+| A5 | 96 | 76 | 20 |
+| A6 | 240 | 52 | 188 |
+| A7 | 216 | 27 | 189 |
 
 主扫描网格为 2,424 条条件、121,200 个 episode；固定 seed43/44 稳定性扩展最多增加 176 条条件。
 历史结果只有在 checkpoint、legacy cohort、normalizer、动作裁剪、精度、随机数和候选生成语义都一致时才复用；缺轨迹历史结果只进入 success-only 统计。
@@ -27,6 +27,7 @@
 |---|---|---|---:|---:|---|
 | cube | A3 | p0_guided_flow | 100.0% | 0.17453392734751105 | current |
 | cube | A6 | cem_budget | 100.0% | 0.801135943736881 | current |
+| cube | A3 | p0_guided_flow | 100.0% | 0.08105652313679457 | current |
 | cube | A3 | p0_guided_flow | 100.0% | 0.34935761522501707 | current |
 | cube | A1 | proposal_ranking | 100.0% | 0.21119897812604904 | current |
 | cube | A2 | p0_post_opt | 100.0% | 0.10222758539021015 | current |
@@ -41,10 +42,9 @@
 | cube | A3 | p0_guided_flow | 100.0% | 0.10032219812273979 | current |
 | cube | A4 | p3_post_opt | 100.0% | 2.7060805475339293 | current |
 | cube | A4 | p3_post_opt | 100.0% | 0.9021547930315137 | current |
+| cube | A4 | p3_refine | 100.0% | 0.38333469722419977 | current |
 | cube | A2 | p0_post_opt | 100.0% | 0.1953987660817802 | history |
 | tworoom | A6 | cem_budget | 100.0% | 14.729640062432736 | history |
-| pusht | A1 | proposal_ranking | 100.0% | 0.2667507450096309 | current |
-| cube | A3 | p0_guided_flow | 100.0% | 0.04583725379779935 | current |
 
 ## 诊断与决策
 
