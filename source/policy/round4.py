@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import hashlib
 import time
 from collections.abc import Callable, Mapping
 
@@ -325,6 +326,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             .reshape(-1, z_goal.shape[-1])
         )
         started = time.perf_counter()
+        candidate_noise_sha256 = None
         with self._autocast(self.bf16_proposal):
             if self.optimize_proposal and self.guidance_mode == "none":
                 actions = self.model.sample_actions(
@@ -346,6 +348,10 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
                     dtype=z_start.dtype,
                     generator=generator,
                 )
+                if self.diagnostic_callback is not None:
+                    candidate_noise_sha256 = hashlib.sha256(
+                        all_noise.detach().cpu().numpy().tobytes()
+                    ).hexdigest()
                 chunk = (
                     total
                     if self.proposal_chunk_size is None
@@ -392,6 +398,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             "guidance_mode": self.guidance_mode,
             "guidance_backward_count": int(per_candidate_backward * total),
             "proposal_chunk_size": self.proposal_chunk_size,
+            "candidate_noise_sha256": candidate_noise_sha256,
         }
 
     def _propose(self, z_start, z_goal, generator):

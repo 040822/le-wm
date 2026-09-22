@@ -268,6 +268,7 @@ def _first_replan_pool_records(
                     "predicted_cost": float(costs_array[row, candidate_index]),
                     "predicted_future_latent": predicted_array[row, candidate_index, -1].tolist(),
                     "action": candidates[row, candidate_index].tolist(),
+                    "candidate_noise_sha256": event.get("candidate_noise_sha256"),
                     "outcome_status": "pending",
                 }
             )
@@ -291,8 +292,10 @@ def _capture_candidate_proposals(
     for flow_step in flow_steps:
         target = output_root / f"proposals_s{int(flow_step)}.jsonl"
         if target.is_file():
-            all_records.extend(_read_records(target))
-            continue
+            existing = _read_records(target)
+            if existing and all(item.get("candidate_noise_sha256") for item in existing):
+                all_records.extend(existing)
+                continue
         captured: list[dict[str, Any]] = []
         seen_slots: set[int] = set()
 
@@ -357,6 +360,21 @@ def _capture_candidate_proposals(
             raise RuntimeError(f"candidate pool missed initial replans for slots {missing}")
         _write_jsonl(target, captured)
         all_records.extend(captured)
+    noise_by_flow = {
+        int(flow): {
+            row.get("candidate_noise_sha256")
+            for row in all_records
+            if int(row.get("flow_steps", -1)) == int(flow)
+        }
+        for flow in flow_steps
+    }
+    if any(not values or None in values for values in noise_by_flow.values()):
+        raise RuntimeError("candidate pool did not record full initial noise provenance")
+    reference_noise = noise_by_flow[int(flow_steps[0])]
+    if any(values != reference_noise for values in noise_by_flow.values()):
+        raise RuntimeError(
+            "candidate pool flow steps did not reuse the same initial candidate noise"
+        )
     return all_records
 
 
