@@ -912,6 +912,32 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
             "cem_elite_ratio": 0.1,
             "cem_var_scale": 1.0,
         },
+        {
+            "name": "P1_c300_i30",
+            "mode": "P1",
+            "flow_steps": None,
+            "candidate_count": 300,
+            "cem_protocol": "cem-clip",
+            "action_bound_mode": "candidate_clip",
+            "guidance": "none",
+            "cem_num_samples": 300,
+            "cem_iterations": 30,
+            "cem_elite_ratio": 0.1,
+            "cem_var_scale": 1.0,
+        },
+        {
+            "name": "P2_c300_i30",
+            "mode": "P2",
+            "flow_steps": 1,
+            "candidate_count": 300,
+            "cem_protocol": "cem-clip",
+            "action_bound_mode": "candidate_clip",
+            "guidance": "none",
+            "cem_num_samples": 300,
+            "cem_iterations": 30,
+            "cem_elite_ratio": 0.1,
+            "cem_var_scale": 1.0,
+        },
     ]
     if args.limit is not None:
         calibration_specs = calibration_specs[: int(args.limit)]
