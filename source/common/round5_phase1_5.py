@@ -1365,14 +1365,37 @@ def guidance_effect_metrics(records: Sequence[Mapping[str, Any]]) -> dict[str, A
     """Summarize predicted and real effects, including model exploitation."""
     if not records:
         raise ValueError("guidance records cannot be empty")
-    required = ("predicted_cost_before", "predicted_cost_after", "true_cost_before", "true_cost_after")
-    for record in records:
-        missing = [field for field in required if field not in record]
-        if missing:
-            raise ValueError(f"guidance record is missing {missing}")
-    predicted = np.asarray([float(row["predicted_cost_before"]) - float(row["predicted_cost_after"]) for row in records])
-    true = np.asarray([float(row["true_cost_before"]) - float(row["true_cost_after"]) for row in records])
-    displacement = np.asarray([float(row.get("action_rms_displacement", math.nan)) for row in records])
+    def value(record: Mapping[str, Any], name: str, guided_name: str) -> float:
+        observed = record.get(name, record.get(guided_name))
+        if observed is None:
+            raise ValueError(f"guidance record is missing {name!r} and {guided_name!r}")
+        return float(observed)
+
+    predicted = np.asarray(
+        [
+            value(record, "predicted_cost_before", "guided_predicted_cost_before")
+            - value(record, "predicted_cost_after", "guided_predicted_cost_after")
+            for record in records
+        ]
+    )
+    true = np.asarray(
+        [
+            value(record, "true_cost_before", "guided_true_cost_before")
+            - value(record, "true_cost_after", "guided_true_cost_after")
+            for record in records
+        ]
+    )
+    displacement = np.asarray(
+        [
+            float(
+                row.get(
+                    "action_rms_displacement",
+                    row.get("guided_action_rms_displacement", math.nan),
+                )
+            )
+            for row in records
+        ]
+    )
     finite_displacement = displacement[np.isfinite(displacement)]
     return {
         "records": len(records),

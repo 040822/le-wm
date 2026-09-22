@@ -270,6 +270,21 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["model_exploitation_fraction"], 1.0)
         self.assertEqual(result["true_degradation_fraction"], 1.0)
 
+    def test_guidance_metrics_accepts_persisted_paired_schema(self):
+        result = guidance_effect_metrics(
+            [
+                {
+                    "guided_predicted_cost_before": 2.0,
+                    "guided_predicted_cost_after": 1.0,
+                    "guided_true_cost_before": 1.0,
+                    "guided_true_cost_after": 2.0,
+                    "guided_action_rms_displacement": 0.25,
+                }
+            ]
+        )
+        self.assertEqual(result["model_exploitation_fraction"], 1.0)
+        self.assertEqual(result["action_rms_displacement_mean"], 0.25)
+
     def test_paired_guidance_compares_same_displacement_random_control(self):
         result = paired_guidance_metrics(
             [
