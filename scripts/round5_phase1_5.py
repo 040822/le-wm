@@ -45,6 +45,7 @@ from source.common.round5_phase1_5 import (
     PHASE15_PROTOCOL_VARIANT,
     PHASE15_STABILITY_SEEDS,
     PHASE15_TASKS,
+    adaptive_stability_specs,
     atomic_write_json,
     canonical_json,
     cluster_bootstrap,
@@ -197,6 +198,19 @@ def _selected_specs(
     return specs
 
 
+def _load_adaptive_specs(output_root: Path) -> list[dict[str, Any]]:
+    path = output_root / "analysis" / "adaptive_stability_specs.json"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"adaptive stability selection is missing: {path}; run select-stability first"
+        )
+    value = json.loads(path.read_text(encoding="utf-8"))
+    specs = value.get("specs") if isinstance(value, Mapping) else None
+    if not isinstance(specs, list) or not all(isinstance(item, Mapping) for item in specs):
+        raise ValueError(f"invalid adaptive stability selection: {path}")
+    return [dict(item) for item in specs]
+
+
 def _identity_map(
     specs: Sequence[Mapping[str, Any]],
     manifests: Mapping[str, CohortManifest],
@@ -340,7 +354,9 @@ def _run_spec(
 
 
 def scan(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
-    specs = _selected_specs(args)
+    specs = _selected_specs(args, include_stability=args.include_stability)
+    if args.include_adaptive_stability:
+        specs.extend(_load_adaptive_specs(_resolve(args.output_root)))
     if not specs:
         raise ValueError("no Phase1.5 conditions selected")
     manifests = _load_manifests(config)
@@ -381,6 +397,8 @@ def scan(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
 
 def index(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, Any]:
     specs = _selected_specs(args, include_stability=args.include_stability)
+    if args.include_adaptive_stability:
+        specs.extend(_load_adaptive_specs(_resolve(args.output_root)))
     manifests = _load_manifests(config)
     checkpoints, checkpoint_hashes = _checkpoint_paths(config)
     identities = _identity_map(specs, manifests, checkpoints, checkpoint_hashes)
@@ -435,6 +453,7 @@ def _rows_from_index(index_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         payload = item.get("payload", item.get("payload_summary", {}))
         spec = item.get("spec", payload.get("phase15_condition", {}))
         row.update({
+            "spec": dict(spec) if isinstance(spec, Mapping) else {},
             "task": spec.get("task", payload.get("task")),
             "group": spec.get("group"),
             "family": spec.get("family"),
@@ -451,6 +470,7 @@ def _rows_from_index(index_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
             "planning_median_seconds": planning.get("planning_median_seconds"),
             "planning_p95_seconds": planning.get("planning_p95_seconds"),
             "forward_count": planning.get("forward_count"),
+            "planning_forward_count": planning.get("forward_count"),
             "guidance_backward_count": planning.get("guidance_backward_count"),
             "peak_memory_bytes": planning.get("peak_memory_bytes"),
         })
@@ -583,6 +603,33 @@ def analyze(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, An
     result = {"analysis": str(analysis_path), "report": str(report_path), "conditions": len(rows), "counts": index_payload["counts"]}
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return result
+
+
+def select_stability(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+    """Select the post-scan adaptive stability extension from primary rows."""
+    index_path = _resolve(args.output_root) / "analysis" / "index.json"
+    if not index_path.is_file() or args.refresh_index:
+        index_payload = index(args, config)
+    else:
+        index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    rows = _rows_from_index(index_payload)
+    primary_rows = [
+        row for row in rows
+        if isinstance(row.get("spec"), Mapping)
+        and int(row["spec"].get("evaluation_seed", PHASE15_EVAL_SEED)) == PHASE15_EVAL_SEED
+    ]
+    specs = adaptive_stability_specs(primary_rows)
+    target = _resolve(args.output_root) / "analysis" / "adaptive_stability_specs.json"
+    atomic_write_json(
+        target,
+        {
+            "schema_version": "round5_phase1_5_adaptive_stability_v1",
+            "source_index": str(index_path),
+            "primary_rows": len(primary_rows),
+            "specs": specs,
+        },
+    )
+    print(json.dumps({"adaptive_stability": str(target), "conditions": len(specs)}, ensure_ascii=False, sort_keys=True))
 
 
 def validate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
@@ -773,7 +820,7 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("validate", "dry-run", "calibrate", "scan", "index", "analyze"))
+    parser.add_argument("command", choices=("validate", "dry-run", "calibrate", "scan", "index", "analyze", "select-stability"))
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--report-output", default=str(DEFAULT_REPORT))
@@ -782,6 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--condition-index", action="append", type=int)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--include-stability", action="store_true")
+    parser.add_argument("--include-adaptive-stability", action="store_true")
     parser.add_argument("--allow-incomplete", action="store_true")
     parser.add_argument("--refresh-index", action="store_true")
     parser.add_argument("--device", default="cuda")
@@ -803,6 +851,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         scan(args, config)
     elif args.command == "index":
         index(args, config)
+    elif args.command == "select-stability":
+        select_stability(args, config)
     else:
         analyze(args, config)
 

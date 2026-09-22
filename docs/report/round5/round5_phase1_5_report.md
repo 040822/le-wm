@@ -4,19 +4,19 @@
 
 - 配置：`/data/users/wenxin/pre-exp/le-wm/config/round5/phase1_5.json`
 - 输出根目录：`/data/users/wenxin/pre-exp/le-wm/outputs/round5/phase1_5_seed3072_legacy`
-- 条件状态：`{"completed": 100, "pending": 2324}`
+- 条件状态：`{"completed": 437, "pending": 1987}`
 
 ## 主扫描验收
 
 | group | planned | indexed | pending |
 |---|---:|---:|---:|
-| A1 | 144 | 48 | 96 |
-| A2 | 432 | 16 | 416 |
-| A3 | 864 | 4 | 860 |
-| A4 | 432 | 16 | 416 |
-| A5 | 96 | 0 | 96 |
-| A6 | 240 | 16 | 224 |
-| A7 | 216 | 0 | 216 |
+| A1 | 144 | 100 | 44 |
+| A2 | 432 | 66 | 366 |
+| A3 | 864 | 57 | 807 |
+| A4 | 432 | 65 | 367 |
+| A5 | 96 | 74 | 22 |
+| A6 | 240 | 50 | 190 |
+| A7 | 216 | 25 | 191 |
 
 主扫描网格为 2,424 条条件、121,200 个 episode；固定 seed43/44 稳定性扩展最多增加 176 条条件。
 历史结果只有在 checkpoint、legacy cohort、normalizer、动作裁剪、精度、随机数和候选生成语义都一致时才复用；缺轨迹历史结果只进入 success-only 统计。
@@ -25,26 +25,26 @@
 
 | task | group | family | success | p50 planning (s) | source |
 |---|---|---|---:|---:|---|
+| cube | A3 | p0_guided_flow | 100.0% | 0.17453392734751105 | current |
+| cube | A6 | cem_budget | 100.0% | 0.801135943736881 | current |
+| cube | A3 | p0_guided_flow | 100.0% | 0.34935761522501707 | current |
+| cube | A1 | proposal_ranking | 100.0% | 0.21119897812604904 | current |
+| cube | A2 | p0_post_opt | 100.0% | 0.10222758539021015 | current |
+| cube | A5 | p3_guided_flow | 100.0% | 0.5643311040475965 | current |
+| cube | A2 | p0_post_opt | 100.0% | 0.06399708706885576 | current |
+| cube | A3 | p0_guided_flow | 100.0% | 0.16736199613660574 | current |
 | tworoom | A4 | p3_post_opt | 100.0% | 1.023237818852067 | history |
+| cube | A4 | p3_post_opt | 100.0% | 3.2565162028186023 | current |
+| cube | A3 | p0_guided_flow | 100.0% | 0.18022423470392823 | current |
+| cube | A6 | cem_budget | 100.0% | 1.0599323119968176 | current |
+| cube | A4 | p3_post_opt | 100.0% | 0.3081235936842859 | current |
+| cube | A3 | p0_guided_flow | 100.0% | 0.10032219812273979 | current |
+| cube | A4 | p3_post_opt | 100.0% | 2.7060805475339293 | current |
+| cube | A4 | p3_post_opt | 100.0% | 0.9021547930315137 | current |
 | cube | A2 | p0_post_opt | 100.0% | 0.1953987660817802 | history |
 | tworoom | A6 | cem_budget | 100.0% | 14.729640062432736 | history |
-| cube | A3 | p0_guided_flow | 100.0% | 0.5832880977541208 | history |
-| tworoom | A6 | cem_budget | 100.0% | 3.2451155183371156 | history |
-| cube | A4 | p3_refine | 100.0% | 0.348144163377583 | history |
-| tworoom | A4 | p3_refine | 100.0% | 1.2689756895415485 | history |
-| cube | A1 | proposal_ranking | 100.0% | 0.2923399251885712 | history |
-| cube | A1 | proposal_ranking | 100.0% | 0.29689727863296866 | history |
-| tworoom | A1 | proposal_ranking | 100.0% | 0.6107347696088254 | history |
-| cube | A2 | p0_post_opt | 100.0% | 0.24421118991449475 | history |
-| cube | A1 | proposal_ranking | 100.0% | 0.5383123108185828 | history |
-| cube | A4 | p3_refine | 100.0% | 0.3450439455918968 | history |
-| cube | A4 | p3_post_opt | 100.0% | 1.6279823179356754 | history |
-| cube | A1 | proposal_ranking | 100.0% | 0.2542917304672301 | history |
-| cube | A4 | p3_post_opt | 100.0% | 0.7936307601630688 | history |
-| tworoom | A1 | proposal_ranking | 100.0% | 0.4673698083497584 | history |
-| cube | A1 | proposal_ranking | 100.0% | 0.42275777040049434 | history |
-| tworoom | A4 | p3_refine | 100.0% | 0.3273179279640317 | history |
-| cube | A1 | proposal_ranking | 100.0% | 0.36359437135979533 | history |
+| pusht | A1 | proposal_ranking | 100.0% | 0.2667507450096309 | current |
+| cube | A3 | p0_guided_flow | 100.0% | 0.04583725379779935 | current |
 
 ## 诊断与决策
 
