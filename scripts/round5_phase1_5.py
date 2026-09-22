@@ -583,6 +583,86 @@ def _rows_from_index(index_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _diagnostic_decisions(
+    output_root: Path,
+    rows: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """Render conservative four-question decisions from persisted evidence."""
+    summary_path = output_root / "diagnostics" / "summary.json"
+    summary: Mapping[str, Any] = {}
+    if summary_path.is_file():
+        value = json.loads(summary_path.read_text(encoding="utf-8"))
+        if isinstance(value, Mapping):
+            summary = value
+    candidate = summary.get("candidate_pool")
+    p3_status = "尚无固定候选池证据"
+    p3_supported = None
+    if isinstance(candidate, Mapping):
+        flows = candidate.get("by_flow_steps", {})
+        gains = []
+        regrets = []
+        for value in flows.values() if isinstance(flows, Mapping) else ():
+            if not isinstance(value, Mapping):
+                continue
+            selected = value.get("selected_success_rate")
+            random = value.get("random_success_rate")
+            regret = value.get("selection_regret")
+            if selected is not None and random is not None:
+                gains.append(float(selected) - float(random))
+            if regret is not None:
+                regrets.append(float(regret))
+        if gains:
+            p3_supported = bool(np.mean(gains) > 0.0 and np.mean(regrets or [0.0]) >= 0.0)
+            p3_status = (
+                "支持保留 P3：B-selected 相对随机选择有正平均收益"
+                if p3_supported
+                else "不支持稳定保留 P3：B-selected 未显示相对随机选择的正收益"
+            )
+
+    guidance = summary.get("paired_guidance")
+    guidance_status = "尚无 guidance 配对证据"
+    guidance_supported = None
+    if isinstance(guidance, Mapping) and guidance.get("paired_advantage_mean") is not None:
+        guidance_supported = float(guidance["paired_advantage_mean"]) > 0.0
+        guidance_status = (
+            "支持 guidance correction：真实配对优势为正"
+            if guidance_supported
+            else "不支持单独强调 guidance：真实配对优势未为正"
+        )
+
+    complete = [row for row in rows if row.get("status") in {"completed", "reused_success_only"}]
+    by_family: dict[str, list[Mapping[str, Any]]] = {}
+    for row in complete:
+        family = row.get("family")
+        if family is not None and row.get("success_rate") is not None:
+            by_family.setdefault(str(family), []).append(row)
+    cem = by_family.get("cem_budget", [])
+    correction = by_family.get("p0_post_opt", []) + by_family.get("p0_guided_flow", [])
+    cem_success = np.mean([float(row["success_rate"]) for row in cem]) if cem else None
+    correction_success = np.mean([float(row["success_rate"]) for row in correction]) if correction else None
+    if cem_success is None or correction_success is None:
+        replacement_status = "尚无足够的 PO/GF 与 CEM 对照结果"
+    elif correction_success >= cem_success - 0.04:
+        replacement_status = "PO/GF 在当前扫描中达到 CEM 成功率容差；仍需结合 timing 和稳定性决定替代"
+    else:
+        replacement_status = "PO/GF 未达到 CEM 成功率容差，暂不能替代 CEM"
+
+    if p3_supported is None or guidance_supported is None:
+        training_status = "下一轮 R4-AB 消融待诊断完成后确定"
+    elif p3_supported and guidance_supported:
+        training_status = "优先验证 proposal-verification 与 B→A 梯度匹配训练消融"
+    elif p3_supported:
+        training_status = "优先验证 proposal-verification 与预测动作输入匹配训练消融"
+    else:
+        training_status = "优先修正 B 的动作后果匹配训练，再扩展推理模块"
+    return [
+        f"1. P3：{p3_status}。",
+        f"2. PO/GF 替代 CEM：{replacement_status}。",
+        f"3. GF：{guidance_status}。",
+        f"4. R4-AB 下一轮：{training_status}。",
+    ]
+
+
 def _render_report(
     *,
     config_path: Path,
@@ -617,10 +697,7 @@ def _render_report(
             "本报告仍处于扫描阶段，条件尚未齐全；P3、PO/GF、CEM 的最终取舍暂记为尚未收敛。"
         )
     else:
-        decisions = (
-            "最终四项判断必须结合同状态候选池、真实物理后果和隔离计时结果填写；"
-            "若这些诊断产物没有跨任务稳定占优，按协议报告尚未收敛。"
-        )
+        decisions = "\n".join(_diagnostic_decisions(output_root, rows))
     return "\n".join(
         [
             "# Round5 Phase1.5：冻结模型的决策能力诊断与推理方案收敛",
