@@ -34,6 +34,7 @@ from source.common.round5_phase1_5 import (
     safe_correlation,
     sampling_stability_specs,
     synchronous_timing,
+    summarize_timing_samples,
     restore_environment_state,
 )
 
@@ -307,6 +308,13 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         self.assertEqual(len(calls), 5)
         self.assertEqual(result["runs"], 3)
         self.assertEqual(len(result["samples_seconds"]), 3)
+
+    def test_timing_windows_keep_warmup_and_measurement_counts(self):
+        result = summarize_timing_samples(range(20), warmup=5, runs=10)
+        self.assertEqual(result["warmup"], 5)
+        self.assertEqual(result["runs"], 10)
+        self.assertEqual(result["samples_seconds"], list(range(5, 15)))
+        self.assertIsNone(summarize_timing_samples(range(10), warmup=5, runs=10))
 
     def test_scan_slots_bound_concurrent_routes(self):
         with tempfile.TemporaryDirectory() as directory:

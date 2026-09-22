@@ -1643,6 +1643,39 @@ def synchronous_timing(
     }
 
 
+def summarize_timing_samples(
+    samples: Sequence[float],
+    *,
+    warmup: int,
+    runs: int,
+    source: str = "synchronized_samples",
+) -> dict[str, Any] | None:
+    """Summarize a fixed timing window from already synchronized samples.
+
+    This helper is used for scan artifacts whose timing events were collected
+    during a full evaluation.  Callers should label that retrospective source
+    explicitly; it does not turn mixed evaluation wall time into planning time.
+    """
+    if warmup < 0 or runs < 1:
+        raise ValueError("warmup must be non-negative and runs must be positive")
+    values = np.asarray(samples, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    end = int(warmup) + int(runs)
+    if len(values) < end:
+        return None
+    window = values[int(warmup) : end]
+    return {
+        "warmup": int(warmup),
+        "runs": int(runs),
+        "samples_seconds": window.tolist(),
+        "p50_seconds": float(np.quantile(window, 0.50)),
+        "p95_seconds": float(np.quantile(window, 0.95)),
+        "mean_seconds": float(np.mean(window)),
+        "batch50_throughput_per_second": float(50.0 / np.mean(window)),
+        "source": str(source),
+    }
+
+
 def capture_rng_state(obj: Any) -> Any:
     rng = getattr(obj, "np_random", None)
     bit_generator = getattr(rng, "bit_generator", None)
@@ -1809,6 +1842,7 @@ __all__ = [
     "sampling_stability_specs",
     "stable_sha256",
     "synchronous_timing",
+    "summarize_timing_samples",
     "validate_phase15_result",
     "verify_state_restore",
 ]

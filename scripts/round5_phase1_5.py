@@ -61,6 +61,7 @@ from source.common.round5_phase1_5 import (
     result_path,
     sampling_stability_specs,
     stable_sha256,
+    summarize_timing_samples,
     validate_phase15_result,
 )
 
@@ -757,6 +758,18 @@ def timing(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, Any
                 "forward_count": planning.get("forward_count"),
                 "guidance_backward_count": planning.get("guidance_backward_count"),
                 "peak_memory_bytes": planning.get("peak_memory_bytes"),
+                "coarse_timing": summarize_timing_samples(
+                    samples,
+                    warmup=5,
+                    runs=10,
+                    source="retrospective_synchronized_replan_events",
+                ),
+                "fine_timing": summarize_timing_samples(
+                    samples,
+                    warmup=20,
+                    runs=100,
+                    source="retrospective_synchronized_replan_events",
+                ),
                 "evaluation_seconds_including_environment": payload.get(
                     "evaluation_seconds"
                 ),
@@ -772,6 +785,8 @@ def timing(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, Any
             "method": "synchronized per-replan samples recorded by round4_eval",
             "environment_wall_clock_is_separate": True,
             "warmup_runs": "not applicable to retrospective scan events",
+            "coarse_window": {"warmup": 5, "runs": 10},
+            "fine_window": {"warmup": 20, "runs": 100},
             "records": records,
             "conditions": len(records),
         },
