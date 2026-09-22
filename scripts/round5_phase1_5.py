@@ -56,6 +56,7 @@ from source.common.round5_phase1_5 import (
     index_phase15_results,
     make_control_actions,
     primary_condition_specs,
+    phase15_scan_slot,
     result_path,
     sampling_stability_specs,
     stable_sha256,
@@ -353,7 +354,7 @@ def _run_spec(
     return {"status": "completed", "path": str(target), "condition_id": condition_id(identity)}
 
 
-def scan(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+def _scan_unbounded(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     specs = _selected_specs(args, include_stability=args.include_stability)
     if args.include_adaptive_stability:
         specs.extend(_load_adaptive_specs(_resolve(args.output_root)))
@@ -393,6 +394,12 @@ def scan(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                 )
                 mark_infrastructure_failure(result_path(output_root, spec, identity), exc)
                 raise
+
+
+def scan(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+    output_root = _resolve(args.output_root)
+    with phase15_scan_slot(output_root, max_slots=int(args.max_concurrent_scans)):
+        _scan_unbounded(args, config)
 
 
 def index(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, Any]:
@@ -835,6 +842,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--gpu", type=_gpu)
     parser.add_argument("--min-free-mib", type=int, default=DEFAULT_MIN_FREE_MIB)
+    parser.add_argument("--max-concurrent-scans", type=int, default=4)
     return parser
 
 

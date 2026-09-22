@@ -17,6 +17,7 @@ from source.common.round5_phase1_5 import (
     make_control_actions,
     make_probe_split,
     normalized_physical_distance,
+    phase15_scan_slot,
     primary_condition_specs,
     safe_correlation,
     sampling_stability_specs,
@@ -116,6 +117,17 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         self.assertEqual(len(calls), 5)
         self.assertEqual(result["runs"], 3)
         self.assertEqual(len(result["samples_seconds"]), 3)
+
+    def test_scan_slots_bound_concurrent_routes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with phase15_scan_slot(directory, max_slots=1) as slot:
+                self.assertEqual(slot, 0)
+                with self.assertRaises(RuntimeError):
+                    with phase15_scan_slot(directory, max_slots=1):
+                        pass
+            self.assertFalse(
+                (Path(directory) / "locks" / "scan_slots" / "slot_0.lock").exists()
+            )
 
     def test_adaptive_stability_picks_two_per_category(self):
         rows = []

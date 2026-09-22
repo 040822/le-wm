@@ -34,6 +34,7 @@ PHASE15_EVAL_SEED = 42
 PHASE15_STABILITY_SEEDS = (43, 44)
 PHASE15_MAX_CONDITIONS = 2_600
 PHASE15_MAX_EPISODES = 130_000
+PHASE15_MAX_CONCURRENT_SCANS = 4
 PHASE15_BOOTSTRAP_SAMPLES = 10_000
 PHASE15_COHORT_KIND = "dev"
 PHASE15_PROTOCOL_VARIANT = "legacy"
@@ -454,6 +455,84 @@ def condition_lock(result: str | Path) -> Iterator[Path]:
                 lock_path.unlink()
             except FileNotFoundError:
                 pass
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid < 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@contextmanager
+def phase15_scan_slot(
+    output_root: str | Path,
+    *,
+    max_slots: int = PHASE15_MAX_CONCURRENT_SCANS,
+) -> Iterator[int]:
+    """Reserve one of the bounded Phase1.5 scan slots.
+
+    A scan evaluates a whole group and can keep several CPU-heavy workers
+    alive for hours.  The slot files make the four-route limit explicit across
+    independently launched shell processes.  Dead owners are reclaimed on
+    the next launch; active owners are never overwritten.
+    """
+    limit = int(max_slots)
+    if limit < 1:
+        raise ValueError("max_slots must be positive")
+    if limit > PHASE15_MAX_CONCURRENT_SCANS:
+        raise ValueError(
+            f"max_slots cannot exceed the Phase1.5 safety limit of "
+            f"{PHASE15_MAX_CONCURRENT_SCANS}"
+        )
+    directory = Path(output_root) / "locks" / "scan_slots"
+    directory.mkdir(parents=True, exist_ok=True)
+    acquired: tuple[Path, str] | None = None
+    for index in range(limit):
+        path = directory / f"slot_{index}.lock"
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                content = path.read_text(encoding="ascii").strip()
+                owner_pid = int(content.split(" ", 1)[0].split("=", 1)[1])
+            except (OSError, ValueError, IndexError):
+                owner_pid = -1
+            if not _pid_is_alive(owner_pid):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                try:
+                    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                except FileExistsError:
+                    continue
+            else:
+                continue
+        token = f"pid={os.getpid()} token={stable_sha256([os.getpid(), time.time_ns()])}\n"
+        os.write(fd, token.encode("ascii"))
+        os.close(fd)
+        acquired = (path, token)
+        break
+    if acquired is None:
+        raise RuntimeError(
+            f"Phase1.5 scan concurrency limit reached: {limit}; "
+            f"active slots are under {directory}"
+        )
+    path, token = acquired
+    try:
+        yield int(path.stem.removeprefix("slot_"))
+    finally:
+        try:
+            if path.read_text(encoding="ascii") == token:
+                path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def publish_result(path: str | Path, payload: Mapping[str, Any]) -> Path:
@@ -1318,6 +1397,7 @@ __all__ = [
     "PHASE15_EXECUTION_SEMANTICS",
     "PHASE15_FLOW_STEPS",
     "PHASE15_MAX_CONDITIONS",
+    "PHASE15_MAX_CONCURRENT_SCANS",
     "PHASE15_MAX_EPISODES",
     "PHASE15_PROTOCOL_VARIANT",
     "PHASE15_RECEDING_HORIZON",
@@ -1345,6 +1425,7 @@ __all__ = [
     "mark_infrastructure_failure",
     "normalized_physical_distance",
     "p2_protocol",
+    "phase15_scan_slot",
     "phase15_condition_specs",
     "primary_condition_specs",
     "publish_result",
