@@ -165,7 +165,12 @@ def validate_round4_protocol_variant(
     return manifest
 
 
-def validate_round4_config(cfg: Any, mode: str) -> None:
+def validate_round4_config(
+    cfg: Any,
+    mode: str,
+    *,
+    allow_solver_override: bool = False,
+) -> None:
     """Validate frozen shared settings without forcing CEM on P3/P4."""
     mode = validate_round4_mode(mode)
     expected = {
@@ -183,7 +188,7 @@ def validate_round4_config(cfg: Any, mode: str) -> None:
                 f"Round 4 config drift at {path}: expected {expected_value!r}, "
                 f"got {current!r}"
             )
-    if mode in {"P1", "P2"}:
+    if mode in {"P1", "P2"} and not allow_solver_override:
         for path, expected_value in (
             ("solver.num_samples", ROUND4_DEFAULTS["cem"]["num_samples"]),
             ("solver.n_steps", ROUND4_DEFAULTS["cem"]["n_steps"]),
@@ -278,6 +283,8 @@ def run_round4_evaluation(
     guidance_max_rms_offset: float = 0.20,
     proposal_chunk_size: int | None = None,
     allowed_protocol_variants: Sequence[str] = ("round3_revised",),
+    allow_variable_candidate_count: bool = False,
+    allow_solver_config_override: bool = False,
 ) -> dict[str, Any]:
     """Run a Round 4 mode and publish cohort-bound result and trace artifacts."""
     mode = validate_round4_mode(mode)
@@ -298,7 +305,11 @@ def run_round4_evaluation(
     )
     device = str(device or cfg.get("solver", {}).get("device", "cuda"))
     validate_gpu_visibility(device)
-    validate_round4_config(cfg, mode)
+    validate_round4_config(
+        cfg,
+        mode,
+        allow_solver_override=bool(allow_solver_config_override),
+    )
     solver_batch_size = (
         int(ROUND4_DEFAULTS["best_of_n"]["solver_batch_size"])
         if solver_batch_size is None
@@ -311,7 +322,11 @@ def run_round4_evaluation(
     if mode in {"P0-shuf", "P4-first"} and manifest.cohort_kind == "final":
         raise ValueError(f"{mode} is a development-only Round 4 diagnostic")
     if mode in {"P3", "P4", "P4-first"}:
-        if int(candidate_count) != int(ROUND4_DEFAULTS["best_of_n"]["num_candidates"]):
+        if (
+            not allow_variable_candidate_count
+            and int(candidate_count)
+            != int(ROUND4_DEFAULTS["best_of_n"]["num_candidates"])
+        ):
             raise ValueError("Round 4 best-of-N candidate count is frozen at 64")
         if mode in {"P4", "P4-first"} and int(flow_steps) != int(
             ROUND4_DEFAULTS["best_of_n"]["flow_steps"]
