@@ -43,7 +43,14 @@ from source.common.eval import (
 )
 from source.common.eval import EvaluationIdentity
 from source.common.round3_phase1 import CohortManifest, Round3TraceCollector
-from source.common.round4_eval import run_round4_evaluation
+from source.common.round4_eval import run_round4_evaluation, validate_gpu_visibility
+from scripts.round5_phase1_5 import (
+    DEFAULT_MAX_LOAD_PER_CPU,
+    DEFAULT_MIN_AVAILABLE_MIB,
+    DEFAULT_MIN_FREE_MIB,
+    _gpu_preflight,
+    _host_preflight,
+)
 from source.common.round5_phase1_5 import (
     PHASE15_PROTOCOL_VARIANT,
     PHASE15_TASKS,
@@ -147,13 +154,24 @@ def _gpu(value: str | None) -> str | None:
     return str(value)
 
 
-def _configure_device(device: str, gpu: str | None) -> torch.device:
+def _configure_device(
+    device: str,
+    gpu: str | None,
+    *,
+    minimum_free_mib: int,
+    max_load_per_cpu: float,
+    minimum_available_mib: int,
+) -> torch.device:
     if str(device).startswith("cuda"):
         if gpu is None:
             raise ValueError("CUDA diagnostics require --gpu")
-        import os
-
+        _host_preflight(
+            max_load_per_cpu=max_load_per_cpu,
+            minimum_available_mib=minimum_available_mib,
+        )
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
+        validate_gpu_visibility(device)
+        _gpu_preflight(str(gpu), minimum_free_mib)
         if not torch.cuda.is_available():
             raise RuntimeError(f"CUDA device {gpu} is unavailable")
     return torch.device(device)
@@ -575,7 +593,13 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         raise ValueError("--guidance must be post_opt or guided_flow")
     if args.device.startswith("cuda") and args.gpu is None:
         raise ValueError("guidance-pool CUDA runs require --gpu")
-    _configure_device(args.device, args.gpu)
+    _configure_device(
+        args.device,
+        args.gpu,
+        minimum_free_mib=args.min_free_mib,
+        max_load_per_cpu=args.max_load_per_cpu,
+        minimum_available_mib=args.min_available_mib,
+    )
     manifest = _manifest(config, args.task)
     checkpoint, checkpoint_sha256 = _checkpoint(config, args.task)
     model, resolved = load_policy_or_model(str(checkpoint))
@@ -1029,7 +1053,13 @@ def _fit_mlp(
 
 def probe(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     tasks = PHASE15_TASKS if args.task == "all" else (args.task,)
-    device = _configure_device(args.device, args.gpu)
+    device = _configure_device(
+        args.device,
+        args.gpu,
+        minimum_free_mib=args.min_free_mib,
+        max_load_per_cpu=args.max_load_per_cpu,
+        minimum_available_mib=args.min_available_mib,
+    )
     output_root = _resolve(args.output_root) / "diagnostics" / "probe"
     output_root.mkdir(parents=True, exist_ok=True)
     all_results: list[dict[str, Any]] = []
@@ -1195,7 +1225,13 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         raise ValueError("candidate-pool requires one task; run it once per task")
     if args.device.startswith("cuda") and args.gpu is None:
         raise ValueError("candidate-pool CUDA runs require --gpu")
-    _configure_device(args.device, args.gpu)
+    _configure_device(
+        args.device,
+        args.gpu,
+        minimum_free_mib=args.min_free_mib,
+        max_load_per_cpu=args.max_load_per_cpu,
+        minimum_available_mib=args.min_available_mib,
+    )
     manifest = _manifest(config, args.task)
     checkpoint, checkpoint_sha256 = _checkpoint(config, args.task)
     model, resolved = load_policy_or_model(str(checkpoint))
@@ -1324,6 +1360,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", choices=(*PHASE15_TASKS, "all"), default="all")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--gpu", type=_gpu)
+    parser.add_argument("--min-free-mib", type=int, default=DEFAULT_MIN_FREE_MIB)
+    parser.add_argument("--min-available-mib", type=int, default=DEFAULT_MIN_AVAILABLE_MIB)
+    parser.add_argument("--max-load-per-cpu", type=float, default=DEFAULT_MAX_LOAD_PER_CPU)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--max-trajectories", type=int, default=1000)
     parser.add_argument("--frames-per-trajectory", type=int, default=100)
