@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import resource
 import subprocess
 import sys
 from typing import Any, Mapping, Sequence
@@ -984,6 +985,20 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
             cfg.eval.num_eval = 5
             cfg.world.num_envs = 5
             output_dir = target_root / task / str(spec["name"])
+            result_file = output_dir / "result.json"
+            if result_file.is_file():
+                cached = json.loads(result_file.read_text(encoding="utf-8"))
+                records.append(
+                    {
+                        "task": task,
+                        "condition": spec["name"],
+                        "status": "reused",
+                        "success_rate": cached.get("success_rate"),
+                        "evaluation_seconds": cached.get("evaluation_seconds"),
+                    }
+                )
+                continue
+            usage_before = resource.getrusage(resource.RUSAGE_SELF)
             try:
                 result = run_round4_evaluation(
                     cfg,
@@ -1018,7 +1033,24 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                     allow_variable_candidate_count=True,
                     allow_solver_config_override=True,
                 )
-                records.append({"task": task, "condition": spec["name"], "status": "ok", "success_rate": result["success_rate"]})
+                usage_after = resource.getrusage(resource.RUSAGE_SELF)
+                planning = result.get("round4_planning", {})
+                records.append(
+                    {
+                        "task": task,
+                        "condition": spec["name"],
+                        "status": "ok",
+                        "success_rate": result["success_rate"],
+                        "evaluation_seconds": result.get("evaluation_seconds"),
+                        "planning_samples": len(planning.get("planning_samples_seconds", ())),
+                        "planning_peak_memory_bytes": planning.get("peak_memory_bytes"),
+                        "process_cpu_seconds": float(
+                            (usage_after.ru_utime + usage_after.ru_stime)
+                            - (usage_before.ru_utime + usage_before.ru_stime)
+                        ),
+                        "process_max_rss_kib": int(usage_after.ru_maxrss),
+                    }
+                )
             except Exception as exc:
                 records.append({"task": task, "condition": spec["name"], "status": "failed", "error": str(exc)})
                 raise
