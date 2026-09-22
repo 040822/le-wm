@@ -2,6 +2,7 @@
 
 from collections import deque
 import time
+from typing import Callable
 
 import hydra
 import numpy as np
@@ -727,6 +728,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         guidance_last_steps=5,
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
+        diagnostic_callback: Callable[[dict], None] | None = None,
     ):
         """构造直接动作 policy，并冻结模型、记录动作块尺寸和采样参数。"""
         super().__init__()
@@ -772,6 +774,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self._action_buffer = None
         self._generators = {}
         self.planning_events: list[dict] = []
+        self.diagnostic_callback = diagnostic_callback
 
     def _generator(self, device):
         """按设备懒创建可复现的 torch.Generator，并在多次规划间保留随机状态。"""
@@ -897,13 +900,22 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             else:
                 encode_seconds = 0.0
             generator = self._generator(device)
+            diagnostic_noise = None
+            if self.diagnostic_callback is not None and self.guidance_mode != "none":
+                # Draw once and pass the same initial noise to the guided and
+                # unguided paths.  This keeps the paired comparison about the
+                # guidance update rather than a second stochastic proposal.
+                diagnostic_noise = self.model._initial_noise(
+                    z0, None, generator
+                ).detach()
             proposal_started = time.perf_counter() if timing_enabled else None
             with torch.no_grad():
                 if self.mode == "stage_a":
                     chunk = self.model.sample_actions(
                         z0,
+                        noise=diagnostic_noise,
                         num_steps=self.inference_steps,
-                        generator=generator,
+                        generator=None if diagnostic_noise is not None else generator,
                         goal_latent=goal_latent,
                         integrator=self.integrator,
                         guidance_mode=self.guidance_mode,
@@ -915,8 +927,9 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                 else:
                     chunk = self.model.sample_joint(
                         z0,
+                        noise=diagnostic_noise,
                         num_steps=self.inference_steps,
-                        generator=generator,
+                        generator=None if diagnostic_noise is not None else generator,
                         integrator=self.integrator,
                     )["actions"]
 
@@ -928,6 +941,32 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                 proposal_seconds = 0.0
 
             raw_chunk = chunk
+            diagnostic_record = None
+            if diagnostic_noise is not None:
+                with torch.no_grad():
+                    unguided = self.model.sample_actions(
+                        z0,
+                        noise=diagnostic_noise,
+                        num_steps=self.inference_steps,
+                        goal_latent=goal_latent,
+                        integrator=self.integrator,
+                        guidance_mode="none",
+                    )
+                    predicted_before = self.model.get_cost_from_latents(
+                        z0, goal_latent, unguided[:, None]
+                    ).reshape(-1)
+                    predicted_after = self.model.get_cost_from_latents(
+                        z0, goal_latent, chunk[:, None]
+                    ).reshape(-1)
+                diagnostic_record = {
+                    "z_start": z0.detach().cpu(),
+                    "z_goal": None if goal_latent is None else goal_latent.detach().cpu(),
+                    "unguided_actions": unguided.detach().cpu(),
+                    "guided_actions": chunk.detach().cpu(),
+                    "predicted_cost_before": predicted_before.detach().cpu(),
+                    "predicted_cost_after": predicted_after.detach().cpu(),
+                    "replan_indices": tuple(int(index) for index in replan),
+                }
             if self.action_bound_mode != "none":
                 if self.action_bounds is None:
                     raise RuntimeError(
@@ -959,8 +998,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                 if self.inference_steps is None
                 else self.inference_steps
             )
-            self.planning_events.append(
-                {
+            event = {
                     "proposal_source": self.mode,
                     "candidate_count": 1,
                     "flow_steps": flow_steps,
@@ -1000,7 +1038,10 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                         else None
                     ),
                 }
-            )
+            self.planning_events.append(event)
+            if diagnostic_record is not None:
+                diagnostic_record["event"] = dict(event)
+                self.diagnostic_callback(diagnostic_record)
             for row, env_index in enumerate(replan):
                 self._action_buffer[env_index].extend(plan[row].cpu())
 
@@ -1035,6 +1076,7 @@ def make_fast_lewam_policy(
     guidance_last_steps=5,
     guidance_inner_steps=5,
     guidance_max_rms_offset=0.20,
+    diagnostic_callback=None,
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -1130,6 +1172,7 @@ def make_fast_lewam_policy(
         guidance_last_steps=guidance_last_steps,
         guidance_inner_steps=guidance_inner_steps,
         guidance_max_rms_offset=guidance_max_rms_offset,
+        diagnostic_callback=diagnostic_callback,
     )
 
 

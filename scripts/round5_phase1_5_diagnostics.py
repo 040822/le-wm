@@ -507,6 +507,251 @@ def _attach_candidate_outcomes(
     return result
 
 
+def _first_guidance_records(
+    event: Mapping[str, Any],
+    *,
+    task: str,
+    flow_steps: int,
+    guidance: str,
+    manifest: CohortManifest,
+    seen_slots: set[int],
+    seed: int,
+) -> tuple[list[dict[str, Any]], np.ndarray, np.ndarray, np.ndarray]:
+    """Capture paired unguided, guided, and same-RMS random actions."""
+    guided = torch.as_tensor(event["guided_actions"]).detach().cpu().numpy()
+    baseline = torch.as_tensor(event["unguided_actions"]).detach().cpu().numpy()
+    before = torch.as_tensor(event["predicted_cost_before"]).detach().cpu().numpy().reshape(-1)
+    after = torch.as_tensor(event["predicted_cost_after"]).detach().cpu().numpy().reshape(-1)
+    slots = tuple(int(value) for value in event["replan_indices"])
+    if guided.shape != baseline.shape or guided.ndim != 3:
+        raise ValueError("guidance callback returned incompatible action shapes")
+    if guided.shape[0] != len(slots) or before.shape != (len(slots),) or after.shape != (len(slots),):
+        raise ValueError("guidance callback returned incompatible cost or slot shapes")
+    random_actions = np.empty_like(guided)
+    rows: list[dict[str, Any]] = []
+    new_indices: list[int] = []
+    for row, slot in enumerate(slots):
+        if slot in seen_slots:
+            continue
+        if slot < 0 or slot >= len(manifest.entries):
+            raise ValueError(f"guidance callback returned invalid slot {slot}")
+        seen_slots.add(slot)
+        new_indices.append(row)
+        delta = np.asarray(guided[row] - baseline[row], dtype=np.float64)
+        rms = float(np.sqrt(np.mean(np.square(delta))))
+        rng = np.random.default_rng(int(seed) + slot)
+        direction = rng.normal(size=delta.shape)
+        direction_rms = float(np.sqrt(np.mean(np.square(direction))))
+        if direction_rms <= 0.0:
+            raise RuntimeError("random guidance direction has zero RMS")
+        random_actions[row] = baseline[row] + direction * (rms / direction_rms)
+        entry = manifest.entries[slot]
+        state_id = _candidate_state_id(entry)
+        rows.append(
+            {
+                "task": task,
+                "state_id": state_id,
+                "slot": slot,
+                "episode_id": entry.episode_id,
+                "start_step": int(entry.start_step),
+                "row_index": int(entry.row_index),
+                "flow_steps": int(flow_steps),
+                "guidance": str(guidance),
+                "guided_predicted_cost_before": float(before[row]),
+                "guided_predicted_cost_after": float(after[row]),
+                "guided_action_rms_displacement": rms,
+                "random_action_rms_displacement": rms,
+            }
+        )
+    indices = np.asarray(new_indices, dtype=np.int64)
+    return rows, baseline[indices], guided[indices], random_actions[indices]
+
+
+def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+    """Run paired guidance branches against same-RMS random controls."""
+    if args.task == "all":
+        raise ValueError("guidance-pool requires one task")
+    if args.guidance not in {"post_opt", "guided_flow"}:
+        raise ValueError("--guidance must be post_opt or guided_flow")
+    if args.device.startswith("cuda") and args.gpu is None:
+        raise ValueError("guidance-pool CUDA runs require --gpu")
+    _configure_device(args.device, args.gpu)
+    manifest = _manifest(config, args.task)
+    checkpoint, checkpoint_sha256 = _checkpoint(config, args.task)
+    model, resolved = load_policy_or_model(str(checkpoint))
+    if resolved is not None and Path(resolved).resolve() != checkpoint.resolve():
+        raise ValueError(f"checkpoint resolver changed requested path: {checkpoint}")
+    diagnostics = config.get("diagnostics", {})
+    default_flow_steps = (1, 2, 5, 16) if args.guidance == "post_opt" else (2, 5)
+    flow_steps = tuple(args.flow_steps or default_flow_steps)
+    output_root = _resolve(args.output_root) / "diagnostics" / "guidance" / args.task
+    output_root.mkdir(parents=True, exist_ok=True)
+    all_records: list[dict[str, Any]] = []
+    for flow_step in flow_steps:
+        target = output_root / f"{args.guidance}_s{int(flow_step)}.jsonl"
+        if target.is_file():
+            all_records.extend(_read_records(target))
+            continue
+        captured: list[dict[str, Any]] = []
+        action_batches: dict[str, list[np.ndarray]] = {
+            "baseline": [],
+            "guided": [],
+            "random": [],
+        }
+        seen_slots: set[int] = set()
+
+        def callback(event: dict[str, Any]) -> None:
+            rows, baseline, guided, random_actions = _first_guidance_records(
+                event,
+                task=args.task,
+                flow_steps=int(flow_step),
+                guidance=args.guidance,
+                manifest=manifest,
+                seen_slots=seen_slots,
+                seed=int(config.get("diagnostics", {}).get("pool_seed", 2026)),
+            )
+            captured.extend(rows)
+            if rows:
+                action_batches["baseline"].append(baseline)
+                action_batches["guided"].append(guided)
+                action_batches["random"].append(random_actions)
+
+        cfg = compose_eval_config(
+            args.task,
+            overrides=[
+                "eval.num_eval=50",
+                "eval.goal_offset_steps=25",
+                "eval.eval_budget=50",
+                "plan_config.horizon=5",
+                "plan_config.receding_horizon=5",
+                "plan_config.action_block=5",
+                "output.save_video=false",
+                f"solver.device={args.device}",
+            ],
+        )
+        run_round4_evaluation(
+            cfg,
+            task=args.task,
+            policy_or_model=model,
+            mode="P0",
+            identity=EvaluationIdentity(
+                entrypoint="round5_phase1_5_guidance_pool",
+                policy_kind="round4_shared_dit",
+                checkpoint=str(checkpoint.resolve()),
+                epoch=int(config["training"]["epoch"]),
+                stage="P0",
+            ),
+            manifest=manifest,
+            output_dir=output_root / f"proposal_eval_s{int(flow_step)}",
+            device=args.device,
+            trace=False,
+            candidate_count=1,
+            flow_steps=int(flow_step),
+            action_flow_steps=int(flow_step),
+            action_bound_mode="none",
+            cem_protocol="not_applicable",
+            guidance_mode=args.guidance,
+            guidance_step_size=float(args.guidance_step_size),
+            guidance_last_steps=int(args.guidance_last_steps or flow_step),
+            guidance_inner_steps=int(args.guidance_inner_steps),
+            guidance_max_rms_offset=float(args.max_rms_offset),
+            allowed_protocol_variants=("legacy",),
+            allow_variable_candidate_count=True,
+            allow_solver_config_override=True,
+            diagnostic_callback=callback,
+        )
+        if seen_slots != set(range(len(manifest.entries))):
+            missing = sorted(set(range(len(manifest.entries))) - seen_slots)
+            raise RuntimeError(f"guidance pool missed initial replans for slots {missing}")
+        action_arrays = {
+            kind: np.concatenate(batches, axis=0)
+            for kind, batches in action_batches.items()
+            if batches
+        }
+        if set(action_arrays) != {"baseline", "guided", "random"}:
+            raise RuntimeError("guidance callback did not capture all paired action batches")
+        def proposal_rows(kind: str, cost_field: str) -> list[dict[str, Any]]:
+            return [
+                {
+                    **row,
+                    "candidate_index": 0,
+                    "predicted_cost": float(row[cost_field]),
+                    "action": action_arrays[kind][index].tolist(),
+                }
+                for index, row in enumerate(captured)
+            ]
+        baseline_rows = proposal_rows("baseline", "guided_predicted_cost_before")
+        guided_rows = proposal_rows("guided", "guided_predicted_cost_after")
+        random_rows = proposal_rows("random", "guided_predicted_cost_before")
+        branch_session = DatasetEvaluationSession(
+            cfg, task=args.task, cohort=manifest.to_evaluation_cohort()
+        )
+        branches = {
+            kind: _run_fixed_candidate(
+                cfg=cfg,
+                task=args.task,
+                manifest=manifest,
+                normalized_actions=action_arrays[kind],
+                process=branch_session.process,
+                model=model,
+                transform=branch_session.transform["pixels"],
+                device=args.device,
+                output_dir=output_root / f"{args.guidance}_s{int(flow_step)}" / kind,
+            )
+            for kind in ("baseline", "guided", "random")
+        }
+        outcomes = {
+            kind: {
+                int(row["slot"]): row
+                for row in _attach_candidate_outcomes(
+                    proposal_rows(kind, "guided_predicted_cost_before" if kind != "guided" else "guided_predicted_cost_after"),
+                    branches[kind],
+                    task=args.task,
+                )
+            }
+            for kind in ("baseline", "guided", "random")
+        }
+        completed: list[dict[str, Any]] = []
+        for row in captured:
+            slot = int(row["slot"])
+            base = outcomes["baseline"][slot]
+            guided = outcomes["guided"][slot]
+            random = outcomes["random"][slot]
+            if (
+                base["true_distance"] is None
+                or guided["true_distance"] is None
+                or random["true_distance"] is None
+            ):
+                raise RuntimeError(f"guidance branch missed a physical outcome for slot {slot}")
+            completed.append(
+                {
+                    **row,
+                    "guided_true_cost_before": float(base["true_distance"]),
+                    "guided_true_cost_after": float(guided["true_distance"]),
+                    "random_true_cost_before": float(base["true_distance"]),
+                    "random_true_cost_after": float(random["true_distance"]),
+                    "outcome_status": "completed",
+                }
+            )
+        _write_jsonl(target, completed)
+        all_records.extend(completed)
+    aggregate = output_root / "records.jsonl"
+    _write_jsonl(aggregate, all_records)
+    atomic_write_json(
+        output_root / "manifest.json",
+        {
+            "schema_version": "round5_phase1_5_guidance_pool_v1",
+            "task": args.task,
+            "guidance": args.guidance,
+            "flow_steps": list(flow_steps),
+            "records": str(aggregate),
+            "checkpoint": str(checkpoint.resolve()),
+            "checkpoint_sha256": checkpoint_sha256,
+        },
+    )
+    print(json.dumps({"guidance_pool": str(output_root), "records": str(aggregate)}, ensure_ascii=False, sort_keys=True))
+
+
 def _episode_column(dataset: Any) -> str:
     if "episode_idx" in dataset.column_names:
         return "episode_idx"
@@ -1070,7 +1315,10 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("validate", "probe", "summarize", "candidate-pool"))
+    parser.add_argument(
+        "command",
+        choices=("validate", "probe", "summarize", "candidate-pool", "guidance-pool"),
+    )
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--task", choices=(*PHASE15_TASKS, "all"), default="all")
@@ -1088,6 +1336,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bootstrap-samples", type=int, default=10_000)
     parser.add_argument("--proposal-only", action="store_true")
     parser.add_argument("--limit-candidates", type=int)
+    parser.add_argument("--guidance", choices=("post_opt", "guided_flow"), default="post_opt")
+    parser.add_argument("--guidance-step-size", type=float, default=0.01)
+    parser.add_argument("--guidance-last-steps", type=int)
+    parser.add_argument("--guidance-inner-steps", type=int, default=5)
+    parser.add_argument("--max-rms-offset", type=float, default=0.2)
     return parser
 
 
@@ -1100,6 +1353,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         probe(args, config)
     elif args.command == "candidate-pool":
         candidate_pool(args, config)
+    elif args.command == "guidance-pool":
+        guidance_pool(args, config)
     else:
         summarize(args, config)
 

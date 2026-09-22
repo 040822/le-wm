@@ -725,6 +725,7 @@ def make_round4_policy(
             seed=seed,
             action_flow_integrator=action_flow_integrator,
             action_bound_mode=action_bound_mode,
+            diagnostic_callback=diagnostic_callback,
             **guidance_kwargs,
         )
     if mode == "P0-shuf":

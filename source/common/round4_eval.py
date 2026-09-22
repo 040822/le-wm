@@ -299,8 +299,8 @@ def run_round4_evaluation(
         raise ValueError(f"guidance is not defined for {mode}")
     if guidance_mode == "post_opt_refine" and mode != "P3":
         raise ValueError("post_opt_refine guidance is only defined for P3")
-    if diagnostic_callback is not None and mode != "P3":
-        raise ValueError("diagnostic candidate capture is only defined for P3")
+    if diagnostic_callback is not None and mode not in {"P0", "P3"}:
+        raise ValueError("diagnostic capture is only defined for P0 and P3")
     cem_protocol, action_bound_mode = resolve_cem_protocol(
         mode,
         cem_protocol,
