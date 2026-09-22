@@ -993,6 +993,7 @@ def make_control_actions(
     seed: int = 2026,
     action_block: int = PHASE15_ACTION_BLOCK,
     include_anchors: bool = True,
+    physical_zero: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Create the deterministic control actions from the fixed-pool protocol."""
     values = np.asarray(anchors, dtype=np.float64)
@@ -1032,7 +1033,10 @@ def make_control_actions(
             add(np.roll(transformed, -int(action_block), axis=0), "block_transform", anchor_index)
     for index in range(64):
         add(_unit_direction(rng, values[0].shape), "standard_gaussian", None)
-    add(np.zeros_like(values[0]), "physical_zero", None)
+    physical_zero_value = np.zeros_like(values[0]) if physical_zero is None else np.asarray(physical_zero, dtype=np.float64)
+    if physical_zero_value.shape != values[0].shape or not np.all(np.isfinite(physical_zero_value)):
+        raise ValueError("physical_zero must be finite and match one anchor shape")
+    add(physical_zero_value, "physical_zero", None)
     add(np.zeros_like(values[0]), "normalized_zero", None)
     return np.stack(actions, axis=0), metadata
 
@@ -1145,6 +1149,134 @@ def candidate_selection_metrics(
     }
 
 
+def _validate_candidate_pool(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    flow_steps: Sequence[int],
+    candidates_per_flow_step: int,
+    state_ids: Sequence[Any] | None = None,
+) -> tuple[list[dict[str, Any]], tuple[Any, ...]]:
+    """Validate the fixed candidate-pool contract before calculating metrics."""
+    expected_flow_steps = tuple(int(value) for value in flow_steps)
+    if not expected_flow_steps or len(set(expected_flow_steps)) != len(expected_flow_steps):
+        raise ValueError("flow_steps must be a non-empty sequence of unique values")
+    candidate_count = int(candidates_per_flow_step)
+    if candidate_count < 1:
+        raise ValueError("candidates_per_flow_step must be positive")
+    normalized: list[dict[str, Any]] = []
+    groups: dict[tuple[Any, int], list[int]] = {}
+    observed_states: list[Any] = []
+    observed_state_keys: set[str] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("candidate-pool records must be mappings")
+        if "state_id" not in record or "flow_steps" not in record or "candidate_index" not in record:
+            raise ValueError("candidate-pool records need state_id, flow_steps, and candidate_index")
+        state_id = record["state_id"]
+        state_key = canonical_json(state_id)
+        flow = int(record["flow_steps"])
+        candidate_index = int(record["candidate_index"])
+        if flow not in expected_flow_steps:
+            raise ValueError(f"unexpected candidate-pool flow_steps={flow}")
+        if candidate_index < 0 or candidate_index >= candidate_count:
+            raise ValueError(f"candidate_index {candidate_index} is outside the fixed pool")
+        if state_key not in observed_state_keys:
+            observed_state_keys.add(state_key)
+            observed_states.append(state_id)
+        if "predicted_cost" not in record:
+            raise ValueError("candidate-pool records need predicted_cost")
+        try:
+            predicted_cost = float(record["predicted_cost"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("predicted_cost must be finite") from exc
+        if not np.isfinite(predicted_cost):
+            raise ValueError("predicted_cost must be finite")
+        if "action" not in record:
+            raise ValueError("candidate-pool records need the proposed action sequence")
+        action = np.asarray(record["action"], dtype=np.float64)
+        if action.ndim < 1 or action.size == 0 or not np.all(np.isfinite(action)):
+            raise ValueError("candidate-pool action sequences must be finite and non-empty")
+        normalized_record = dict(record)
+        normalized_record["flow_steps"] = flow
+        normalized_record["candidate_index"] = candidate_index
+        normalized_record["predicted_cost"] = predicted_cost
+        groups.setdefault((state_key, flow), []).append(candidate_index)
+        normalized.append(normalized_record)
+    expected_states = tuple(observed_states if state_ids is None else state_ids)
+    expected_state_keys = {canonical_json(value) for value in expected_states}
+    if not expected_state_keys:
+        raise ValueError("candidate-pool records must contain at least one state")
+    if observed_state_keys != expected_state_keys:
+        raise ValueError("candidate-pool state_ids do not match the requested states")
+    expected_indices = set(range(candidate_count))
+    for state_key in expected_state_keys:
+        for flow in expected_flow_steps:
+            indices = groups.get((state_key, flow), [])
+            if set(indices) != expected_indices or len(indices) != candidate_count:
+                raise ValueError(
+                    "candidate pool is incomplete or duplicated for "
+                    f"state={state_key}, flow_steps={flow}"
+                )
+    return normalized, expected_states
+
+
+def candidate_pool_metrics(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    task: str,
+    flow_steps: Sequence[int] = PHASE15_FLOW_STEPS,
+    candidates_per_flow_step: int = 256,
+    state_ids: Sequence[Any] | None = None,
+    random_draws: int = 128,
+    bootstrap_samples: int = PHASE15_BOOTSTRAP_SAMPLES,
+    seed: int = 2026,
+) -> dict[str, Any]:
+    """Summarize the fixed pool by flow step with state-clustered intervals.
+
+    Every flow step is evaluated against the same state set and exactly the
+    requested number of candidate action sequences.  Candidate rows are never
+    treated as iid observations: all confidence intervals resample states.
+    """
+    normalized, expected_states = _validate_candidate_pool(
+        records,
+        flow_steps=flow_steps,
+        candidates_per_flow_step=candidates_per_flow_step,
+        state_ids=state_ids,
+    )
+    by_flow: dict[str, dict[str, Any]] = {}
+    for offset, flow in enumerate(tuple(int(value) for value in flow_steps)):
+        subset = [record for record in normalized if int(record["flow_steps"]) == flow]
+        metrics = candidate_selection_metrics(
+            subset,
+            task=task,
+            random_draws=random_draws,
+            seed=int(seed) + offset,
+        )
+        state_rows = metrics["state_rows"]
+        metrics["bootstrap"] = {
+            field: cluster_bootstrap(
+                state_rows,
+                field,
+                samples=bootstrap_samples,
+                seed=int(seed) + offset * 101 + index,
+            )
+            for index, field in enumerate(
+                ("oracle_success", "selected_success", "selection_regret", "oracle_distance", "selected_distance")
+            )
+        }
+        by_flow[str(flow)] = metrics
+    return {
+        "schema_version": "round5_phase1_5_candidate_pool_metrics_v1",
+        "task": str(task),
+        "states": len(expected_states),
+        "candidate_rows": len(normalized),
+        "flow_steps": [int(value) for value in flow_steps],
+        "candidates_per_flow_step": int(candidates_per_flow_step),
+        "complete": True,
+        "by_flow_steps": by_flow,
+    }
+
+
 def guidance_effect_metrics(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Summarize predicted and real effects, including model exploitation."""
     if not records:
@@ -1171,6 +1303,90 @@ def guidance_effect_metrics(records: Sequence[Mapping[str, Any]]) -> dict[str, A
         ),
         "action_rms_displacement_mean": None if len(finite_displacement) == 0 else float(np.mean(finite_displacement)),
         "action_saturation_fraction": float(np.mean([float(row.get("action_saturation_fraction", 0.0)) for row in records])),
+    }
+
+
+def paired_guidance_metrics(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    bootstrap_samples: int = PHASE15_BOOTSTRAP_SAMPLES,
+    seed: int = 2026,
+    rms_tolerance: float = 1e-6,
+) -> dict[str, Any]:
+    """Compare a guidance update with its same-displacement random control."""
+    if not records:
+        raise ValueError("paired guidance records cannot be empty")
+    required = (
+        "state_id",
+        "guided_predicted_cost_before",
+        "guided_predicted_cost_after",
+        "guided_true_cost_before",
+        "guided_true_cost_after",
+        "random_true_cost_before",
+        "random_true_cost_after",
+        "guided_action_rms_displacement",
+        "random_action_rms_displacement",
+    )
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        missing = [field for field in required if field not in record]
+        if missing:
+            raise ValueError(f"paired guidance record is missing {missing}")
+        values = {field: float(record[field]) for field in required if field != "state_id"}
+        if not all(np.isfinite(value) for value in values.values()):
+            raise ValueError("paired guidance values must be finite")
+        if not np.isclose(
+            values["guided_action_rms_displacement"],
+            values["random_action_rms_displacement"],
+            rtol=0.0,
+            atol=float(rms_tolerance),
+        ):
+            raise ValueError("guided and random controls must have the same RMS displacement")
+        predicted_improvement = (
+            values["guided_predicted_cost_before"]
+            - values["guided_predicted_cost_after"]
+        )
+        guided_improvement = (
+            values["guided_true_cost_before"] - values["guided_true_cost_after"]
+        )
+        random_improvement = (
+            values["random_true_cost_before"] - values["random_true_cost_after"]
+        )
+        rows.append(
+            {
+                "state_id": record["state_id"],
+                "predicted_improvement": predicted_improvement,
+                "guided_true_improvement": guided_improvement,
+                "random_true_improvement": random_improvement,
+                "paired_advantage": guided_improvement - random_improvement,
+                "model_exploitation": bool(predicted_improvement > 0.0 and guided_improvement < 0.0),
+                "guided_action_rms_displacement": values["guided_action_rms_displacement"],
+                "random_action_rms_displacement": values["random_action_rms_displacement"],
+            }
+        )
+    return {
+        "schema_version": "round5_phase1_5_paired_guidance_metrics_v1",
+        "records": len(rows),
+        "states": len({canonical_json(row["state_id"]) for row in rows}),
+        "predicted_improvement_mean": float(np.mean([row["predicted_improvement"] for row in rows])),
+        "guided_true_improvement_mean": float(np.mean([row["guided_true_improvement"] for row in rows])),
+        "random_true_improvement_mean": float(np.mean([row["random_true_improvement"] for row in rows])),
+        "paired_advantage_mean": float(np.mean([row["paired_advantage"] for row in rows])),
+        "guided_true_improvement_fraction": float(np.mean([row["guided_true_improvement"] > 0.0 for row in rows])),
+        "random_true_improvement_fraction": float(np.mean([row["random_true_improvement"] > 0.0 for row in rows])),
+        "model_exploitation_fraction": float(np.mean([row["model_exploitation"] for row in rows])),
+        "bootstrap": {
+            field: cluster_bootstrap(
+                rows,
+                field,
+                samples=bootstrap_samples,
+                seed=int(seed) + index,
+            )
+            for index, field in enumerate(
+                ("guided_true_improvement", "random_true_improvement", "paired_advantage")
+            )
+        },
+        "state_rows": rows,
     }
 
 
@@ -1359,6 +1575,76 @@ def restore_rng_state(obj: Any, state: Any) -> None:
     bit_generator.state = deepcopy(state)
 
 
+def capture_environment_state(env: Any) -> dict[str, Any]:
+    """Capture a restorable simulator state for diagnostic branch replay."""
+    target = getattr(env, "unwrapped", env)
+    getter = getattr(target, "get_state", None)
+    setter = getattr(target, "set_state", None)
+    if callable(getter) and callable(setter):
+        return {"kind": "get_set_state", "state": deepcopy(getter())}
+    sim = getattr(target, "sim", None)
+    sim_getter = getattr(sim, "get_state", None)
+    sim_setter = getattr(sim, "set_state", None)
+    if callable(sim_getter) and callable(sim_setter):
+        return {"kind": "sim_state", "state": deepcopy(sim_getter())}
+    data = getattr(target, "_data", getattr(target, "data", None))
+    model = getattr(target, "_model", getattr(target, "model", None))
+    if data is not None and hasattr(data, "qpos") and hasattr(data, "qvel"):
+        snapshot: dict[str, Any] = {
+            "kind": "mujoco_data",
+            "qpos": np.asarray(data.qpos).copy(),
+            "qvel": np.asarray(data.qvel).copy(),
+        }
+        for name in ("act", "ctrl", "time"):
+            if hasattr(data, name):
+                snapshot[name] = np.asarray(getattr(data, name)).copy()
+        if model is not None:
+            snapshot["model"] = model
+        return snapshot
+    raise ValueError("environment does not expose a supported restorable simulator state")
+
+
+def restore_environment_state(env: Any, snapshot: Mapping[str, Any]) -> None:
+    """Restore a snapshot produced by :func:`capture_environment_state`."""
+    target = getattr(env, "unwrapped", env)
+    kind = snapshot.get("kind")
+    if kind == "get_set_state":
+        setter = getattr(target, "set_state", None)
+        if not callable(setter):
+            raise ValueError("environment lost its set_state method")
+        setter(deepcopy(snapshot["state"]))
+        return
+    if kind == "sim_state":
+        sim = getattr(target, "sim", None)
+        setter = getattr(sim, "set_state", None)
+        if not callable(setter):
+            raise ValueError("environment lost its simulator set_state method")
+        setter(deepcopy(snapshot["state"]))
+        forward = getattr(sim, "forward", None)
+        if callable(forward):
+            forward()
+        return
+    if kind == "mujoco_data":
+        data = getattr(target, "_data", getattr(target, "data", None))
+        if data is None:
+            raise ValueError("environment lost its MuJoCo data object")
+        for name in ("qpos", "qvel", "act", "ctrl", "time"):
+            if name in snapshot and hasattr(data, name):
+                value = np.asarray(snapshot[name])
+                getattr(data, name)[...] = value
+        model = snapshot.get("model", getattr(target, "_model", getattr(target, "model", None)))
+        try:
+            import mujoco
+
+            mujoco.mj_forward(model, data)
+        except (ImportError, TypeError):
+            forward = getattr(data, "forward", None)
+            if callable(forward):
+                forward()
+        return
+    raise ValueError(f"unknown environment state snapshot kind: {kind!r}")
+
+
 def verify_state_restore(
     make_env: Callable[[], Any],
     *,
@@ -1407,6 +1693,8 @@ __all__ = [
     "PHASE15_TASKS",
     "atomic_write_json",
     "adaptive_stability_specs",
+    "capture_environment_state",
+    "candidate_pool_metrics",
     "candidate_selection_metrics",
     "canonical_json",
     "circular_angle_error",
@@ -1426,10 +1714,12 @@ __all__ = [
     "normalized_physical_distance",
     "p2_protocol",
     "phase15_scan_slot",
+    "paired_guidance_metrics",
     "phase15_condition_specs",
     "primary_condition_specs",
     "publish_result",
     "result_path",
+    "restore_environment_state",
     "safe_correlation",
     "sampling_stability_specs",
     "stable_sha256",

@@ -3,10 +3,15 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import gymnasium as gym
+from sklearn.preprocessing import StandardScaler
+
+from scripts.round5_phase1_5_diagnostics import FixedCandidatePolicy
 
 from source.common.round5_phase1_5 import (
     PHASE15_BOOTSTRAP_SAMPLES,
     adaptive_stability_specs,
+    capture_environment_state,
     candidate_selection_metrics,
     cluster_bootstrap,
     condition_id,
@@ -17,11 +22,14 @@ from source.common.round5_phase1_5 import (
     make_control_actions,
     make_probe_split,
     normalized_physical_distance,
+    candidate_pool_metrics,
+    paired_guidance_metrics,
     phase15_scan_slot,
     primary_condition_specs,
     safe_correlation,
     sampling_stability_specs,
     synchronous_timing,
+    restore_environment_state,
 )
 
 
@@ -50,6 +58,51 @@ class Round5Phase15GridTests(unittest.TestCase):
 
 
 class Round5Phase15DiagnosticsTests(unittest.TestCase):
+    def test_fixed_candidate_policy_replays_then_holds_zero(self):
+        class FakeEnv:
+            num_envs = 2
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(2, 2))
+
+        processor = StandardScaler().fit(
+            np.array([[-1.0, -1.0], [0.0, 0.0], [1.0, 1.0]])
+        )
+        policy = FixedCandidatePolicy(
+            np.asarray(
+                [
+                    [[-0.5, 0.5], [0.25, -0.25]],
+                    [[0.1, 0.2], [0.3, 0.4]],
+                ]
+            ),
+            process={"action": processor},
+            action_block=1,
+        )
+        policy.set_env(FakeEnv())
+        info = {"terminated": np.array([False, False]), "truncated": np.array([False, False])}
+        first = policy.get_action(info)
+        second = policy.get_action(info)
+        third = policy.get_action(info)
+        self.assertEqual(first.shape, (2, 2))
+        np.testing.assert_allclose(first, processor.inverse_transform([[-0.5, 0.5], [0.1, 0.2]]))
+        np.testing.assert_allclose(second, processor.inverse_transform([[0.25, -0.25], [0.3, 0.4]]))
+        np.testing.assert_array_equal(third, np.zeros((2, 2), dtype=np.float32))
+
+    def test_environment_state_snapshot_round_trips(self):
+        class FakeEnv:
+            def __init__(self):
+                self.value = np.array([1.0, 2.0])
+
+            def get_state(self):
+                return self.value.copy()
+
+            def set_state(self, state):
+                self.value = np.asarray(state, dtype=np.float64).copy()
+
+        env = FakeEnv()
+        snapshot = capture_environment_state(env)
+        env.value[:] = 9.0
+        restore_environment_state(env, snapshot)
+        np.testing.assert_array_equal(env.value, [1.0, 2.0])
+
     def test_constant_correlation_is_undefined(self):
         self.assertIsNone(safe_correlation([1, 1, 1], [1, 2, 3]))
 
@@ -62,6 +115,21 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         unique, duplicates = deduplicate_actions(first)
         self.assertEqual(len(unique) + len(duplicates), len(first))
         self.assertGreater(len(duplicates), 0)
+
+    def test_controls_keep_physical_and_normalized_zero_distinct(self):
+        anchors = np.zeros((1, 5, 2), dtype=np.float64)
+        physical_zero = np.full((5, 2), 0.25, dtype=np.float64)
+        actions, metadata = make_control_actions(
+            anchors,
+            seed=7,
+            physical_zero=physical_zero,
+        )
+        physical_indices = [index for index, item in enumerate(metadata) if item["kind"] == "physical_zero"]
+        normalized_indices = [index for index, item in enumerate(metadata) if item["kind"] == "normalized_zero"]
+        self.assertEqual(len(physical_indices), 1)
+        self.assertEqual(len(normalized_indices), 1)
+        np.testing.assert_array_equal(actions[physical_indices[0]], physical_zero)
+        np.testing.assert_array_equal(actions[normalized_indices[0]], np.zeros_like(physical_zero))
 
     def test_task_normalized_distance_uses_plan_thresholds(self):
         self.assertAlmostEqual(normalized_physical_distance("cube", [0.04, 0], [0, 0]), 1.0)
@@ -84,6 +152,34 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         self.assertAlmostEqual(result["selection_regret"], 1.0)
         self.assertEqual(result["predicted_true_distance_correlation"], 0.0)
 
+    def test_candidate_pool_requires_complete_state_by_flow_grid(self):
+        records = []
+        for flow_steps in (1, 2):
+            for state_id in ("a", "b"):
+                for candidate_index in range(3):
+                    records.append(
+                        {
+                            "state_id": state_id,
+                            "flow_steps": flow_steps,
+                            "candidate_index": candidate_index,
+                            "predicted_cost": float(candidate_index),
+                            "true_distance": float(3 - candidate_index),
+                            "success": candidate_index == 2,
+                            "action": [[float(candidate_index)]],
+                        }
+                    )
+        result = candidate_pool_metrics(
+            records,
+            task="tworoom",
+            flow_steps=(1, 2),
+            candidates_per_flow_step=3,
+            bootstrap_samples=8,
+        )
+        self.assertEqual(result["states"], 2)
+        self.assertEqual(result["candidate_rows"], 12)
+        self.assertEqual(set(result["by_flow_steps"]), {"1", "2"})
+        self.assertEqual(result["by_flow_steps"]["1"]["candidate_rows"], 6)
+
     def test_guidance_metrics_marks_model_exploitation(self):
         result = guidance_effect_metrics(
             [
@@ -98,6 +194,26 @@ class Round5Phase15DiagnosticsTests(unittest.TestCase):
         )
         self.assertEqual(result["model_exploitation_fraction"], 1.0)
         self.assertEqual(result["true_degradation_fraction"], 1.0)
+
+    def test_paired_guidance_compares_same_displacement_random_control(self):
+        result = paired_guidance_metrics(
+            [
+                {
+                    "state_id": "a",
+                    "guided_predicted_cost_before": 2.0,
+                    "guided_predicted_cost_after": 1.0,
+                    "guided_true_cost_before": 2.0,
+                    "guided_true_cost_after": 1.0,
+                    "random_true_cost_before": 2.0,
+                    "random_true_cost_after": 1.5,
+                    "guided_action_rms_displacement": 0.2,
+                    "random_action_rms_displacement": 0.2,
+                }
+            ],
+            bootstrap_samples=8,
+        )
+        self.assertAlmostEqual(result["paired_advantage_mean"], 0.5)
+        self.assertEqual(result["guided_true_improvement_fraction"], 1.0)
 
     def test_bootstrap_samples_states(self):
         rows = [{"state_id": index, "value": float(index)} for index in range(4)]

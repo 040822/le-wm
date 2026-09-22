@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from statistics import median
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -285,6 +285,7 @@ def run_round4_evaluation(
     allowed_protocol_variants: Sequence[str] = ("round3_revised",),
     allow_variable_candidate_count: bool = False,
     allow_solver_config_override: bool = False,
+    diagnostic_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run a Round 4 mode and publish cohort-bound result and trace artifacts."""
     mode = validate_round4_mode(mode)
@@ -298,6 +299,8 @@ def run_round4_evaluation(
         raise ValueError(f"guidance is not defined for {mode}")
     if guidance_mode == "post_opt_refine" and mode != "P3":
         raise ValueError("post_opt_refine guidance is only defined for P3")
+    if diagnostic_callback is not None and mode != "P3":
+        raise ValueError("diagnostic candidate capture is only defined for P3")
     cem_protocol, action_bound_mode = resolve_cem_protocol(
         mode,
         cem_protocol,
@@ -381,6 +384,7 @@ def run_round4_evaluation(
         guidance_inner_steps=guidance_inner_steps,
         guidance_max_rms_offset=guidance_max_rms_offset,
         proposal_chunk_size=proposal_chunk_size,
+        diagnostic_callback=diagnostic_callback,
     )
     _time_cem_policy(policy, mode)
     world_cfg = OmegaConf.to_container(cfg.world, resolve=True)

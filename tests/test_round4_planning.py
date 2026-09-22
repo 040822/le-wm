@@ -643,6 +643,36 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(calls["batch"], 1)
         self.assertEqual(calls["kwargs"]["inner_steps"], 2)
 
+    def test_p3_diagnostic_callback_exposes_candidate_pool_context(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        events = []
+        policy = make_round4_policy(
+            make_round4_model().eval(),
+            mode="P3",
+            plan_config={"horizon": 5, "receding_horizon": 5, "action_block": 1},
+            device="cpu",
+            action_flow_steps=2,
+            candidate_count=4,
+            diagnostic_callback=events.append,
+        )
+        policy.set_env(FakeEnv())
+        policy.get_action(
+            {
+                "pixels": torch.randn(1, 1, 3, 8, 8),
+                "goal": torch.randn(1, 1, 3, 8, 8),
+            }
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(tuple(events[0]["candidates"].shape), (1, 4, 5, 4))
+        self.assertEqual(tuple(events[0]["costs"].shape), (1, 4))
+        self.assertEqual(tuple(events[0]["z_start"].shape), (1, 8))
+        self.assertEqual(tuple(events[0]["predicted_latents"].shape[:3]), (1, 4, 5))
+
 
 if __name__ == "__main__":
     unittest.main()

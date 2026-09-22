@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import numpy as np
 import stable_worldmodel as swm
@@ -112,6 +112,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         guidance_inner_steps: int = 5,
         guidance_max_rms_offset: float = 0.20,
         proposal_chunk_size: int | None = None,
+        diagnostic_callback: Callable[[dict], None] | None = None,
     ):
         super().__init__()
         if proposal_source not in {"action", "latent"}:
@@ -194,6 +195,7 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
         self._generators = {}
         self._action_buffer = None
         self.planning_events: list[dict] = []
+        self.diagnostic_callback = diagnostic_callback
 
     def _autocast(self, enabled: bool):
         device = next(self.model.parameters()).device
@@ -607,6 +609,33 @@ class Round4BestOfNPolicy(swm.policy.BasePolicy):
             if projection is not None:
                 event["action_bound_projection"] = projection
             self.planning_events.append(event)
+            if self.diagnostic_callback is not None:
+                predicted_latents = self.model(
+                    z_start[:, None]
+                    .expand(-1, candidates.shape[1], -1)
+                    .reshape(-1, z_start.shape[-1]),
+                    candidates.reshape(-1, candidates.shape[-2], candidates.shape[-1]),
+                    torch.ones(
+                        len(replan) * candidates.shape[1],
+                        device=candidates.device,
+                        dtype=candidates.dtype,
+                    ),
+                    mode="stage_b",
+                )["predicted_latents"].reshape(
+                    len(replan), candidates.shape[1], candidates.shape[-2], -1
+                )
+                self.diagnostic_callback(
+                    {
+                        "z_start": z_start.detach().cpu(),
+                        "z_goal": z_goal.detach().cpu(),
+                        "candidates": candidates.detach().cpu(),
+                        "costs": None if costs is None else costs.detach().cpu(),
+                        "predicted_latents": predicted_latents.detach().cpu(),
+                        "selected_indices": selected_indices.detach().cpu(),
+                        "replan_indices": tuple(int(index) for index in replan),
+                        "event": dict(event),
+                    }
+                )
             for row, env_index in enumerate(replan):
                 self._action_buffer[env_index].extend(plan[row].detach().cpu())
 
@@ -650,6 +679,7 @@ def make_round4_policy(
     guidance_inner_steps: int = 5,
     guidance_max_rms_offset: float = 0.20,
     proposal_chunk_size: int | None = None,
+    diagnostic_callback: Callable[[dict], None] | None = None,
 ):
     """Build one of the frozen Round 4 P0--P4 policy variants."""
     if mode not in ROUND4_MODES:
@@ -790,6 +820,7 @@ def make_round4_policy(
         guidance_inner_steps=guidance_inner_steps,
         guidance_max_rms_offset=guidance_max_rms_offset,
         proposal_chunk_size=proposal_chunk_size,
+        diagnostic_callback=diagnostic_callback,
     )
 
 

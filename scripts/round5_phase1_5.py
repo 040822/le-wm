@@ -553,6 +553,7 @@ def _render_report(
             "- 梯度修正：同时报告预测 latent cost、真实 latent cost 和物理距离改善，以及 model exploitation。",
             "- Probe：按轨迹拆分 train/validation，排除评测轨迹；真实未来图像与 B 预测 future latent 分开报告。",
             "- 计时：包含编码、提案、评分/梯度、CEM 更新和动作输出；环境时间单独报告。",
+            f"- 计时明细：`{output_root / 'analysis' / 'timing.json'}`；规划延迟来自同步的 per-replan 样本，环境 wall clock 单列。",
             "",
             f"{decisions}",
             "",
@@ -560,6 +561,7 @@ def _render_report(
             "",
             f"- 索引：`{output_root / 'analysis' / 'index.json'}`",
             f"- 条件 CSV：`{output_root / 'analysis' / 'conditions.csv'}`",
+            f"- 计时：`{output_root / 'analysis' / 'timing.json'}`",
             f"- 本报告：`{output_root.parents[2] / 'docs' / 'report' / 'round5' / 'round5_phase1_5_report.md'}`",
             "",
         ]
@@ -608,6 +610,76 @@ def analyze(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, An
         encoding="utf-8",
     )
     result = {"analysis": str(analysis_path), "report": str(report_path), "conditions": len(rows), "counts": index_payload["counts"]}
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return result
+
+
+def timing(args: argparse.Namespace, config: Mapping[str, Any]) -> dict[str, Any]:
+    """Extract fair planning timing from completed full-path evaluations.
+
+    ``round4_eval`` records synchronized per-replan timings around encoding,
+    proposal, verifier/guidance, CEM updates, and action selection.  The
+    environment wall clock is retained separately as ``evaluation_seconds``;
+    it is never used as the planning latency claim.
+    """
+    del config
+    index_path = _resolve(args.output_root) / "analysis" / "index.json"
+    if not index_path.is_file():
+        raise FileNotFoundError(f"timing requires an index: {index_path}")
+    index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    records: list[dict[str, Any]] = []
+    for item in index_payload.get("items", {}).values():
+        if item.get("status") not in {"completed", "reused_success_only"}:
+            continue
+        path = item.get("path")
+        if not path or not Path(path).is_file():
+            continue
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        planning = payload.get("round4_planning", {})
+        samples = np.asarray(
+            planning.get("planning_samples_seconds", ()), dtype=np.float64
+        )
+        samples = samples[np.isfinite(samples)]
+        if len(samples) == 0 and planning.get("planning_median_seconds") is not None:
+            samples = np.asarray([float(planning["planning_median_seconds"])])
+        if len(samples) == 0:
+            continue
+        spec = item.get("spec", payload.get("phase15_condition", {}))
+        records.append(
+            {
+                "condition_id": item.get("condition_id"),
+                "task": spec.get("task", payload.get("task")),
+                "group": spec.get("group"),
+                "family": spec.get("family"),
+                "mode": spec.get("mode", payload.get("round4_mode")),
+                "guidance": spec.get("guidance", "none"),
+                "planning_p50_seconds": float(np.quantile(samples, 0.50)),
+                "planning_p95_seconds": float(np.quantile(samples, 0.95)),
+                "batch50_throughput_per_second": float(50.0 / np.mean(samples)),
+                "planning_samples": int(len(samples)),
+                "forward_count": planning.get("forward_count"),
+                "guidance_backward_count": planning.get("guidance_backward_count"),
+                "peak_memory_bytes": planning.get("peak_memory_bytes"),
+                "evaluation_seconds_including_environment": payload.get(
+                    "evaluation_seconds"
+                ),
+                "environment_separate_from_planning": True,
+                "source": item.get("source"),
+            }
+        )
+    output = _resolve(args.output_root) / "analysis" / "timing.json"
+    atomic_write_json(
+        output,
+        {
+            "schema_version": "round5_phase1_5_timing_v1",
+            "method": "synchronized per-replan samples recorded by round4_eval",
+            "environment_wall_clock_is_separate": True,
+            "warmup_runs": "not applicable to retrospective scan events",
+            "records": records,
+            "conditions": len(records),
+        },
+    )
+    result = {"timing": str(output), "conditions": len(records)}
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return result
 
@@ -827,7 +899,7 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("validate", "dry-run", "calibrate", "scan", "index", "analyze", "select-stability"))
+    parser.add_argument("command", choices=("validate", "dry-run", "calibrate", "scan", "index", "analyze", "timing", "select-stability"))
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--report-output", default=str(DEFAULT_REPORT))
@@ -861,6 +933,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         index(args, config)
     elif args.command == "select-stability":
         select_stability(args, config)
+    elif args.command == "timing":
+        timing(args, config)
     else:
         analyze(args, config)
 

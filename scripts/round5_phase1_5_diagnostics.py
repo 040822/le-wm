@@ -16,33 +16,107 @@ Examples::
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+import stable_worldmodel as swm
 import torch
+from omegaconf import OmegaConf
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from source.common.checkpoint import load_policy_or_model
-from source.common.eval import compose_eval_config, get_dataset, img_transform
-from source.common.round3_phase1 import CohortManifest
+from source.common.eval import (
+    DatasetEvaluationSession,
+    compose_eval_config,
+    evaluate_from_dataset_compat,
+    get_dataset,
+    img_transform,
+)
+from source.common.eval import EvaluationIdentity
+from source.common.round3_phase1 import CohortManifest, Round3TraceCollector
+from source.common.round4_eval import run_round4_evaluation
 from source.common.round5_phase1_5 import (
     PHASE15_PROTOCOL_VARIANT,
     PHASE15_TASKS,
     atomic_write_json,
+    candidate_pool_metrics,
+    guidance_effect_metrics,
     fit_ridge_probe,
     make_probe_split,
+    normalized_physical_distance,
+    paired_guidance_metrics,
 )
 
 
 DEFAULT_CONFIG = ROOT / "config" / "round5" / "phase1_5.json"
 DEFAULT_OUTPUT = ROOT / "outputs" / "round5" / "phase1_5_seed3072_legacy"
+
+
+class FixedCandidatePolicy(swm.policy.BasePolicy):
+    """Replay one captured candidate action sequence in every env slot."""
+
+    def __init__(self, normalized_actions: np.ndarray, *, process: Mapping[str, Any], action_block: int):
+        super().__init__()
+        actions = np.asarray(normalized_actions, dtype=np.float64)
+        if actions.ndim != 3 or actions.shape[0] < 1 or actions.shape[1] < 1:
+            raise ValueError("normalized_actions must have shape [env, horizon, action_dim]")
+        if int(action_block) < 1 or actions.shape[-1] % int(action_block):
+            raise ValueError("candidate action_dim must be divisible by action_block")
+        processor = process.get("action") if process is not None else None
+        if processor is None or not hasattr(processor, "inverse_transform"):
+            raise ValueError("candidate replay needs the fitted action processor")
+        base_action_dim = actions.shape[-1] // int(action_block)
+        primitive = actions.reshape(actions.shape[0], -1, base_action_dim)
+        physical = processor.inverse_transform(primitive.reshape(-1, base_action_dim))
+        self._physical_actions = np.asarray(
+            physical.reshape(actions.shape[0], primitive.shape[1], base_action_dim),
+            dtype=np.float64,
+        )
+        self._action_block = int(action_block)
+        self._queues: list[deque[np.ndarray]] | None = None
+        self._done: np.ndarray | None = None
+        self.type = "round5_phase1_5_fixed_candidate"
+
+    def set_env(self, env: Any) -> None:
+        if int(env.num_envs) != int(self._physical_actions.shape[0]):
+            raise ValueError("candidate replay env count differs from captured pool")
+        self.env = env
+        self._queues = [deque(row.copy() for row in self._physical_actions[index]) for index in range(env.num_envs)]
+        self._done = np.zeros(env.num_envs, dtype=bool)
+
+    def get_action(self, info_dict: Mapping[str, Any], **kwargs: Any) -> np.ndarray:
+        del kwargs
+        if self._queues is None or self._done is None:
+            raise RuntimeError("set_env must be called before get_action")
+        terminated = np.asarray(info_dict.get("terminated", np.zeros(len(self._queues))), dtype=bool).reshape(-1)
+        truncated = np.asarray(info_dict.get("truncated", np.zeros(len(self._queues))), dtype=bool).reshape(-1)
+        if len(terminated) != len(self._queues) or len(truncated) != len(self._queues):
+            raise ValueError("termination vectors do not match candidate replay env count")
+        self._done |= terminated | truncated
+        action = np.zeros(self.env.action_space.shape, dtype=np.float32)
+        for index, queue in enumerate(self._queues):
+            if not self._done[index] and queue:
+                action[index] = queue.popleft()
+            elif not queue:
+                self._done[index] = True
+        return action
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "action_block": self._action_block,
+            "environment_count": int(self._physical_actions.shape[0]),
+            "primitive_action_steps": int(self._physical_actions.shape[1]),
+        }
 
 
 def _resolve(value: str | Path) -> Path:
@@ -105,6 +179,332 @@ def _checkpoint(config: Mapping[str, Any], task: str) -> tuple[Path, str]:
     if expected is not None and digest != expected:
         raise ValueError(f"{task} checkpoint hash changed: {digest} != {expected}")
     return path, digest
+
+
+def _candidate_state_id(entry: Any) -> str:
+    return f"episode={entry.episode_id};start={int(entry.start_step)};row={int(entry.row_index)}"
+
+
+def _write_jsonl(path: str | Path, records: Sequence[Mapping[str, Any]]) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        for record in records:
+            stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True, allow_nan=False))
+            stream.write("\n")
+    temporary.replace(target)
+    return target
+
+
+def _first_replan_pool_records(
+    event: Mapping[str, Any],
+    *,
+    task: str,
+    flow_steps: int,
+    manifest: CohortManifest,
+    seen_slots: set[int],
+) -> list[dict[str, Any]]:
+    candidates = torch.as_tensor(event["candidates"]).detach().cpu().numpy()
+    costs = event.get("costs")
+    if costs is None:
+        raise ValueError("candidate pool capture requires verifier costs")
+    costs_array = torch.as_tensor(costs).detach().cpu().numpy()
+    predicted = event.get("predicted_latents")
+    predicted_array = None if predicted is None else torch.as_tensor(predicted).detach().cpu().numpy()
+    slots = tuple(int(value) for value in event["replan_indices"])
+    if candidates.ndim != 4 or costs_array.shape != candidates.shape[:2]:
+        raise ValueError("candidate callback returned incompatible candidate/cost shapes")
+    if predicted_array is None or predicted_array.shape[:3] != candidates.shape[:3]:
+        raise ValueError("candidate callback did not return predicted future latents")
+    result: list[dict[str, Any]] = []
+    for row, slot in enumerate(slots):
+        if slot in seen_slots:
+            continue
+        if slot < 0 or slot >= len(manifest.entries):
+            raise ValueError(f"candidate callback returned invalid slot {slot}")
+        seen_slots.add(slot)
+        entry = manifest.entries[slot]
+        state_id = _candidate_state_id(entry)
+        for candidate_index in range(candidates.shape[1]):
+            result.append(
+                {
+                    "task": task,
+                    "state_id": state_id,
+                    "slot": slot,
+                    "episode_id": entry.episode_id,
+                    "start_step": int(entry.start_step),
+                    "row_index": int(entry.row_index),
+                    "flow_steps": int(flow_steps),
+                    "candidate_index": int(candidate_index),
+                    "predicted_cost": float(costs_array[row, candidate_index]),
+                    "predicted_future_latent": predicted_array[row, candidate_index, -1].tolist(),
+                    "action": candidates[row, candidate_index].tolist(),
+                    "outcome_status": "pending",
+                }
+            )
+    return result
+
+
+def _capture_candidate_proposals(
+    *,
+    args: argparse.Namespace,
+    config: Mapping[str, Any],
+    task: str,
+    manifest: CohortManifest,
+    checkpoint: Path,
+    checkpoint_sha256: str,
+    model: Any,
+    flow_steps: Sequence[int],
+    output_root: Path,
+) -> list[dict[str, Any]]:
+    """Capture the fixed 256-action proposal pool at each requested flow step."""
+    all_records: list[dict[str, Any]] = []
+    for flow_step in flow_steps:
+        target = output_root / f"proposals_s{int(flow_step)}.jsonl"
+        if target.is_file():
+            all_records.extend(_read_records(target))
+            continue
+        captured: list[dict[str, Any]] = []
+        seen_slots: set[int] = set()
+
+        def callback(event: dict[str, Any]) -> None:
+            captured.extend(
+                _first_replan_pool_records(
+                    event,
+                    task=task,
+                    flow_steps=int(flow_step),
+                    manifest=manifest,
+                    seen_slots=seen_slots,
+                )
+            )
+
+        cfg = compose_eval_config(
+            task,
+            overrides=[
+                "eval.num_eval=50",
+                "eval.goal_offset_steps=25",
+                "eval.eval_budget=50",
+                "plan_config.horizon=5",
+                "plan_config.receding_horizon=5",
+                "plan_config.action_block=5",
+                "output.save_video=false",
+                f"solver.device={args.device}",
+            ],
+        )
+        run_round4_evaluation(
+            cfg,
+            task=task,
+            policy_or_model=model,
+            mode="P3",
+            identity=EvaluationIdentity(
+                entrypoint="round5_phase1_5_candidate_pool",
+                policy_kind="round4_shared_dit",
+                checkpoint=str(checkpoint.resolve()),
+                epoch=int(config["training"]["epoch"]),
+                stage="P3",
+            ),
+            manifest=manifest,
+            output_dir=output_root / f"proposal_eval_s{int(flow_step)}",
+            trace_output_dir=output_root / f"proposal_eval_s{int(flow_step)}" / "trace",
+            device=args.device,
+            trace=True,
+            candidate_count=256,
+            flow_steps=int(flow_step),
+            action_flow_steps=int(flow_step),
+            solver_batch_size=int(config["evaluation"]["solver_batch_size"]),
+            candidate_batch_size=int(config["evaluation"]["candidate_batch_size"]),
+            action_flow_integrator="euler",
+            action_bound_mode="none",
+            cem_protocol="not_applicable",
+            guidance_mode="none",
+            proposal_chunk_size=int(config["evaluation"]["proposal_chunk_size"]),
+            allowed_protocol_variants=("legacy",),
+            allow_variable_candidate_count=True,
+            allow_solver_config_override=True,
+            diagnostic_callback=callback,
+        )
+        if seen_slots != set(range(len(manifest.entries))):
+            missing = sorted(set(range(len(manifest.entries))) - seen_slots)
+            raise RuntimeError(f"candidate pool missed initial replans for slots {missing}")
+        _write_jsonl(target, captured)
+        all_records.extend(captured)
+    return all_records
+
+
+def _milestone_step(steps: Sequence[Mapping[str, Any]], target: int) -> Mapping[str, Any] | None:
+    eligible = [item for item in steps if int(item.get("raw_env_step", -1)) <= int(target)]
+    return eligible[-1] if eligible else None
+
+
+def _extract_pixel_batch(value: Any, expected_count: int) -> Any | None:
+    """Find a batched pixel observation in a vector-env observation."""
+    if isinstance(value, Mapping):
+        for key in ("pixels", "image", "observation", "obs"):
+            if key in value:
+                found = _extract_pixel_batch(value[key], expected_count)
+                if found is not None:
+                    return found
+        for child in value.values():
+            found = _extract_pixel_batch(child, expected_count)
+            if found is not None:
+                return found
+        return None
+    shape = getattr(value, "shape", None)
+    if shape is None or len(shape) < 4 or int(shape[0]) != int(expected_count):
+        return None
+    return value
+
+
+def _run_fixed_candidate(
+    *,
+    cfg: Any,
+    task: str,
+    manifest: CohortManifest,
+    normalized_actions: np.ndarray,
+    process: Mapping[str, Any],
+    model: Any,
+    transform: Any,
+    device: str,
+    output_dir: Path,
+) -> list[dict[str, Any]]:
+    """Execute one captured candidate for all 50 states and retain true outcomes."""
+    session = DatasetEvaluationSession(
+        cfg,
+        task=task,
+        cohort=manifest.to_evaluation_cohort(),
+    )
+    policy = FixedCandidatePolicy(
+        normalized_actions,
+        process=process,
+        action_block=int(cfg.plan_config.action_block),
+    )
+    world_cfg = OmegaConf.to_container(cfg.world, resolve=True)
+    world_cfg["max_episode_steps"] = 2 * int(cfg.eval.eval_budget)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    world = session.world_factory(**world_cfg, image_shape=(224, 224))
+    envs = getattr(world, "envs", None)
+    if envs is None:
+        raise RuntimeError("candidate branch world does not expose envs")
+    action_processor = session.process.get("action")
+    collector = Round3TraceCollector(
+        task,
+        manifest,
+        action_block=int(cfg.plan_config.action_block),
+        action_space=getattr(envs, "single_action_space", None),
+        action_processor=action_processor,
+    )
+    original_step = envs.step
+    step_counter = {"value": 0}
+    future_latents: dict[int, dict[str, list[float]]] = {index: {} for index in range(len(manifest.entries))}
+    model = getattr(model, "model", model).to(device).eval()
+
+    def traced_step(actions: Any, *args: Any, **kwargs: Any):
+        result = original_step(actions, *args, **kwargs)
+        step_counter["value"] += 1
+        if step_counter["value"] in {5, 10, 15, 20, 25}:
+            pixels = _extract_pixel_batch(result[0] if isinstance(result, tuple) else result, len(manifest.entries))
+            if pixels is not None:
+                transformed = []
+                for index in range(len(manifest.entries)):
+                    row = pixels[index]
+                    if hasattr(row, "detach"):
+                        row = row.detach().cpu().numpy()
+                    row = np.asarray(row)
+                    if row.ndim >= 4:
+                        row = row[-1]
+                    transformed.append(transform(row))
+                image_batch = torch.stack(transformed).to(device)
+                with torch.inference_mode():
+                    encoded = model.encode_pixels(image_batch).float().detach().cpu().numpy()
+                for index, latent in enumerate(encoded):
+                    future_latents[index][str(step_counter["value"])] = latent.tolist()
+        infos = result[-1] if isinstance(result, tuple) and result else result
+        collector.record_step(actions, infos, raw_env_step=step_counter["value"])
+        return result
+
+    envs.step = traced_step
+    try:
+        world.set_policy(policy)
+        metrics = evaluate_from_dataset_compat(
+            world=world,
+            dataset=session.dataset,
+            eval_start_idx=session.cohort.start_steps,
+            eval_episodes=session.cohort.episode_ids,
+            cfg=cfg,
+            video_path=output_dir / "videos",
+            save_video=False,
+        )
+    finally:
+        envs.step = original_step
+        if hasattr(world, "close"):
+            world.close()
+    successes = np.asarray(metrics["episode_successes"], dtype=bool).reshape(-1)
+    episodes = collector.finalize(successes.tolist(), eval_budget=int(cfg.eval.eval_budget))
+    for index, episode in enumerate(episodes):
+        episode["future_latents"] = future_latents[index]
+    return episodes
+
+
+def _attach_candidate_outcomes(
+    proposals: Sequence[Mapping[str, Any]],
+    episodes: Sequence[Mapping[str, Any]],
+    *,
+    task: str,
+) -> list[dict[str, Any]]:
+    """Join branch traces to proposal rows without inventing post-terminal state."""
+    by_slot = {int(row["slot"]): row for row in episodes}
+    result: list[dict[str, Any]] = []
+    for proposal in proposals:
+        slot = int(proposal["slot"])
+        episode = by_slot[slot]
+        steps = episode.get("steps", [])
+        terminal = _milestone_step(steps, 25)
+        if terminal is None:
+            terminal = steps[-1] if steps else None
+        current = None if terminal is None else terminal.get("current")
+        goal = None if terminal is None else terminal.get("goal")
+        if current is not None and goal is not None:
+            true_distance = float(normalized_physical_distance(task, current, goal))
+        else:
+            true_distance = None
+        milestones: dict[str, Any] = {}
+        for target in (5, 10, 15, 20, 25):
+            step = _milestone_step(steps, target)
+            if step is None:
+                continue
+            raw_step = int(step["raw_env_step"])
+            milestone = {
+                "raw_env_step": raw_step,
+                "current": step.get("current"),
+                "goal": step.get("goal"),
+                "distance": step.get("distance"),
+                "future_latent": episode.get("future_latents", {}).get(
+                    str(raw_step)
+                ),
+            }
+            if milestone["future_latent"] is None:
+                raise RuntimeError(
+                    "candidate branch did not expose a future pixel encoding at "
+                    f"raw_env_step={milestone['raw_env_step']}"
+                )
+            milestones[str(target)] = milestone
+        result.append(
+            {
+                **dict(proposal),
+                "success": bool(episode.get("success", False)),
+                "true_distance": true_distance,
+                "physical_state": current,
+                "goal_state": goal,
+                "milestones": milestones,
+                "valid_length": int(len(steps)),
+                "termination_reason": (
+                    steps[-1].get("termination_reason") if steps else "no_step"
+                ),
+                "outcome_status": "completed",
+            }
+        )
+    return result
 
 
 def _episode_column(dataset: Any) -> str:
@@ -198,6 +598,88 @@ def _jsonable_metrics(value: Mapping[str, Any]) -> dict[str, Any]:
         else:
             result[key] = item
     return result
+
+
+def _probe_candidate_predictions(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    task: str,
+    ridge: Mapping[str, Any],
+    milestone: int = 5,
+) -> dict[str, Any]:
+    """Apply a probe fitted on real images to real and predicted future latents.
+
+    Candidate records contain the Stage-B endpoint prediction and the matching
+    environment trace.  The comparison uses the same physical target and the
+    same fitted Ridge readout for both features, so the second error includes
+    the model's future-latent prediction error while the first is the
+    representation/readout reference.
+    """
+    model = ridge.get("model")
+    x_scaler = ridge.get("x_scaler")
+    y_scaler = ridge.get("y_scaler")
+    if model is None or x_scaler is None or y_scaler is None:
+        raise ValueError("ridge probe artifacts do not contain a fitted model")
+    predicted: list[np.ndarray] = []
+    observed: list[np.ndarray] = []
+    raw_targets: list[np.ndarray] = []
+    for record in records:
+        milestone_record = record.get("milestones", {}).get(str(int(milestone)))
+        if not isinstance(milestone_record, Mapping):
+            continue
+        future = milestone_record.get("future_latent")
+        predicted_future = record.get("predicted_future_latent")
+        current = milestone_record.get("current")
+        if future is None or predicted_future is None or current is None:
+            continue
+        observed.append(np.asarray(future, dtype=np.float64).reshape(-1))
+        predicted.append(np.asarray(predicted_future, dtype=np.float64).reshape(-1))
+        raw_targets.append(np.asarray(current, dtype=np.float64).reshape(-1))
+    if not predicted:
+        raise ValueError(
+            f"candidate records contain no complete milestone-{milestone} "
+            "future-latent rows"
+        )
+    targets, target_schema = _probe_target(task, np.stack(raw_targets, axis=0))
+    observed_features = np.stack(observed, axis=0)
+    predicted_features = np.stack(predicted, axis=0)
+
+    def error_metrics(prediction: np.ndarray) -> dict[str, Any]:
+        error = np.asarray(prediction, dtype=np.float64) - targets
+        return {
+            "count": int(len(targets)),
+            "mae": float(np.mean(np.abs(error))),
+            "rmse": float(np.sqrt(np.mean(np.square(error)))),
+            "per_dimension_mae": np.mean(np.abs(error), axis=0).tolist(),
+        }
+
+    def decode(features: np.ndarray) -> np.ndarray:
+        scaled = x_scaler.transform(features)
+        return y_scaler.inverse_transform(model.predict(scaled))
+
+    observed_prediction = decode(observed_features)
+    predicted_prediction = decode(predicted_features)
+    return {
+        "milestone": int(milestone),
+        "rows": int(len(targets)),
+        "target_schema": target_schema,
+        "real_future_latent": error_metrics(observed_prediction),
+        "predicted_future_latent": error_metrics(predicted_prediction),
+    }
+
+
+def _candidate_records_path(value: str | Path, task: str) -> Path:
+    """Resolve either one task's JSONL file or a candidate-pool root."""
+    path = _resolve(value)
+    if path.is_dir():
+        candidates = (
+            path / task / "records.jsonl",
+            path / "candidate_pool" / task / "records.jsonl",
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+    return path
 
 
 def _collect_features(
@@ -361,6 +843,16 @@ def probe(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
             "target_schema": target_schema,
             "ridge": _jsonable_metrics(ridge),
         }
+        if args.candidate_records is not None:
+            candidate_path = _candidate_records_path(args.candidate_records, task)
+            candidate_records = _read_records(candidate_path)
+            result["candidate_pool_probe"] = _probe_candidate_predictions(
+                candidate_records,
+                task=task,
+                ridge=ridge,
+                milestone=5,
+            )
+            result["candidate_pool_probe"]["records"] = str(candidate_path)
         if args.mlp:
             result["mlp"] = _fit_mlp(features, targets, trajectory_ids, split, seeds=(0, 1, 2))
         task_root = output_root / task
@@ -387,9 +879,198 @@ def validate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     }, ensure_ascii=False, sort_keys=True))
 
 
+def _read_records(path: str | Path) -> list[dict[str, Any]]:
+    target = _resolve(path)
+    if not target.is_file():
+        raise FileNotFoundError(target)
+    if target.suffix == ".jsonl":
+        records = []
+        for line_number, line in enumerate(target.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if not isinstance(value, Mapping):
+                raise ValueError(f"record {line_number} in {target} is not an object")
+            records.append(dict(value))
+        return records
+    value = json.loads(target.read_text(encoding="utf-8"))
+    if isinstance(value, Mapping):
+        value = value.get("records", value.get("rows"))
+    if not isinstance(value, list) or not all(isinstance(item, Mapping) for item in value):
+        raise ValueError(f"diagnostic records must be a list or JSONL object stream: {target}")
+    return [dict(item) for item in value]
+
+
+def summarize(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+    """Analyze persisted candidate-pool and paired-guidance records."""
+    if args.candidate_records is not None and args.task == "all":
+        raise ValueError(
+            "summarize candidate records requires --task so physical-state "
+            "normalization is unambiguous"
+        )
+    result: dict[str, Any] = {
+        "schema_version": "round5_phase1_5_diagnostics_summary_v1",
+        "task": args.task,
+        "inputs": {},
+    }
+    if args.candidate_records is not None:
+        records = _read_records(args.candidate_records)
+        diagnostics = config.get("diagnostics", {})
+        flow_steps = tuple(args.flow_steps or diagnostics.get("pool_flow_steps", (1, 2, 5, 10, 16, 32)))
+        candidate_count = int(
+            args.candidates_per_flow_step
+            or diagnostics.get("pool_candidates_per_flow_step", 256)
+        )
+        result["inputs"]["candidate_records"] = str(_resolve(args.candidate_records))
+        result["candidate_pool"] = candidate_pool_metrics(
+            records,
+            task=args.task,
+            flow_steps=flow_steps,
+            candidates_per_flow_step=candidate_count,
+            bootstrap_samples=int(args.bootstrap_samples),
+        )
+    if args.guidance_records is not None:
+        records = _read_records(args.guidance_records)
+        result["inputs"]["guidance_records"] = str(_resolve(args.guidance_records))
+        result["guidance"] = guidance_effect_metrics(records)
+        result["paired_guidance"] = paired_guidance_metrics(
+            records,
+            bootstrap_samples=int(args.bootstrap_samples),
+        )
+    if len(result["inputs"]) == 0:
+        raise ValueError("summarize requires --candidate-records or --guidance-records")
+    output = _resolve(args.output_root) / "diagnostics" / "summary.json"
+    atomic_write_json(output, result)
+    print(json.dumps({"summary": str(output), "inputs": result["inputs"]}, ensure_ascii=False, sort_keys=True))
+
+
+def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
+    """Capture and execute the fixed candidate pool for one task."""
+    if args.task == "all":
+        raise ValueError("candidate-pool requires one task; run it once per task")
+    if args.device.startswith("cuda") and args.gpu is None:
+        raise ValueError("candidate-pool CUDA runs require --gpu")
+    _configure_device(args.device, args.gpu)
+    manifest = _manifest(config, args.task)
+    checkpoint, checkpoint_sha256 = _checkpoint(config, args.task)
+    model, resolved = load_policy_or_model(str(checkpoint))
+    if resolved is not None and Path(resolved).resolve() != checkpoint.resolve():
+        raise ValueError(f"checkpoint resolver changed requested path: {checkpoint}")
+    diagnostics = config.get("diagnostics", {})
+    flow_steps = tuple(args.flow_steps or diagnostics.get("pool_flow_steps", (1, 2, 5, 10, 16, 32)))
+    task_root = _resolve(args.output_root) / "diagnostics" / "candidate_pool" / args.task
+    task_root.mkdir(parents=True, exist_ok=True)
+    proposals = _capture_candidate_proposals(
+        args=args,
+        config=config,
+        task=args.task,
+        manifest=manifest,
+        checkpoint=checkpoint,
+        checkpoint_sha256=checkpoint_sha256,
+        model=model,
+        flow_steps=flow_steps,
+        output_root=task_root,
+    )
+    proposal_count = int(diagnostics.get("pool_candidates_per_flow_step", 256))
+    if args.proposal_only:
+        atomic_write_json(
+            task_root / "manifest.json",
+            {
+                "schema_version": "round5_phase1_5_candidate_pool_manifest_v1",
+                "status": "proposal_only",
+                "task": args.task,
+                "flow_steps": list(flow_steps),
+                "candidates_per_flow_step": proposal_count,
+                "states": len(manifest.entries),
+                "checkpoint": str(checkpoint.resolve()),
+                "checkpoint_sha256": checkpoint_sha256,
+                "cohort_id": manifest.cohort_id,
+                "cohort_sha256": manifest.computed_sha256,
+            },
+        )
+        print(json.dumps({"candidate_pool": str(task_root), "status": "proposal_only"}, ensure_ascii=False, sort_keys=True))
+        return
+
+    cfg = compose_eval_config(
+        args.task,
+        overrides=[
+            "eval.num_eval=50",
+            "eval.goal_offset_steps=25",
+            "eval.eval_budget=50",
+            "plan_config.horizon=5",
+            "plan_config.receding_horizon=5",
+            "plan_config.action_block=5",
+            "output.save_video=false",
+            f"solver.device={args.device}",
+        ],
+    )
+    session = DatasetEvaluationSession(cfg, task=args.task, cohort=manifest.to_evaluation_cohort())
+    process = session.process
+    completed_files: list[Path] = []
+    branch_limit = proposal_count if args.limit_candidates is None else min(proposal_count, int(args.limit_candidates))
+    if branch_limit <= 0:
+        raise ValueError("--limit-candidates must be positive")
+    for flow_step in flow_steps:
+        flow_proposals = [row for row in proposals if int(row["flow_steps"]) == int(flow_step)]
+        by_candidate: dict[int, list[dict[str, Any]]] = {}
+        for row in flow_proposals:
+            by_candidate.setdefault(int(row["candidate_index"]), []).append(row)
+        for candidate_index in range(branch_limit):
+            branch_path = task_root / "branches" / f"s{int(flow_step)}" / f"candidate_{candidate_index:04d}.jsonl"
+            if branch_path.is_file():
+                completed_files.append(branch_path)
+                continue
+            rows = sorted(by_candidate.get(candidate_index, []), key=lambda item: int(item["slot"]))
+            if len(rows) != len(manifest.entries):
+                raise RuntimeError(
+                    f"candidate {candidate_index} at S={flow_step} has {len(rows)} states; "
+                    f"expected {len(manifest.entries)}"
+                )
+            actions = np.asarray([row["action"] for row in rows], dtype=np.float64)
+            episodes = _run_fixed_candidate(
+                cfg=cfg,
+                task=args.task,
+                manifest=manifest,
+                normalized_actions=actions,
+                process=process,
+                model=model,
+                transform=session.transform["pixels"],
+                device=args.device,
+                output_dir=branch_path.parent / f"candidate_{candidate_index:04d}",
+            )
+            outcomes = _attach_candidate_outcomes(rows, episodes, task=args.task)
+            _write_jsonl(branch_path, outcomes)
+            completed_files.append(branch_path)
+    aggregate = task_root / "records.jsonl"
+    temporary = aggregate.with_name(f".{aggregate.name}.{os.getpid()}.tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        for path in sorted(completed_files):
+            stream.write(path.read_text(encoding="utf-8"))
+    temporary.replace(aggregate)
+    complete = branch_limit == proposal_count
+    atomic_write_json(
+        task_root / "manifest.json",
+        {
+            "schema_version": "round5_phase1_5_candidate_pool_manifest_v1",
+            "status": "completed" if complete else "partial",
+            "task": args.task,
+            "flow_steps": list(flow_steps),
+            "candidates_per_flow_step": proposal_count,
+            "executed_candidates_per_flow_step": branch_limit,
+            "states": len(manifest.entries),
+            "records": str(aggregate),
+            "checkpoint": str(checkpoint.resolve()),
+            "checkpoint_sha256": checkpoint_sha256,
+            "cohort_id": manifest.cohort_id,
+            "cohort_sha256": manifest.computed_sha256,
+        },
+    )
+    print(json.dumps({"candidate_pool": str(task_root), "records": str(aggregate), "status": "completed" if complete else "partial"}, ensure_ascii=False, sort_keys=True))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("validate", "probe"))
+    parser.add_argument("command", choices=("validate", "probe", "summarize", "candidate-pool"))
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--task", choices=(*PHASE15_TASKS, "all"), default="all")
@@ -400,6 +1081,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frames-per-trajectory", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--mlp", action="store_true")
+    parser.add_argument("--candidate-records")
+    parser.add_argument("--guidance-records")
+    parser.add_argument("--flow-steps", type=int, nargs="+")
+    parser.add_argument("--candidates-per-flow-step", type=int)
+    parser.add_argument("--bootstrap-samples", type=int, default=10_000)
+    parser.add_argument("--proposal-only", action="store_true")
+    parser.add_argument("--limit-candidates", type=int)
     return parser
 
 
@@ -408,8 +1096,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     config = _load_config(_resolve(args.config))
     if args.command == "validate":
         validate(args, config)
-    else:
+    elif args.command == "probe":
         probe(args, config)
+    elif args.command == "candidate-pool":
+        candidate_pool(args, config)
+    else:
+        summarize(args, config)
 
 
 if __name__ == "__main__":
