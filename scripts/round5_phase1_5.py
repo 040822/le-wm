@@ -70,6 +70,7 @@ DEFAULT_REPORT = ROOT / "docs" / "report" / "round5" / "round5_phase1_5_report.m
 DEFAULT_MIN_FREE_MIB = 3500
 DEFAULT_MAX_LOAD_PER_CPU = 0.75
 DEFAULT_MIN_AVAILABLE_MIB = 8192
+DEFAULT_MIN_SWAP_FREE_MIB = 1024
 
 
 def _resolve(value: str | Path) -> Path:
@@ -196,11 +197,14 @@ def _host_preflight(
     *,
     max_load_per_cpu: float,
     minimum_available_mib: int,
+    minimum_swap_free_mib: int = DEFAULT_MIN_SWAP_FREE_MIB,
 ) -> dict[str, Any]:
     if max_load_per_cpu <= 0:
         raise ValueError("--max-load-per-cpu must be positive")
     if minimum_available_mib < 0:
         raise ValueError("--min-available-mib cannot be negative")
+    if minimum_swap_free_mib < 0:
+        raise ValueError("--min-swap-free-mib cannot be negative")
     cpu_count = max(1, int(os.cpu_count() or 1))
     try:
         load_1, load_5, load_15 = os.getloadavg()
@@ -220,6 +224,8 @@ def _host_preflight(
         "memory_total_mib": memory.get("MemTotal"),
         "memory_available_mib": int(available_mib),
         "minimum_available_mib": int(minimum_available_mib),
+        "swap_free_mib": memory.get("SwapFree"),
+        "minimum_swap_free_mib": int(minimum_swap_free_mib),
     }
     if snapshot["load_per_cpu"] > float(max_load_per_cpu):
         raise RuntimeError(
@@ -232,6 +238,12 @@ def _host_preflight(
             "host memory headroom is below the Phase1.5 startup limit: "
             f"available={available_mib} MiB < {minimum_available_mib} MiB"
         )
+    swap_free_mib = snapshot.get("swap_free_mib")
+    if swap_free_mib is not None and int(swap_free_mib) < int(minimum_swap_free_mib):
+        raise RuntimeError(
+            "host swap headroom is below the Phase1.5 startup limit: "
+            f"free={swap_free_mib} MiB < {minimum_swap_free_mib} MiB"
+        )
     print(json.dumps({"host_preflight": snapshot}, sort_keys=True))
     return snapshot
 
@@ -242,6 +254,7 @@ def _configure_device(
     minimum_free_mib: int,
     max_load_per_cpu: float,
     minimum_available_mib: int,
+    minimum_swap_free_mib: int = DEFAULT_MIN_SWAP_FREE_MIB,
 ) -> None:
     if str(device).startswith("cuda"):
         if gpu is None:
@@ -249,6 +262,7 @@ def _configure_device(
         _host_preflight(
             max_load_per_cpu=max_load_per_cpu,
             minimum_available_mib=minimum_available_mib,
+            minimum_swap_free_mib=minimum_swap_free_mib,
         )
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu
         validate_gpu_visibility(device)
@@ -443,6 +457,7 @@ def _scan_unbounded(args: argparse.Namespace, config: Mapping[str, Any]) -> None
         args.min_free_mib,
         args.max_load_per_cpu,
         args.min_available_mib,
+        args.min_swap_free_mib,
     )
     output_root = _resolve(args.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -841,6 +856,7 @@ def calibrate(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         args.min_free_mib,
         args.max_load_per_cpu,
         args.min_available_mib,
+        args.min_swap_free_mib,
     )
     calibration_specs = [
         {
@@ -1028,6 +1044,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gpu", type=_gpu)
     parser.add_argument("--min-free-mib", type=int, default=DEFAULT_MIN_FREE_MIB)
     parser.add_argument("--min-available-mib", type=int, default=DEFAULT_MIN_AVAILABLE_MIB)
+    parser.add_argument("--min-swap-free-mib", type=int, default=DEFAULT_MIN_SWAP_FREE_MIB)
     parser.add_argument("--max-load-per-cpu", type=float, default=DEFAULT_MAX_LOAD_PER_CPU)
     parser.add_argument("--max-concurrent-scans", type=int, default=1)
     return parser

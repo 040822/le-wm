@@ -49,6 +49,7 @@ from scripts.round5_phase1_5 import (
     DEFAULT_MAX_LOAD_PER_CPU,
     DEFAULT_MIN_AVAILABLE_MIB,
     DEFAULT_MIN_FREE_MIB,
+    DEFAULT_MIN_SWAP_FREE_MIB,
     _gpu_preflight,
     _host_preflight,
 )
@@ -164,6 +165,7 @@ def _configure_device(
     minimum_free_mib: int,
     max_load_per_cpu: float,
     minimum_available_mib: int,
+    minimum_swap_free_mib: int,
 ) -> torch.device:
     if str(device).startswith("cuda"):
         if gpu is None:
@@ -171,6 +173,7 @@ def _configure_device(
         _host_preflight(
             max_load_per_cpu=max_load_per_cpu,
             minimum_available_mib=minimum_available_mib,
+            minimum_swap_free_mib=minimum_swap_free_mib,
         )
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
         validate_gpu_visibility(device)
@@ -694,6 +697,7 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         minimum_free_mib=args.min_free_mib,
         max_load_per_cpu=args.max_load_per_cpu,
         minimum_available_mib=args.min_available_mib,
+        minimum_swap_free_mib=args.min_swap_free_mib,
     )
     manifest = _manifest(config, args.task)
     checkpoint, checkpoint_sha256 = _checkpoint(config, args.task)
@@ -1170,6 +1174,7 @@ def probe(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         minimum_free_mib=args.min_free_mib,
         max_load_per_cpu=args.max_load_per_cpu,
         minimum_available_mib=args.min_available_mib,
+        minimum_swap_free_mib=args.min_swap_free_mib,
     )
     output_root = _resolve(args.output_root) / "diagnostics" / "probe"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1367,6 +1372,7 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         minimum_free_mib=args.min_free_mib,
         max_load_per_cpu=args.max_load_per_cpu,
         minimum_available_mib=args.min_available_mib,
+        minimum_swap_free_mib=args.min_swap_free_mib,
     )
     manifest = _manifest(config, args.task)
     checkpoint, checkpoint_sha256 = _checkpoint(config, args.task)
@@ -1566,6 +1572,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gpu", type=_gpu)
     parser.add_argument("--min-free-mib", type=int, default=DEFAULT_MIN_FREE_MIB)
     parser.add_argument("--min-available-mib", type=int, default=DEFAULT_MIN_AVAILABLE_MIB)
+    parser.add_argument("--min-swap-free-mib", type=int, default=DEFAULT_MIN_SWAP_FREE_MIB)
     parser.add_argument("--max-load-per-cpu", type=float, default=DEFAULT_MAX_LOAD_PER_CPU)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--max-trajectories", type=int, default=1000)

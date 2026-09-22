@@ -93,6 +93,18 @@ class Round5Phase15GridTests(unittest.TestCase):
         ), self.assertRaisesRegex(RuntimeError, "memory headroom"):
             _host_preflight(max_load_per_cpu=0.5, minimum_available_mib=256)
 
+        with patch("scripts.round5_phase1_5.os.cpu_count", return_value=8), patch(
+            "scripts.round5_phase1_5.os.getloadavg", return_value=(0.5, 0.5, 0.5)
+        ), patch(
+            "scripts.round5_phase1_5._meminfo_mib",
+            return_value={"MemTotal": 1024, "MemAvailable": 512, "SwapFree": 128},
+        ), self.assertRaisesRegex(RuntimeError, "swap headroom"):
+            _host_preflight(
+                max_load_per_cpu=0.5,
+                minimum_available_mib=256,
+                minimum_swap_free_mib=256,
+            )
+
 
 class Round5Phase15DiagnosticsTests(unittest.TestCase):
     def test_fixed_candidate_policy_replays_then_holds_zero(self):
