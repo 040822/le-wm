@@ -57,6 +57,7 @@ from source.common.round5_phase1_5 import (
     PHASE15_PROTOCOL_VARIANT,
     PHASE15_TASKS,
     atomic_write_json,
+    capture_environment_state,
     candidate_pool_metrics,
     control_action_metrics,
     make_control_actions,
@@ -65,6 +66,9 @@ from source.common.round5_phase1_5 import (
     make_probe_split,
     normalized_physical_distance,
     paired_guidance_metrics,
+    capture_rng_state,
+    restore_environment_state,
+    restore_rng_state,
 )
 
 
@@ -392,6 +396,7 @@ def _run_fixed_candidate(
     device: str,
     output_dir: Path,
     dataset: Any | None = None,
+    branch_state: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Execute one captured candidate for all 50 states and retain true outcomes."""
     session = DatasetEvaluationSession(
@@ -424,8 +429,32 @@ def _run_fixed_candidate(
     step_counter = {"value": 0}
     future_latents: dict[int, dict[str, list[float]]] = {index: {} for index in range(len(manifest.entries))}
     model = getattr(model, "model", model).to(device).eval()
+    replay_state = branch_state if branch_state is not None else {}
+
+    def replay_initial_state() -> None:
+        env_slots = getattr(envs, "envs", None)
+        if env_slots is None or len(env_slots) != len(manifest.entries):
+            raise RuntimeError("diagnostic branch cannot enumerate simulator environments")
+        if not replay_state:
+            replay_state["snapshots"] = [
+                {
+                    "environment": capture_environment_state(env),
+                    "rng": capture_rng_state(env),
+                }
+                for env in env_slots
+            ]
+            replay_state["source"] = "captured_before_first_primitive_step"
+        else:
+            snapshots = replay_state.get("snapshots")
+            if not isinstance(snapshots, list) or len(snapshots) != len(env_slots):
+                raise RuntimeError("diagnostic branch replay snapshot count changed")
+            for env, snapshot in zip(env_slots, snapshots):
+                restore_environment_state(env, snapshot["environment"])
+                restore_rng_state(env, snapshot.get("rng"))
 
     def traced_step(actions: Any, *args: Any, **kwargs: Any):
+        if step_counter["value"] == 0:
+            replay_initial_state()
         result = original_step(actions, *args, **kwargs)
         step_counter["value"] += 1
         if step_counter["value"] in {5, 10, 15, 20, 25}:
@@ -809,6 +838,7 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
         branch_session = DatasetEvaluationSession(
             cfg, task=args.task, cohort=manifest.to_evaluation_cohort()
         )
+        branch_replay: dict[str, Any] = {}
         branches = {
             kind: _run_fixed_candidate(
                 cfg=cfg,
@@ -820,6 +850,8 @@ def guidance_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                 transform=branch_session.transform["pixels"],
                 device=args.device,
                 output_dir=output_root / f"{args.guidance}_s{int(flow_step)}" / kind,
+                dataset=branch_session.dataset,
+                branch_state=branch_replay,
             )
             for kind in ("baseline", "guided", "random")
         }
@@ -1433,6 +1465,7 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
     branch_limit = proposal_count if args.limit_candidates is None else min(proposal_count, int(args.limit_candidates))
     if branch_limit <= 0:
         raise ValueError("--limit-candidates must be positive")
+    branch_replay: dict[str, Any] = {}
     if not args.controls_only:
         for flow_step in flow_steps:
             flow_proposals = [row for row in proposals if int(row["flow_steps"]) == int(flow_step)]
@@ -1462,6 +1495,7 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                     device=args.device,
                     output_dir=branch_path.parent / f"candidate_{candidate_index:04d}",
                     dataset=session.dataset,
+                    branch_state=branch_replay,
                 )
                 outcomes = _attach_candidate_outcomes(rows, episodes, task=args.task)
                 _write_jsonl(branch_path, outcomes)
@@ -1525,6 +1559,7 @@ def candidate_pool(args: argparse.Namespace, config: Mapping[str, Any]) -> None:
                 device=args.device,
                 output_dir=control_path.parent / control_path.stem,
                 dataset=session.dataset,
+                branch_state=branch_replay,
             )
             _write_jsonl(control_path, _attach_candidate_outcomes(rows, episodes, task=args.task))
             control_files.append(control_path)
