@@ -1186,12 +1186,19 @@ def _collect_features(
     with torch.inference_mode():
         for start in range(0, len(rows), int(batch_size)):
             batch_rows = list(rows[start : start + int(batch_size)])
-            raw = dataset.get_row_data(batch_rows)
-            pixels = np.asarray(raw["pixels"])
+            # h5py requires advanced-index arrays to be increasing.  Probe
+            # rows are deliberately trajectory-disjoint and therefore arrive
+            # in sampling order, which is not necessarily dataset order.
+            sorted_rows, restore_order = np.unique(
+                np.asarray(batch_rows, dtype=np.int64),
+                return_inverse=True,
+            )
+            raw = dataset.get_row_data(sorted_rows.tolist())
+            pixels = np.asarray(raw["pixels"])[restore_order]
             image_batch = torch.stack([transform(pixel) for pixel in pixels]).to(device)
             latent = model.encode_pixels(image_batch).float().detach().cpu().numpy()
             features.append(np.asarray(latent, dtype=np.float64))
-            targets.append(np.asarray(raw[target_column], dtype=np.float64))
+            targets.append(np.asarray(raw[target_column], dtype=np.float64)[restore_order])
     return np.concatenate(features, axis=0), np.concatenate(targets, axis=0)
 
 
