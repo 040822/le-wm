@@ -1,202 +1,34 @@
 \section{Introduction}
-\label{sec:intro}
+\label{sec:introduction}
 
-Please follow the steps outlined below when submitting your manuscript to the IEEE Computer Society Press.
-This style guide now has several important modifications (for example, you are no longer warned against the use of sticky tape to attach your artwork to the paper), so all authors should read this new version.
+% 总起段（2026-09-26 调整）：从 LeWM-like 的视觉目标规划出发，先交代预测与搜索，再引出学习动作提议。
+% 潜在世界模型根据候选动作预测未来表征，并以目标图像为参照进行规划。
+% DINO-WM 和 LeWM 说明这一接口可以支持视觉控制，但每次重规划都需要评估和更新动作候选，
+% 反复查询动力学模型会带来计算成本。由此引出问题：能否学习动作提议以减少搜索负担，
+% 同时保留预测动作后果以进行选择和修正的能力？
+Latent world models enable visual goal-conditioned planning by predicting how candidate actions change the environment in a learned representation space. DINO-WM and LeWM use such predictions to search for action sequences that bring future representations toward an image goal~\cite{zhou2024dinowm,maes2026lewm}. At each replanning step, however, trajectory optimization evaluates and updates candidate sequences through repeated queries to the dynamics model. This search can account for a substantial part of the decision cost. Starting from this planning framework, we ask how learned action proposals can reduce the search burden while retaining the ability to assess and refine actions through predicted consequences.
 
-%-------------------------------------------------------------------------
-\subsection{Language}
+% 近期工作 -> 凝练科学问题：优先讲 latent planning 的两条改进路径，再引出训练耦合。
+% Fast LeWM 降低预测候选后果的成本；LeFlow 学习 latent 轨迹提议，再由冻结世界模型排序；
+% FlowMPC 将 flow 策略与模型规划结合。这些工作引出提议生成器与预测器如何共同学习的问题。
+% WAM 的训练/推理区分放在 related work 第三段展开，避免开篇偏离 LeWM-like 规划主线。
+Recent work addresses both prediction and search costs. Fast LeWorldModel predicts futures from action prefixes in parallel~\cite{gao2026fastlewm}. LeFlow learns latent trajectory proposals, decodes them into actions, and ranks them with a frozen world model~\cite{huang2026leflow}; FlowMPC combines a flow policy with model-based planning~\cite{hamel2026flowmpc}. These approaches motivate learning reusable proposals for world-model planning. They also raise a training question: how should proposal generation and consequence prediction be learned together? We investigate whether coupling these learning problems improves the predictor's ability to select or refine proposed actions under a limited decision budget.
 
-All manuscripts must be in English.
+% 这段进一步讨论问题，但是可能要和下一段提出CoWM的融合起来比较好。
+% 答案并非仅由预测准确性或架构决定。策略可能无法提出成功的动作；预测器可能将不成功的候选排在成功候选之前；或者梯度优化可能在减少预测目标距离的同时使执行结果恶化。共享参数可以传递有用信息，但也可能将这些误差耦合在一起。此外，在保留记录轨迹作为目标的同时，将策略估计的动作输入预测器，并不能提供这些动作的真实反事实结果。这些可能性使得耦合的形式，而非仅仅存在两个目标，成为该研究的核心。
+The answer does not follow from predictive accuracy or architecture alone. A policy may fail to propose a successful action; a predictor may rank an unsuccessful candidate above a successful one; or gradient optimization may reduce predicted goal distance while worsening the executed outcome. Sharing parameters can transfer useful information, but it can also couple these errors. Moreover, feeding a policy's estimated actions into a predictor while retaining the recorded trajectory as the target does not provide the true counterfactual outcome of those actions. These possibilities make the form of coupling, rather than simply the presence of two objectives, central to the study.
 
-\subsection{Dual submission}
+% 引出方法。
+% 我们介绍了 \textbf{CoWM}，一种耦合的潜在世界--动作模型，具有共享的视觉编码器和扩散 Transformer（DiT）。其动作模式使用流匹配生成目标条件动作序列，而其动力学模式则基于因果可用的动作前缀并行预测未来潜在表示。我们明确区分了三种训练连接：共享参数、动力学输入的预测动作，以及从动力学损失经由这些输入到动作生成器的梯度路径。在推理时，模型要么直接执行一个提议，要么使用预测结果在多个提议中进行选择，要么通过下降学习到的目标代价来细化提议。该形式化方法支持对哪些连接有用进行受控研究，而不预设更强的耦合总是更好。
+We introduce \textbf{CoWM}, a coupled latent world--action model with a shared visual encoder and diffusion transformer (DiT). Its action mode generates goal-conditioned action sequences using flow matching, and its dynamics mode predicts future latents from causally available action prefixes in parallel. We explicitly distinguish three training connections: shared parameters, predicted-action inputs to dynamics, and a gradient path from the dynamics loss through those inputs to the action generator. At inference, the model either executes a proposal directly, selects among proposals using predicted outcomes, or refines proposals by descending a learned goal cost. This formulation supports a controlled study of which connections are useful, without presupposing that stronger coupling is always better.
 
-Please refer to the author guidelines on the \confName\ \confYear\ web page for a
-discussion of the policy on dual submissions.
+% 进一步说明实验设计
+% 我们的评估遵循相同的分解。需要匹配的训练消融来隔离耦合效应；固定检查点推理比较衡量使用学习到的预测器的价值；模拟器分支测试候选分数和细化方向是否与真实结果一致。物理探针通过区分从观测到的潜变量中可读出的信息与预测潜变量中保留的信息，补充了这些决策测试。效率通过成功-延迟权衡来评估，包括细化所使用的反向传播，而不仅仅是流步数。
+Our evaluation follows the same decomposition. Matched training ablations are needed to isolate coupling effects; fixed-checkpoint inference comparisons measure the value of using the learned predictor; and simulator branches test whether candidate scores and refinement directions agree with real outcomes. Physical probes complement these decision tests by distinguishing information readable from an observed latent from information preserved in a predicted latent. Efficiency is assessed through success--latency trade-offs, including the backward passes used by refinement, rather than flow-step counts alone.
 
-\subsection{Paper length}
-Papers, excluding the references section, must be no longer than eight pages in length.
-The references section will not be included in the page count, and there is no limit on the length of the references section.
-For example, a paper of eight pages with two pages of references would have a total length of 10 pages.
-{\bf There will be no extra page charges for \confName\ \confYear.}
+% 分析实验结果
+% 本稿给出了耦合公式、其选择与精化接口，以及对其行为的探索性评估。在当前的 Reacher 队列上，生成后精化将一步直接执行从 72\% 提升到 88\%，而采用两个流步骤的候选选择达到 90\%。然而，候选池诊断表明，预测器无法可靠地恢复可用的成功率上界，并且其他任务已接近饱和。因此，核心假设——即在固定预算下，特定的训练耦合能够提高决策质量——仍然是匹配消融实验的目标。在此阶段，我们并不声称具有普遍的双向迁移、经过验证的加速效果，或对迭代搜索的替代。
+The present draft provides the coupled formulation, its selection and refinement interfaces, and an exploratory evaluation of their behavior. On the current Reacher cohort, post-generation refinement improves one-step direct execution from 72\% to 88\%, while candidate selection with two flow steps reaches 90\%. However, candidate-pool diagnostics show that the predictor does not reliably recover the available success upper bound, and other tasks are close to saturation. The central hypothesis---that a particular training coupling improves decision quality under a fixed budget---therefore remains the target of the matched ablations. We make no claim of universal bidirectional transfer, a validated speedup, or replacement of iterative search at this stage.
 
-Overlength papers will simply not be reviewed.
-This includes papers where margins and formatting are deemed to have been significantly altered from those laid down by this style guide.
-Note that this \LaTeX\ guide already sets the figure captions and references in a smaller font.
-The reason why such papers will not be reviewed is that there is no provision for supervised revisions of manuscripts.
-The review process cannot determine the suitability of the paper for presentation in eight pages if it is reviewed in 11 pages.
-
-%-------------------------------------------------------------------------
-\subsection{The ruler}
-The \LaTeX\ style defines a printed ruler that should be present in the version submitted for review.
-The ruler is provided in order that reviewers may comment on particular lines in the paper without circumlocution.
-If you are preparing a document using a non-\LaTeX\ document preparation system, arrange for an equivalent ruler to appear on the final output pages.
-The presence or absence of the ruler should not change the appearance of any other content on the page.
-The camera-ready copy should not contain a ruler.
-(\LaTeX\ users may use the options of \texttt{cvpr.sty} to switch between different versions.)
-
-Reviewers:
-note that the ruler measurements do not align well with lines in the paper --- this turns out to be very difficult to do well when the paper contains many figures and equations, and, when done, looks ugly.
-Use fractional references (\eg, this line is $087.5$), although in most cases the approximate location would be adequate.
-
-
-\subsection{Paper ID}
-Make sure that the Paper ID from the submission system is visible in the version submitted for review (replacing the ``*****'' you see in this document).
-If you are using the \LaTeX\ template, \textbf{make sure to update paper ID in the appropriate place in the tex file}.
-
-
-\subsection{Mathematics}
-
-Please, number all of your sections and displayed equations as in these examples:
-\begin{equation}
-  E = m\cdot c^2
-  \label{eq:important}
-\end{equation}
-and
-\begin{equation}
-  v = a\cdot t.
-  \label{eq:also-important}
-\end{equation}
-It is important for the reader to be able to refer to any particular equation.
-Just because you did not refer to it in the text does not mean that some future reader might not need to refer to it.
-It is cumbersome to have to use circumlocutions like ``the equation second from the top of page 3 column 1''.
-(Note that the ruler will not be present in the final copy, so is not an alternative to equation numbers).
-All authors will benefit from reading Mermin's description of how to write mathematics:
-\url{http://www.pamitc.org/documents/mermin.pdf}.
-
-\subsection{Blind review}
-
-Many authors misunderstand the concept of anonymizing for blind review.
-Blind review does not mean that one must remove citations to one's own work---in fact it is often impossible to review a paper unless the previous citations are known and available.
-
-Blind review means that you do not use the words ``my'' or ``our'' when citing previous work.
-That is all.
-(But see below for tech reports.)
-
-Saying ``this builds on the work of Lucy Smith [1]'' does not mean that you are Lucy Smith;
-it says that you are building on her work.
-If you are Smith and Jones, do not say ``as we show in [7]'', say ``as Smith and Jones show in [7]'' and at the end of the paper, include reference 7 as you would any other cited work.
-
-An example of a bad paper just asking to be rejected:
-\begin{quote}
-\begin{center}
-    An analysis of the frobnicatable foo filter.
-\end{center}
-
-   In this paper, we present a performance analysis of our previous paper [1], and show that it is inferior to all previously known methods.
-   Why the previous paper was accepted without this analysis is beyond me.
-
-   [1] Removed for blind review
-\end{quote}
-
-
-An example of an acceptable paper:
-\begin{quote}
-\begin{center}
-     An analysis of the frobnicatable foo filter.
-\end{center}
-
-   In this paper, we present a performance analysis of the paper of Smith \etal [1], and show it to be inferior to all previously known methods.
-   Why the previous paper was accepted without this analysis is beyond me.
-
-   [1] Smith, L and Jones, C. ``The frobnicatable foo filter, a fundamental contribution to human knowledge''. Nature 381(12), 1-213.
-\end{quote}
-
-If you are making a submission to another conference at the same time that covers similar or overlapping material, you may need to refer to that submission to explain the differences, just as you would if you had previously published related work.
-In such cases, include the anonymized parallel submission~\cite{Authors14} as supplemental material and cite it as
-\begin{quote}
-[1] Authors. ``The frobnicatable foo filter'', F\&G 2014 Submission ID 324, Supplied as supplemental material {\tt fg324.pdf}.
-\end{quote}
-
-Finally, you may feel you need to tell the reader that more details can be found elsewhere and refer them to a technical report.
-For conference submissions, the paper must stand on its own, and not {\em require} the reviewer to go to a tech report for further details.
-Thus, you may say in the body of the paper ``further details may be found in~\cite{Authors14b}''.
-Then submit the tech report as supplemental material.
-Again, do not assume that the reviewers will read this material.
-
-Sometimes your paper is about a problem that you tested using a tool that is widely known to be restricted to a single institution.
-For example, let's say it's 1969, you have solved a key problem on the Apollo lander, and you believe that the 1970 audience would like to hear about your
-solution.
-The work is a development of your celebrated 1968 paper entitled ``Zero-g frobnication: How being the only people in the world with access to the Apollo lander source code makes us a wow at parties'', by Zeus \etal.
-
-You can handle this paper like any other.
-Do not write ``We show how to improve our previous work [Anonymous, 1968].
-This time we tested the algorithm on a lunar lander [name of lander removed for blind review]''.
-That would be silly, and would immediately identify the authors.
-Instead write the following:
-\begin{quotation}
-\noindent
-   We describe a system for zero-g frobnication.
-   This system is new because it handles the following cases:
-   A, B.  Previous systems [Zeus et al. 1968] did not  handle case B properly.
-   Ours handles it by including a foo term in the bar integral.
-
-   ...
-
-   The proposed system was integrated with the Apollo lunar lander, and went all the way to the moon, don't you know.
-   It displayed the following behaviours, which show how well we solved cases A and B: ...
-\end{quotation}
-As you can see, the above text follows standard scientific convention, reads better than the first version, and does not explicitly name you as the authors.
-A reviewer might think that it is likely that the new article was written by Zeus \etal, but cannot make any decision based on that guess.
-He or she would have to be sure that no other authors could have been contracted to solve problem B.
-\medskip
-
-\noindent
-FAQ\medskip\\
-{\bf Q:} Are acknowledgements OK?\\
-{\bf A:} No.  Leave them for the final copy.\medskip\\
-{\bf Q:} How do I cite my results reported in open challenges?
-{\bf A:} To conform with the double-blind review policy, you can report results of other challenge participants together with your results in your paper.
-However, for your results, you should not identify yourself and should not mention your participation in the challenge.
-Instead, present your results referring to the method proposed in your paper and draw conclusions based on the experimental comparison with other results.\medskip\\
-
-\begin{figure}[t]
-  \centering
-  \fbox{\rule{0pt}{2in} \rule{0.9\linewidth}{0pt}}
-   %\includegraphics[width=0.8\linewidth]{egfigure.eps}
-
-   \caption{Example of caption.
-   It is set in Roman so that mathematics (always set in Roman: $B \sin A = A \sin B$) may be included without an ugly clash.}
-   \label{fig:onecol}
-\end{figure}
-
-\subsection{Miscellaneous}
-
-\noindent
-Compare the following:\\
-\begin{tabular}{ll}
- \verb'$conf_a$' &  $conf_a$ \\
- \verb'$\mathit{conf}_a$' & $\mathit{conf}_a$
-\end{tabular}\\
-See The \TeX book, p165.
-
-The space after \eg, meaning ``for example'', should not be a sentence-ending space.
-So \eg is correct, {\em e.g.} is not.
-The provided \verb'\eg' macro takes care of this.
-
-When citing a multi-author paper, you may save space by using ``et alia'', shortened to ``\etal'' (not ``{\em et.\ al.}'' as ``{\em et}'' is a complete word).
-If you use the \verb'\etal' macro provided, then you need not worry about double periods when used at the end of a sentence as in Alpher \etal.
-However, use it only when there are three or more authors.
-Thus, the following is correct:
-   ``Frobnication has been trendy lately.
-   It was introduced by Alpher~\cite{Alpher02}, and subsequently developed by
-   Alpher and Fotheringham-Smythe~\cite{Alpher03}, and Alpher \etal~\cite{Alpher04}.''
-
-This is incorrect: ``... subsequently developed by Alpher \etal~\cite{Alpher03} ...'' because reference~\cite{Alpher03} has only two authors.
-
-\begin{figure*}
-  \centering
-  \begin{subfigure}{0.68\linewidth}
-    \fbox{\rule{0pt}{2in} \rule{.9\linewidth}{0pt}}
-    \caption{An example of a subfigure.}
-    \label{fig:short-a}
-  \end{subfigure}
-  \hfill
-  \begin{subfigure}{0.28\linewidth}
-    \fbox{\rule{0pt}{2in} \rule{.9\linewidth}{0pt}}
-    \caption{Another example of a subfigure.}
-    \label{fig:short-b}
-  \end{subfigure}
-  \caption{Example of a short caption, which should be centered.}
-  \label{fig:short}
-\end{figure*}
+Our contributions are summarized as follows:
+% 1. 提出CoWM 2. 探索一种计算成本和任务性能之间平衡的方式 3. 实验、额外实验

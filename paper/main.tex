@@ -1,4 +1,5 @@
-% CVPR 2026 Paper Template; see https://github.com/cvpr-org/author-kit
+% CoWM working draft targeting CVPR 2027; bundled style: CVPR 2026 author kit.
+% Recheck the target-edition author kit before submission.
 
 \documentclass[10pt,twocolumn,letterpaper]{article}
 
@@ -23,22 +24,22 @@
 %%%%%%%%% PAPER ID  - PLEASE UPDATE
 \def\paperID{DRAFT} % Replace only after registering a submission.
 \def\confName{CVPR}
-\def\confYear{2026}
+\def\confYear{2027} % Target edition; bundled style is still the 2026 author kit.
 
 %%%%%%%%% TITLE - PLEASE UPDATE
-\title{Fast-LeWAM: Shared Latent Modeling\\for Action Generation and Planning}
+\title{CoWM: Coupled Latent World--Action Modeling\\for Action Selection and Refinement}
 
 %%%%%%%%% AUTHORS - PLEASE UPDATE
 \author{Anonymous Authors}
 
 \begin{document}
 \maketitle
-\input{sec/draft_abstract}
-\input{sec/draft_intro}
-\input{sec/draft_related}
-\input{sec/draft_method}
-\input{sec/draft_experiments}
-\input{sec/draft_discussion}
+\input{sec/0_abstract}
+\input{sec/1_intro}
+\input{sec/2_related}
+\input{sec/3_method}
+\input{sec/4_experiments}
+\input{sec/5_discussion}
 {
     \small
     \bibliographystyle{ieeenat_fullname}
@@ -47,9 +48,10 @@
 
 % WARNING: do not forget to delete the supplementary pages from your submission 
 % \input{sec/X_suppl}
-% Working appendix: includes intermediate results, not final performance.
+% Working supplement is separately compilable via supplement.tex.
+% Uncomment only for an internal combined draft, not the main submission.
 % \clearpage
 % \appendix
-% \input{sec/draft_appendix}
+% \input{sec/6_appendix}
 
 \end{document}

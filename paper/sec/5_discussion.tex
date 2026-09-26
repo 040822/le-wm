@@ -1,0 +1,10 @@
+\section{Discussion and Limitations}
+\label{sec:limitations}
+Coupling is a design variable, not an assurance of mutual improvement. The action estimate and predictor can co-adapt to the recorded target without becoming more accurate about the consequences of perturbed actions. Conversely, simple recorded-action multi-task training may already provide useful shared features. A detached or less coupled variant is a valid outcome of the study if it offers the strongest evidence. The formal claim should identify the effective connection rather than require an ordering from weak to strong coupling.
+
+Our present evidence is limited to a single training seed, reused development cohorts, and partially completed diagnostics. High success on several tasks restricts discrimination among methods. Physical readout quality does not establish decision quality, and a fixed-pool oracle is not a long-horizon optimum. The parallel predictor also does not make refinement free: sequential backward passes may outweigh savings from using fewer candidates. Independent final evaluation and controlled timing are required to resolve these issues.
+
+We focus on offline action--dynamics learning. Online adaptation, latent-path generation, and additional prediction modes introduce separate hypotheses and are not core contributions here. Likewise, causal attention enforces temporal information constraints without guaranteeing that the learned model captures physical causality.
+
+\section{Conclusion}
+CoWM formulates action generation and parallel latent dynamics as a coupled learning problem with distinct parameter, input, and gradient connections. Its direct, selection, and refinement interfaces expose where future prediction participates in control. Exploratory results show task-dependent inference gains alongside substantial gaps in candidate selection, motivating simulator-grounded evaluation of the decision interface. Matched training ablations and measured performance--latency curves remain necessary to determine which coupling and inference combination is justified.

@@ -1,7 +1,5 @@
 \begin{abstract}
-The ABSTRACT is to be in fully justified italicized text, at the top of the left-hand column, below the author and affiliation information.
-Use the word ``Abstract'' as the title, in 12-point Times, boldface type, centered relative to the column, initially capitalized.
-The abstract is to be in 10-point, single-spaced type.
-Leave two blank lines after the Abstract, then begin the main text.
-Look at previous \confName abstracts to get a feel for style and length.
+% abstract肯定是要大改的，先放着。 2026-09-25
+Generative policies produce action sequences directly, while latent world models predict their consequences for planning. Combining them raises a decision-oriented question: which forms of action--dynamics coupling help a model select or refine actions under a limited inference budget? We study this question with CoWM, a coupled latent world--action model that shares a visual encoder and a diffusion transformer between goal-conditioned action flow and action-conditioned parallel future prediction. We distinguish parameter sharing, predicted-action input coupling, and gradient coupling through the action estimate. The same model supports direct execution, candidate selection, and bounded gradient refinement, allowing training effects to be separated from inference effects. We evaluate the decision interface through simulator-grounded candidate ranking, real outcomes of action refinement, and physical readouts from observed and predicted latents. In a single-training-seed exploratory study, one-step direct execution achieves 72\% success on Reacher, compared with 88\% after post-generation refinement and 90\% for two-step generation with candidate selection. Fixed-pool diagnostics nevertheless expose a substantial gap between successful-candidate availability and model-based selection. These observations motivate controlled coupling ablations rather than establish a universal benefit of joint learning.
+\textbf{Draft status:} matched multi-seed training comparisons, independent final evaluation, and fair latency measurements remain pending.
 \end{abstract}

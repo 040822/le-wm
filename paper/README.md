@@ -1,30 +1,33 @@
-# Fast-LeWAM paper draft
+# CoWM working paper
 
-The working manuscript starts at [main.tex](main.tex). See the [Chinese writing guide](DRAFT_GUIDE.md) for the narrative, claim--evidence map, result provenance, pending experiments, and build instructions.
+Start from [main.tex](main.tex). The English draft follows the action–dynamics coupling discussion in session `01a0ba23-c649-7b90-8acc-96716f894f9f` and the local CoWM notes. Read the [Chinese drafting guide](docs/DRAFT_GUIDE.md) for the argument, evidence boundaries, remaining experiments, and source provenance.
 
-The draft distinguishes completed A/B experiments from the ongoing four-mode study. TBD entries are missing results, not zero. Original author-kit examples are retained below and in the unused template sections.
+The manuscript now focuses on shared A/B learning, three forms of coupling, action selection/refinement, and decision probes. CoWM is a provisional paper name; implementation and checkpoint names remain Fast-LeWAM/R4-AB. Online adaptation and C/D/E extensions are outside the core contribution.
 
-## Original template provenance
+## Files
 
-# Official LaTeX template for CVPR/ICCV/3DV 
+- `sec/0_abstract.tex` through `sec/5_discussion.tex`: main paper.
+- `sec/6_appendix.tex`: working supplement, excluded from `main.tex` by default.
+- `fig/draft_architecture.tex`: native LaTeX architecture sketch.
+- `tables/`: frozen exploratory table rows extracted from experiment artifacts.
+- `references.bib`: active bibliography.
+- `docs/evidence_snapshot.json`: numerical provenance and source SHA256 hashes; internal, not a submission artifact.
+- `docs/archive/pre_cowm_20260924.zip`: pre-edit manuscript backup.
+- `sec/template_*.tex`, `main.bib`, `fig/teaser.tex`: retained author-kit examples, unused by the manuscript.
 
-**Note:** as per PC decision, the Microsoft Word version of the template is no longer supported.
-You may find the 2024 version [here](https://github.com/cvpr-org/author-kit/releases/tag/CVPR2024-v3(msword)).
+## Build
 
-### History (in reverse chronological order)
+With TeX Live and latexmk installed:
 
-- updated for CVPR 2026 [Vladimir Pavlovic](mailto:vladimir@rutgers.edu)
-- added styles for `subsubsection` and fixed the wrong PDF bookmarks by [Di Fang](https://github.com/fang-d)
-- modernized for CVPR 2025 by [Christian Richardt](https://richardt.name/)
-- fixed page centering for CVPR 2025 by [Stefan Roth](mailto:stefan.roth@NOSPAMtu-darmstadt.de)
-- inline enumerations and `cvprblue` links for CVPR 2025 by [Ioannis Gkioulekas
-](https://www.cs.cmu.edu/~igkioule/)
-- added automated LaTeX build testing for CVPR 2025 by [Ahan Shabanov](https://ahanio.github.io)
-- references in `cvprblue` for CVPR 2024 by [Klaus Greff](https://github.com/Qwlouse) 
-- added natbib for CVPR 2024 by [Christian Richardt](https://richardt.name/)
-- replaced buggy (review-mode) line numbering for 3DV 2024 by [Adín Ramírez Rivera
-](https://openreview.net/profile?id=~Ad%C3%ADn_Ram%C3%ADrez_Rivera1)
-- setup github repo of author-kit for 3DV 2025 by [Andrea Tagliasacchi](https://theialab.ca)
-- modernized for CVPR 2022 by [Stefan Roth](mailto:stefan.roth@NOSPAMtu-darmstadt.de)
-- created cvpr.sty file to unify review/rebuttal/final versions by [Ming-Ming Cheng](https://github.com/MCG-NKU/CVPR_Template)
-- developed CVPR 2005 template  by [Paolo Ienne](mailto:Paolo.Ienne@di.epfl.ch) and [Andrew Fitzgibbon](mailto:awf@acm.org)
+```bash
+cd paper
+latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
+```
+
+Alternatively, upload the project to Overleaf and set `main.tex` as the main document. Use `supplement.tex` to compile the working supplement separately. The `review` mode and anonymous authors are retained. The target year is 2027, but the bundled `cvpr.sty` is from the 2026 author kit and must be checked against the target edition before submission.
+
+The draft contains explicit pending-evidence markers. It is not submission-ready. Local validation checks input files, references, environments, and table provenance; PDF compilation and the eight-page limit are not yet verified because no TeX engine is available in this environment.
+
+## Template provenance
+
+The bundled style originates from the [official CVPR/ICCV/3DV author kit](https://github.com/cvpr-org/author-kit), updated for CVPR 2026. Original examples remain under `sec/template_*.tex`.

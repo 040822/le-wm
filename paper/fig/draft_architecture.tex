@@ -1,24 +1,18 @@
 \begin{figure*}[t]
- \centering
- \fbox{%
- \begin{minipage}{0.94\textwidth}
- \centering
- \small
- \textbf{Shared visual encoder/projector $f_\phi$ and transformer $T_\theta$}\\[3pt]
- Current and goal images $\longrightarrow (z_0,z_g)$\\[6pt]
- \begin{tabular}{rcl}
-  Action proposal & $\epsilon_a \xrightarrow{\ A\ } \mathbf a^{(i)}$
-    & $\searrow$ \\[4pt]
-  Latent proposal & $\epsilon_z \xrightarrow{\ D\ }
-    (z_0,\tilde z_{1:H-1},z_g)
-    \xrightarrow{\ E\ } \mathbf a^{(i)}$
-    & $\longrightarrow\
-    B(z_0,\mathbf a^{(i)})_H$ \\
- \end{tabular}\\[6pt]
- Predicted terminal latent $\xrightarrow{\ \operatorname{mse}(\,\cdot\,,z_g)\ }$
- candidate score $\longrightarrow$ select actions $\longrightarrow$ environment\\[4pt]
- Direct control: one A sample $\longrightarrow$ environment, without B selection.
- \end{minipage}}
- \caption{Two proposal routes with one learned dynamics scorer. A, B, D, and E reuse transformer blocks with different masks and heads. B receives actions and the current latent, not the generated path or goal token. The goal enters the external score. The diagram represents alternative inference routes; it does not imply both proposal pools are combined in one evaluation.}
- \label{fig:architecture}
+\centering
+\fbox{\begin{minipage}{0.94\textwidth}
+\centering\small
+\textbf{CoWM: shared visual encoder/projector $f_\phi$ and DiT $T_\theta$}\\[5pt]
+\begin{tabular}{p{0.45\textwidth}p{0.45\textwidth}}
+\textbf{Training: three connections} & \textbf{Inference: choose a decision budget} \\[3pt]
+1. A and B update shared parameters. & Current and goal images $\longrightarrow z_0,z_g$ \\[3pt]
+2. B receives recorded or A-estimated actions. & A: noise $\longrightarrow$ action proposal(s) \\[3pt]
+3. B loss backpropagates through estimated actions; detachment removes this path. & P0: execute directly; P3: score with B and select; PO: refine with $\nabla_{\mathbf a}J$ before execution. \\[3pt]
+A learns action velocity; B learns recorded future latents. & B: $(z_0,\mathbf a)\longrightarrow\hat z_{1:H}$ in parallel; $J=\operatorname{mse}(\hat z_H,z_g)$.
+\end{tabular}\\[5pt]
+\textbf{Decision probes:} physical readout $\longrightarrow$ predicted consequences
+$\longrightarrow$ candidate ranking / real refinement outcomes
+\end{minipage}}
+\caption{Coupling and decision interfaces. A and B reuse transformer blocks with different token layouts and masks. The goal conditions A and the external cost, but is not an input to B. The recorded future remains B's training target even on estimated-action inputs; simulator branches are required to test actual consequences. The inference routes are alternatives, not compulsory sequential stages.}
+\label{fig:architecture}
 \end{figure*}

@@ -1,0 +1,64 @@
+\section{Experiments}
+\label{sec:experiments}
+We organize the study around three questions: which training connections improve decision quality, when consequence prediction improves a fixed policy, and whether the gain justifies its inference cost. We report completed exploratory results separately from the controlled comparisons that remain to be completed.
+
+\subsection{Exploratory setup and evidence scope}
+The current experiments use Cube, Push-T, Reacher, and TwoRoom, with a separately trained model for each task. All inference comparisons use the corresponding R4-AB checkpoint at epoch 10, training seed 3072. Observations are $224\times224$ images; the latent width is 192. Each planned sequence contains $H=5$ action blocks of $k=5$ environment steps. The controller executes all five blocks before replanning, subject to termination, within a 50-step episode budget. Goal images are sampled 25 environment steps ahead under the frozen local Phase1 legacy protocol.
+
+Each task has 50 fixed development start--goal pairs. This is not an independent held-out evaluation, nor is it claimed to exactly reproduce every published LeWM setting. The cohort has been repeatedly used for inference selection, and the checkpoint's training-data exposure is not established as strictly disjoint. Additional inference seeds do not constitute additional training seeds. Percentages below describe these cohorts, not a population-level generalization guarantee.
+
+In the Phase1 comparisons, P3 uses $N=64$, while CEM uses 300 samples, 30 elites, 30 iterations, and initial variance scale one. PO and GF use $K=5$, $\eta=0.01$, and RMS radius $R=0.2$; GF guides the last $\min(5,S)$ flow steps. Reacher CEM uses the recorded action-clipping variant, whereas P0/P3 retain their recorded unclipped planner interface. Consequently, a CEM comparison here includes that action-handling difference. Formal comparisons must align the action semantics and give each planner a budget sweep.
+
+\subsection{What does inference-time dynamics add?}
+\begin{table*}[t]
+ \centering\small
+ \begin{tabular}{lrrrrr}
+ \toprule
+ Inference from the same task checkpoint & Flow steps & Cube & Push-T & Reacher & TwoRoom \\
+ \midrule
+ \input{tables/phase1_rows}
+ \bottomrule
+ \end{tabular}
+ \caption{Exploratory closed-loop success (\%) on the fixed 50-episode development cohort per task, using one training seed. PO refines every candidate before selection when combined with P3. One-step GF duplicates the PO update rule and is omitted. These are inference comparisons within R4-AB, not evidence that coupling outperforms independent training. CEM action-handling details are given in the text.}
+ \label{tab:inference}
+\end{table*}
+
+Table~\ref{tab:inference} shows that the value of B depends on the task and computation allocated to A. On Reacher, one-step selection changes success from 72\% to 74\%, only one additional successful episode. At two flow steps, selection reaches 90\% versus 76\% for direct execution. One-step P0-PO reaches 88\%, and refining all one-step candidates before selection reaches 92\%. These observations make both selection and local refinement relevant candidates for a budgeted controller; they do not identify the faster option.
+
+Cube and TwoRoom are close to saturation in several configurations, and Push-T offers little consistent separation. More computation is not uniformly beneficial: on Push-T, two-step direct execution reaches 100\%, versus 98\% for selection and 96\% for selection with PO. On Reacher, random-initialized CEM reaches 92\%, exceeding unrefined P3. Thus, the current evidence neither eliminates search nor supports universal gains from candidate selection. We retain flow steps as a necessary budget parameter without claiming step-count insensitivity or a particular diversity mechanism.
+
+\subsection{Can the predictor select an available successful action?}
+\label{sec:ranking}
+To separate proposal coverage from selection quality, Phase1.5 restores each initial simulator state and executes a fixed candidate pool. Each state has 256 candidates at each $S\in\{1,2,5,10,16,32\}$. The completed pools for Push-T, Reacher, and TwoRoom contain 76,800 executed candidates per task. For each state and step setting, we compare B's selection with random selection and an oracle indicating whether any candidate succeeds. Selection regret measures the selected physical goal distance minus the minimum distance in the same pool. Physical distances are task-specific and normalized by the diagnostic thresholds.
+
+\begin{table*}[t]
+ \centering\small
+ \begin{tabular}{lrrrr}
+ \toprule
+ Task & Pool oracle (\%) & B-selected (\%) & Random (\%) & B $-$ random (pp), 95\% CI \\
+ \midrule
+ \input{tables/candidate_rows}
+ \bottomrule
+ \end{tabular}
+ \caption{Exploratory fixed-pool diagnostics, averaged equally over six flow-step settings. Intervals use 10,000 bootstrap replicates clustered by the 50 initial states, preserving dependence among candidates and settings. Pool execution and success aggregation differ from the full closed-loop experiment in Table~\ref{tab:inference}; these values must not be substituted for closed-loop success. Cube is omitted because its diagnostic pool was incomplete at the source snapshot.}
+ \label{tab:ranking}
+\end{table*}
+
+Table~\ref{tab:ranking} reveals substantial headroom between candidate availability and B's choice. On Reacher, the oracle reaches 94.7\% while B selects a successful candidate in 55.0\% of the state--setting pairs. B's improvement over random selection is 4.2 percentage points, with an interval spanning zero. Push-T has lower candidate coverage and a similar uncertainty in selection gains. TwoRoom is already near saturation under random selection. These findings identify decision tests that a stronger coupling must pass; the fixed-checkpoint experiment alone cannot attribute any limitation or benefit to a particular training connection. The oracle is only an upper bound within the sampled pool and diagnostic horizon.
+
+\subsection{Does refinement improve real consequences?}
+PO minimizes a learned latent cost, so a lower predicted cost is not sufficient evidence of a better action. The paired diagnostic starts from a common state and proposal, executes both original and refined actions, and records changes in predicted cost, actual future-latent cost, and physical goal distance. A matched-RMS random perturbation controls for displacement alone. We additionally measure the fraction of pairs for which the predicted cost decreases but the actual physical distance increases. Short-termination cases without matched execution horizons are reported separately rather than treated as valid pairs.
+
+The Phase1.5 guidance diagnostic is incomplete at the source snapshot. We therefore do not infer gradient reliability from the closed-loop improvements alone. The decisive comparison will apply different training variants' predictors to identical initial actions and restored states.
+\TODO{Refinement: insert audited paired real-outcome improvements, random-direction controls, and uncertainty after guidance diagnostics are complete.}
+
+\subsection{Physical readouts and predicted futures}
+Frozen-feature ridge and small-MLP probes test physical information in observed latents. Probe training and validation trajectories are disjoint from the diagnostic cohort; this split applies to the readout, not retroactively to world-model pretraining. A readout fitted on observed latents is then frozen and applied to B's predicted future latents. In the current Reacher diagnostic, the recorded readout MAE is 0.00871 on real future latents and 0.24587 on predicted futures. This gap combines prediction error and readout distribution shift; it does not show that all physical information is absent from B. The complete probe comparison belongs alongside ranking and refinement, rather than serving as their substitute.
+
+\subsection{Controlled coupling and efficiency: pending evaluation}
+The key training comparisons are A-only, B-only, shared recorded-action training, shared predicted-action training with detachment, full coupling, and a shared-encoder/two-DiT control. A-only and B-only also form an independent inference composition through an observation-level interface. The working supplement specifies these contrasts. Input mixing also changes the current timestep and loss weight; these factors must be controlled before interpreting a difference as an input-coupling effect.
+
+The formal comparison will freeze the inference choice on development data and evaluate matched training seeds and independent episodes. It will report per-task success, paired differences, and training-seed variation, with harder goal or recovery conditions specified before evaluation. LeWM, Fast LeWorldModel, LeFlow, and a strong direct policy are priority comparison targets under aligned data and task protocols. Their published scores are not copied into a local comparison table.
+
+For efficiency, the relevant curve is success versus single-environment decision latency, including encoding, proposal generation, B scoring, gradient computation, search updates, and action output. We will report synchronized p50/p95 latency and peak memory under controlled hardware conditions, with multi-environment throughput and training GPU-hours reported separately. Shared-resource evaluation wall time and the currently available single-configuration timing probe do not support a speedup claim.
+\TODO{Main results: complete matched multi-seed coupling comparisons and isolated success--latency curves; then freeze one principal inference method and revise the abstract and contribution statements.}

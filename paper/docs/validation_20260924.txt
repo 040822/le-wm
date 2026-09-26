@@ -1,0 +1,6 @@
+main.tex: 11 source files, 10 citation keys, 18 labels, no unresolved references
+supplement.tex: 3 source files, 0 citation keys, 4 labels, no unresolved references
+Numerical provenance: 44 Phase1 rows, 3 complete candidate-pool summaries; source and result hashes saved.
+PDF compilation: NOT RUN; no latexmk/pdflatex/xelatex/tectonic installed. Page count and overfull boxes remain unverified.
+Prior draft backup: None
+Failures: []
