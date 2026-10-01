@@ -1,5 +1,13 @@
 \begin{abstract}
-% abstract肯定是要大改的，先放着。 2026-09-25
-Generative policies produce action sequences directly, while latent world models predict their consequences for planning. Combining them raises a decision-oriented question: which forms of action--dynamics coupling help a model select or refine actions under a limited inference budget? We study this question with CoWM, a coupled latent world--action model that shares a visual encoder and a diffusion transformer between goal-conditioned action flow and action-conditioned parallel future prediction. We distinguish parameter sharing, predicted-action input coupling, and gradient coupling through the action estimate. The same model supports direct execution, candidate selection, and bounded gradient refinement, allowing training effects to be separated from inference effects. We evaluate the decision interface through simulator-grounded candidate ranking, real outcomes of action refinement, and physical readouts from observed and predicted latents. In a single-training-seed exploratory study, one-step direct execution achieves 72\% success on Reacher, compared with 88\% after post-generation refinement and 90\% for two-step generation with candidate selection. Fixed-pool diagnostics nevertheless expose a substantial gap between successful-candidate availability and model-based selection. These observations motivate controlled coupling ablations rather than establish a universal benefit of joint learning.
-\textbf{Draft status:} matched multi-seed training comparisons, independent final evaluation, and fair latency measurements remain pending.
+Learning action proposals can reduce world-model search, but joint action--dynamics training need not improve decisions.
+
+We study this question with CoWM, a shared visual encoder and transformer for action flow and parallel latent prediction.
+
+We distinguish parameter sharing, predicted-action inputs, and the action-mediated gradient path. Evaluation separates proposal coverage, consequence ranking, executed refinement, and the success--latency trade-off.
+
+A four-task fixed-checkpoint reference shows a 2.0-point mean selection gain over matched random choice. Gains depend on task; frozen-representation interventions do not identify a reliable training-coupling benefit.
+
+The matched-training study estimates a same-actor Joint-B minus LeWM success difference of \PaperResult{abstract-scorer-effect}, and a Joint-B minus B-only difference of \PaperResult{abstract-training-effect}.
+
+At the declared operating point, Push-T/Reacher p50 is \PaperResult{abstract-latency} ms; the search-reference success difference is \PaperResult{abstract-search-effect}. The supported scope is \PaperResult{abstract-scope}.
 \end{abstract}

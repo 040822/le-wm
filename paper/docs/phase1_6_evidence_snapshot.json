@@ -1,0 +1,2505 @@
+{
+  "cohorts": [
+    {
+      "base_checkpoint_sha256": "2748151a2c43c7841246a5fb8ee1fd7915ebbc00bfc27aa1a32b0f9080d92956",
+      "cohort_sha256": "e2fc68a62791f6ee5dd36a5216f1b18b9cbc0d16ce23a3d7e3ed570dd278b6e7",
+      "task": "cube"
+    },
+    {
+      "base_checkpoint_sha256": "62d00096a34e9f0b6da4ceb6a3c61eb350701a7aade5f5e4d2c1ee528b06015e",
+      "cohort_sha256": "2482c16b6d514896f33f860f8ac4b7dc056fc70b827ddc4ed52448281481c2f2",
+      "task": "pusht"
+    },
+    {
+      "base_checkpoint_sha256": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553",
+      "cohort_sha256": "0e6ea54bde934132dddba5971e325734a60a493eeb862d0c810248a960213560",
+      "task": "reacher"
+    },
+    {
+      "base_checkpoint_sha256": "48d1ed2520ec7142327969eacf1c37b144faec51cfd6c9ce72701a8421bf57c2",
+      "cohort_sha256": "e651aabaa22c877106fd8694916576ecefe9caa2c54ee7680a090df9a7fa09f1",
+      "task": "tworoom"
+    }
+  ],
+  "counts": {
+    "main_closed_loop_conditions": 72,
+    "main_closed_loop_episodes": 7200,
+    "short_training_evaluation_conditions": 24,
+    "short_training_evaluation_episodes": 2400,
+    "short_training_runs": 6,
+    "short_training_updates_per_run": 1000,
+    "timing_conditions": 36,
+    "timing_flagged_conditions": 0,
+    "timing_pending": 0
+  },
+  "excluded_timing_data": [
+    "outputs/round5/phase1_6_timing_host_contention_diagnostic/",
+    "outputs/round5/phase1_6_seed3072/timing_host_contention_diagnostic/",
+    "outputs/round5/phase1_6_seed3072/timing/serial_pilot_summary.json"
+  ],
+  "generated_at_utc": "2026-09-29T09:30:52.185150+00:00",
+  "hash_semantics": {
+    "analysis_row_hash_semantics": "canonical_json_sha256 of stable_hash(payload), not raw file bytes",
+    "canonical_hash_reconciliation": "72/72 rows and result paths independently verified against paper_summary by read-only audit",
+    "raw_file_hash_semantics": "SHA256 over result.json bytes recorded in adjacent complete.json; 96 entries use this field without embedding result bodies",
+    "short_training_hash_reconciliation": "6/6 checkpoint and resume_bundle hashes independently verified against files by read-only audit"
+  },
+  "headline_results": {
+    "action_consequence": {
+      "pusht": {
+        "latent_delta_cosine": 0.124,
+        "physical_sign_accuracy": 0.516
+      },
+      "reacher": {
+        "latent_delta_cosine": 0.44,
+        "physical_sign_accuracy": 0.592
+      }
+    },
+    "cem_gate": {
+      "p3": {
+        "all_tasks_latency_reduction_at_least_20_percent": true,
+        "macro_difference_pp": 4.124999999999999,
+        "macro_one_sided_95_lower_pp": 2.249999999999999,
+        "performance_latency_gate_pass": false,
+        "reacher_one_sided_95_lower_pp": -6.0
+      },
+      "p3_batch1_p50_reduction_percent_by_task": {
+        "cube": 85.2,
+        "pusht": 88.4,
+        "reacher": 85.5,
+        "tworoom": 88.3
+      },
+      "p3_plus_po": {
+        "macro_difference_pp": 3.875,
+        "macro_one_sided_95_lower_pp": 1.8750000000000002,
+        "performance_latency_gate_pass": false
+      },
+      "reference": "P2 CEM 300x30"
+    },
+    "p3_minus_random64_macro_pp": {
+      "ci95_pp": [
+        0.375,
+        3.625
+      ],
+      "estimate": 2.0,
+      "task_family_holm_p": 0.169
+    },
+    "recommended_fallback": "P0 (S=2,N=1)",
+    "recommended_primary": "P3 (S=2,N=64)"
+  },
+  "integrity_checks": {
+    "base_checkpoint_hashes_match_config": true,
+    "main_expected_72_and_complete": true,
+    "main_result_hash_verification": "72/72 rows and result paths independently verified against paper_summary by read-only audit",
+    "main_result_hashes_match_analysis": true,
+    "paper_figures_present": true,
+    "short_training_eval_conditions_complete": true,
+    "six_short_training_runs_1000_updates": true,
+    "timing_expected_36_complete_unflagged": true
+  },
+  "limitations": [
+    "Inference evidence uses one R4-AB training seed; inference seeds are not independent training seeds.",
+    "Short training uses 1,000 updates with encoder/projector and BN statistics frozen; it is not a full trainable-representation ablation.",
+    "Training-data overlap with confirmation starts has not been ruled out; mechanism diagnostics use the legacy_50 cohort.",
+    "Timing measures policy.get_action only and excludes environment execution; it is not a cross-hardware or end-to-end claim.",
+    "P3 reduces latency but fails the prespecified per-task CEM non-inferiority gate on Reacher; no CEM replacement claim is established."
+  ],
+  "main_results": [
+    {
+      "canonical_json_sha256": "d67770a15dbf3f72de9d14d62e4103861fce9eed12be6272f30a58c828cf7081",
+      "episodes": 100,
+      "file_sha256": "69d57503cbb92c2a4f62397845333bc817b2b60f7a903854f6efa49b80e8e584",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_s2/seed_42/complete.json",
+      "file_size_bytes": 7654384,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "f66f02c24406e4b3dbc554bc7383d8dd8d73481e86abdba6652029cbb61ddfd6",
+      "episodes": 100,
+      "file_sha256": "c5d4d511cd0cf25985ca6aeae6867ab3982b5bd31f5eb6483d70e5a7912de2e0",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_s2/seed_43/complete.json",
+      "file_size_bytes": 7669759,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "19ad0f7f47d4cab512a28b39e17f31584aea97c56a9a06837c208ac3ebce70f6",
+      "episodes": 100,
+      "file_sha256": "61487939fe1f8fab7520d2e175563f7e7a08853d97e9b67b9753c429accb2387",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/random64_s2/seed_42/complete.json",
+      "file_size_bytes": 7987945,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/random64_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "4adf8e5b7b98d78b98c517137804188b6ff3d035fe47fc79e8e64a75d5c59340",
+      "episodes": 100,
+      "file_sha256": "deb812c1f5124e17110086c9ff93bd4ee2cb0c8e62464d1839ec085460f1c0d9",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/random64_s2/seed_43/complete.json",
+      "file_size_bytes": 7968875,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/random64_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "ea79d149bd06a948d0704f4c5a60a074cbae1cd8c5b180432f894a888148f896",
+      "episodes": 100,
+      "file_sha256": "ceaef47872e474601f5f3f92e2871cee605ee72c218a0e8c0ac2badb7f65170b",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_s2/seed_42/complete.json",
+      "file_size_bytes": 7952747,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "a124a948775a291cd67b04c7ca037350991325c7a834bcdf35d41a789655ccb3",
+      "episodes": 100,
+      "file_sha256": "7af5eb985c8204c480b6dfcf49927dfbf2a574e27a277b8bb9ada0717222aec4",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_s2/seed_43/complete.json",
+      "file_size_bytes": 7967776,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "cebc5c0d52ab14f64112c6da3e4de31b6bfb3fe22f6a397feead4351893b241b",
+      "episodes": 100,
+      "file_sha256": "87dcaf2ec13f46b074c70d87a07e4ceee9dbcf0eb99cbeddaf2992c33f49dc46",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_po2_s2/seed_42/complete.json",
+      "file_size_bytes": 7647109,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_po2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "658a38b4257b6dc38d0fd62ad6f3a60bb900a02cdfd01174862dd5c1278ff4fe",
+      "episodes": 100,
+      "file_sha256": "d570367820746ae4cfbd072d4df6704f31e45eb8aa567f13e725894cc4b93eba",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_po2_s2/seed_43/complete.json",
+      "file_size_bytes": 7651398,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_po2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "0e673543bac5f35cf9b06dc2f0a81523fdd17091505ba7b98befe493132d2a11",
+      "episodes": 100,
+      "file_sha256": "e4cd5e3cc896c12a89ca2561c1c018c04c9bd6d2b7abe8c8366b027f37b6ab85",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_gf2_s2/seed_42/complete.json",
+      "file_size_bytes": 7656130,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_gf2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "3222ea7196d4817c2153beab8d376507ba851e4cb8306f8882cba1e1582a3ae6",
+      "episodes": 100,
+      "file_sha256": "e4aba265573da42e1fbf7ac4db2aa153e2cb2f11bb1241b8fcf46c501785d575",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_gf2_s2/seed_43/complete.json",
+      "file_size_bytes": 7652536,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p0_gf2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "dbadb8c9dfdab86e1e5dbaa5a8d1918b373f3b24ea9790cd4790f6b08d3a1ac1",
+      "episodes": 100,
+      "file_sha256": "daa78261f63c19f6eaa8592f54f6204faa97fa05538ed028a2ba2425bdb40c09",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_po5_s2/seed_42/complete.json",
+      "file_size_bytes": 7960232,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_po5_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "518b58c64fedbf5a46286f93201c81ec1046f33deb275372c0e4e8e7ad1d2da4",
+      "episodes": 100,
+      "file_sha256": "73e74eea655dc5ceee9e417d655ec9217c548b9502443069141a263e63e1536e",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_po5_s2/seed_43/complete.json",
+      "file_size_bytes": 7993317,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p3_po5_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "ab90c329dc41a833e699b443ec0cc4792d8c0099946cc62b089015e8a254446b",
+      "episodes": 100,
+      "file_sha256": "e96336c44becff61a2f9615f697d6d6d1b1f4bdcf255813b5517ad0cdcaf92ca",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p1_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 14601360,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p1_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.49,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "ffaaea590f394e3cd88f09b49c4bbed71907adb12ff07fb94358acfa44af1b4c",
+      "episodes": 100,
+      "file_sha256": "b8554b6ffa3db77929ca79c998c0e7a21e4fe0bbcd463545c68e961ab5a2329a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p1_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 14437876,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p1_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.5,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "95df27851fd213d44834739543f13e8b9dedb4fd819ac7dc60c769d451f0cb9a",
+      "episodes": 100,
+      "file_sha256": "c41dbabd010b5882c4a75d8f4176f3bfeef0ffd8933e01a74a8da22217ffff41",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 11251328,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.82,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "d324431fb30cccdcad3e896616b8a00503d839998b4675c5be282837784ff93c",
+      "episodes": 100,
+      "file_sha256": "b30b1ce9f0e1583b18ec2eb4ca86bde039da20fc5399cd460cdc2a200eb2ca45",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 10977831,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.85,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "35ef0bb00b4b248f14b10b81c2bfd7a5a4fd88ea219514b3086894989426d922",
+      "episodes": 100,
+      "file_sha256": "a4866d40982d022f62220de4a2e57110b475a04c5bff1f5883342451dac64768",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_small_64x5/seed_42/complete.json",
+      "file_size_bytes": 10375107,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_small_64x5/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.91,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "b265e7f98c70b69128654738fae9e2f4c0d76fccfebeb84da78704685a46af36",
+      "episodes": 100,
+      "file_sha256": "25e9a84d5a6cc6c66adddad9900dad0d61ef0d544da10176f194824067fa2031",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_small_64x5/seed_43/complete.json",
+      "file_size_bytes": 10941207,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/cube/p2_small_64x5/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.85,
+      "task": "cube"
+    },
+    {
+      "canonical_json_sha256": "dd1756c0787ea1832dd5e21a285f62b5dc55da40348c70ebeef33840ec107e45",
+      "episodes": 100,
+      "file_sha256": "1913c702673f315101d6a246f896edc980649c306b1802ba79b4371d449287e2",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42/complete.json",
+      "file_size_bytes": 10071247,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.96,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "1f2ff3ed0cf34cd888b6017e9029e96fc382c6cc0ae703d0b5d95a40895210cb",
+      "episodes": 100,
+      "file_sha256": "45cad3ad90e88d5e4540f83a7e10e5e029d080eca35a492810525fc1c845700f",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43/complete.json",
+      "file_size_bytes": 10280443,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.95,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "165b474ea2a72036daa23b2343c7ebeb93b377e961523d4404cfca93c9b91517",
+      "episodes": 100,
+      "file_sha256": "938f5c5a10859f41d533084bc75e89f4e766cf9fe44d37d644d51d544e1bdcfc",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/random64_s2/seed_42/complete.json",
+      "file_size_bytes": 10316453,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/random64_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.98,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "abcdbceb042d3ed018c9ad228d2b2d305b643a8cda213027b10dddbfbacc279c",
+      "episodes": 100,
+      "file_sha256": "7acb75ee5b260f5f75476f05527ebd989f0d7b9ac7c8588e4cc28b8daa2a2753",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/random64_s2/seed_43/complete.json",
+      "file_size_bytes": 10498544,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/random64_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.97,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "98a4f11364f53f713c88755b45729a7180569c362839e0d1974cb2289da0aa4c",
+      "episodes": 100,
+      "file_sha256": "a6c0c48458f7d73644da852e6155c2bcfa674e9b8897cc4a78a71a436b05157c",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42/complete.json",
+      "file_size_bytes": 10444850,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.97,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "24e709e3b6fd8582bb2d933bb7d087f9ef87d1cb6ad7922d611dea73360429a2",
+      "episodes": 100,
+      "file_sha256": "820a2f5e43bfd112533fc9cdfe24d4022d4bbef5841a4a3e2696fe726a106046",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43/complete.json",
+      "file_size_bytes": 10566878,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.96,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "fe187e2de363bd6e3cb865a5399daa5628a26d8a590f410f429e921c9e30537d",
+      "episodes": 100,
+      "file_sha256": "8d12ce403d971bfdb2bf7ebc41455cba172e1f31f1942b45c92ed016b1fc426a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_po2_s2/seed_42/complete.json",
+      "file_size_bytes": 10229076,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_po2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.95,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "302b6aa0942a8d956c54c8bb9f5a5b0524354565d1ec886eec236396ad87e3c7",
+      "episodes": 100,
+      "file_sha256": "3dbc9f4232777f300c4d349e6214f72f909d5cc2ffc5bc1e0121babc1ae69319",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_po2_s2/seed_43/complete.json",
+      "file_size_bytes": 10155358,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_po2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.96,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "3d7d2176c90718407a9a0644826b7a5d097b6ec4726528b85016880e16f0c2ed",
+      "episodes": 100,
+      "file_sha256": "2eeb0b41a2b9a47fb29a1b77bb8f92d2f0f5d06aa45edc9a49774992471ed046",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_gf2_s2/seed_42/complete.json",
+      "file_size_bytes": 10128949,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_gf2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.96,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "0c7d0aaa2d5f2856d794ed852b0c7a0255230ed33cc2f61dbf9755cd914314b7",
+      "episodes": 100,
+      "file_sha256": "a19b98e86dd6f78e69a4682cd603b7ffd9c049479a9950c669aade7cc45c851f",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_gf2_s2/seed_43/complete.json",
+      "file_size_bytes": 10164442,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_gf2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.95,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "dd96708ea590bf3f89750611963555e6fa930f94e52e06d2a074015dd32e5de9",
+      "episodes": 100,
+      "file_sha256": "5f8f7b5a6ab83a2c9812a1898954ca6bba5d31e0cf5fda4477253d261589763f",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_po5_s2/seed_42/complete.json",
+      "file_size_bytes": 10571137,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_po5_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.95,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "7ef0747fea0bec49841ba5f75519f96daf4bcc81a8db7c7898905344a0db10c6",
+      "episodes": 100,
+      "file_sha256": "bb5b8a698d6865657dfc587f3d3b675589797b676e10d3b220663cecd95f251c",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_po5_s2/seed_43/complete.json",
+      "file_size_bytes": 10683570,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_po5_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.94,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "ce0e744f3e2ffa9ef5ec51a72b4342e0c1dab544961cc06d2a6506c41744f36c",
+      "episodes": 100,
+      "file_sha256": "416abd51a05fa4b3a34c5c1506f9c25143d463dd05c1b2e49ecaf7dfb4d6f0ba",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p1_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 12355485,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p1_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.86,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "7ba4980980df54aa1694666aeec38935adea0f75b2a85ee5ef4b720a88f5f426",
+      "episodes": 100,
+      "file_sha256": "011db982b38a406a7dee0feb2a83e29b836d56b79381850b15de28d9b233872e",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p1_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 11972014,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p1_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.89,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "6692df847aceb3b9a426bfda58199dca20250202987089d3c0689ce194bcb2ef",
+      "episodes": 100,
+      "file_sha256": "62d03d3a4eb2f6a5bfc30a047b25927c30c7dc40a1aa58fd6bb012b2daee82c0",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 11607720,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.93,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "8f6aecc452582474fd20a79064074a8be756619aec1c2e175dccb3d9dffbf06d",
+      "episodes": 100,
+      "file_sha256": "a595d18950a8bcd9685a415aa8caa636f4ac182df626cfa7694947d056c9ad57",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 11422452,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.96,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "ffc79077dc18838dbbdea5e88531fa50a023e6d7b06a944a89a06c82e6575d0d",
+      "episodes": 100,
+      "file_sha256": "234e419d924c4cb4885a3d716fea7a413f6c0f7f18d4e4f6c7d21dab5359a6ba",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_small_64x5/seed_42/complete.json",
+      "file_size_bytes": 11701302,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_small_64x5/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.95,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "37445351e1e0c93c65b477fc71432c26e6b7f05829eaee9c266170c7c9b7607d",
+      "episodes": 100,
+      "file_sha256": "74cd7a9b035dfe2cd71791513543009cebead236b551b286dd8bf9d50fb71597",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_small_64x5/seed_43/complete.json",
+      "file_size_bytes": 11532450,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p2_small_64x5/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.95,
+      "task": "pusht"
+    },
+    {
+      "canonical_json_sha256": "548a79701e5c11fb2735c8195e27293a1fe9dbf24c227efe5f93d99614648355",
+      "episodes": 100,
+      "file_sha256": "9f69bcc91ab2d68d6c3341a41df3ca826df80bee811cc7cafdb375f5ab14d7d2",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42/complete.json",
+      "file_size_bytes": 12216204,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.76,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "305901682e5ea1622606ee395f70de070dee65d23dfc52be76d761e4dc35a422",
+      "episodes": 100,
+      "file_sha256": "48978f985a0a5a0b7da6337b0d737d8ce85a6244b1f5f3baeae05914f40f7249",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43/complete.json",
+      "file_size_bytes": 11439729,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.84,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "a8a69a3834a9f7d3cc43b40ba65369cdb2fee5962290ad5c0c662d516de57c13",
+      "episodes": 100,
+      "file_sha256": "a779b1c9c4685d633f88b9efb39862bc0571935b66e28d7ac7005877a6d18994",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/random64_s2/seed_42/complete.json",
+      "file_size_bytes": 12091978,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/random64_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.82,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "edd6dbfcd029c9275f2e231664b267bce1ff7ec4b064cc49e8fb0b5648e738ed",
+      "episodes": 100,
+      "file_sha256": "1e777e1b2752549bb5c20dce552d9cd43d19765385ca5c49c953ec9c51bacb34",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/random64_s2/seed_43/complete.json",
+      "file_size_bytes": 12101060,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/random64_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.82,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "11e5906d422c5b429adbf86cfe1a2f1564a0cfc3c2cccaa71fc0384fab4131c3",
+      "episodes": 100,
+      "file_sha256": "60f9b7d2a9ca82e1ad5acdde87acdebc56b17bfee944932c06349555016687c7",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42/complete.json",
+      "file_size_bytes": 11876361,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.91,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "3d22f80aa9e9fcc262c0d62934378270913bbce8d06a70b3a4dfa5a8cb3999d1",
+      "episodes": 100,
+      "file_sha256": "31f76c11b46c349e5e45c57b826e73203c160618ab4ef1437fc4e99d42af5747",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43/complete.json",
+      "file_size_bytes": 11847503,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.88,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "c14f6cb818206793d4abf26c814b1f0dcd82f2c2cf25cff2e8c80e8cc0d6c36b",
+      "episodes": 100,
+      "file_sha256": "e55d0fad8f6e0769e758031ffb1f5a37b904fac784059ab78deba16eec69b76d",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_po2_s2/seed_42/complete.json",
+      "file_size_bytes": 11222945,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_po2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.82,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "86f2ed514607307ea3c81d6dbc4e64174b9c523bdb8806d274c8b8d6b370830e",
+      "episodes": 100,
+      "file_sha256": "faacd7a005b9be850763ef531e6a7bc27a1ebac77c6882ca672fb400902f17fd",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_po2_s2/seed_43/complete.json",
+      "file_size_bytes": 11332491,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_po2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.88,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "629ed7c18b842d5b83a7c8de66a49880ed9511d7e85b66ebb8232f603d904bed",
+      "episodes": 100,
+      "file_sha256": "e2376806a13e2a747667c5261587fd0269ea16b6f18a3a34b92fb95492acce10",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_gf2_s2/seed_42/complete.json",
+      "file_size_bytes": 11484344,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_gf2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.83,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "d9bb8c14a52e9b91d637a4d775250a9643a43943f5d491fbc730dd4e73c4b215",
+      "episodes": 100,
+      "file_sha256": "1aa474cb10c8db4372efec780157fa971fb39fb7683d1c30151a3cf47c257ddb",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_gf2_s2/seed_43/complete.json",
+      "file_size_bytes": 11554692,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_gf2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.83,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "158dcdc0cb70b6b1ddc9bac34384e509c6ebc9c4b4aeb327ee37e0edf397d815",
+      "episodes": 100,
+      "file_sha256": "669d2440a20da3e905746095d418308917c3d172c1cb8874d54c2159951bd02e",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_po5_s2/seed_42/complete.json",
+      "file_size_bytes": 11736419,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_po5_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.87,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "62db3ba7cc19d2dcd9c39ad913dc82d73e29ac0bacbced502a0a3611198c4067",
+      "episodes": 100,
+      "file_sha256": "59f6913cbf3712eecb92c6ece3a6ac6663791d418602c0891dc6df86c0939ca0",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_po5_s2/seed_43/complete.json",
+      "file_size_bytes": 11232075,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_po5_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.93,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "499d07a325a192288b79e02cf9226f9b85b4cfb9309b62fed796559a75b2e70e",
+      "episodes": 100,
+      "file_sha256": "0ca5b6c79315a13370bd5c830975f8449af1ab0da4c54ebaf4f5e7318bbf63ac",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p1_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 11833181,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p1_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.94,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "65c4378f841170fa90bff43c7d629d7eb9a9ee509b4688bc01258089e912144a",
+      "episodes": 100,
+      "file_sha256": "46a625852f56d1145deb4a957d9c1342b2f97e5e92744ebbe8819ae92b4130db",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p1_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 12179007,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p1_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.89,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "cb2f747643f30a0153d97e9a766fcf70e9b6ce831faca5c0215fb9b6d8413d2b",
+      "episodes": 100,
+      "file_sha256": "0349aac6485e95f42d95ccec7f1fd11797f9c40bf07a167a80f40f80cb990322",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 13017994,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.93,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "690b7f84048fae207953c7d5e35beb2906f9abe159415e13c00825bfbac1e9d8",
+      "episodes": 100,
+      "file_sha256": "84d23b6926acf1e4741f03529c0ba78a140d4973568672e89e3f1afd862bec82",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 12421608,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.89,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "783fd117c33c275a782b6c369e222c6fb5b8761b13531353a5838f8198936de7",
+      "episodes": 100,
+      "file_sha256": "81a5326806e5f063be4db88fed10fdde18ec092edd026158ac309e8ca05e8c4d",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_small_64x5/seed_42/complete.json",
+      "file_size_bytes": 12708792,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_small_64x5/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.85,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "b02d707e4577d5aea64fdf46712d7449505b4bebdb568a4018dafd16bafa01cf",
+      "episodes": 100,
+      "file_sha256": "a9c45f0b563b7037c1b01be9e185b946a0c1b60626c3a79e926d7c48dea4d946",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_small_64x5/seed_43/complete.json",
+      "file_size_bytes": 12650445,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p2_small_64x5/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.82,
+      "task": "reacher"
+    },
+    {
+      "canonical_json_sha256": "a6141197d33055dfd032db0872b8bcdbb1807b61f79bed6713ae62e42e63c234",
+      "episodes": 100,
+      "file_sha256": "e3e73cf3f786a9e6134c276462cd249020564808c3a236ec02124de147030674",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_s2/seed_42/complete.json",
+      "file_size_bytes": 6374779,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.99,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "fbb8bd4fc548d049c2f0ff874a6a9832fb869f7a7a1bed6f72d3c7fc09b5c058",
+      "episodes": 100,
+      "file_sha256": "a285348bc64240a878592dbb39aa2cdc7fc50be34fd231bed31f4070ebab533a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_s2/seed_43/complete.json",
+      "file_size_bytes": 6627781,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.99,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "ee10c3828ceb4d902b0829d3f967ae349422b8aa455b956b437c26b5663cf0af",
+      "episodes": 100,
+      "file_sha256": "3eb73003daba1972d4413cacbd6618327261062676cdc2d88e7343bdb406bc52",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/random64_s2/seed_42/complete.json",
+      "file_size_bytes": 7335489,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/random64_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.99,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "d5c9a6ead62a2ff3fcd8b9c1a94c28c9b6f1d34c0d89fa54e014731b24549e28",
+      "episodes": 100,
+      "file_sha256": "e7b9163f98fa2f406cb54a71d63fea72ed48f9a8b7c03a8770c46df9fd9e6c9d",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/random64_s2/seed_43/complete.json",
+      "file_size_bytes": 6837067,
+      "method": "random64_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/random64_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.97,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "f1fc00271deb4ad5a45d5a714add98eb022c7b871823091b93b07d3bd2917b66",
+      "episodes": 100,
+      "file_sha256": "52a4f8e115bfdeeff1c677e23e5fb9744fd8ac876abbf8817cc180453bc8389c",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_s2/seed_42/complete.json",
+      "file_size_bytes": 5998785,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "3f24baf5ce8af4f51c3541107d556164cdb9ac2e8a0b0b7df9563185870bc723",
+      "episodes": 100,
+      "file_sha256": "94adb85b8b9bdeb3a96c27e6b3b1744249c469270cd65fd42526ce211be64bad",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_s2/seed_43/complete.json",
+      "file_size_bytes": 6500493,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.99,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "57dd56bb595d41f522324f4dcb9bbbdecc15f4365a615a476e7f7adb6676f95d",
+      "episodes": 100,
+      "file_sha256": "6357fd54fad755d3821e1c3a40dce000b6d3f2179541b64d33479531a1c9829c",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_po2_s2/seed_42/complete.json",
+      "file_size_bytes": 6065513,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_po2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "540974586107a046062adb85854fbe48541f74cc89828848d5adfb91485bb8a1",
+      "episodes": 100,
+      "file_sha256": "307c1e2c20f1848733f636aee68b0beee5d0f971767f8dac3339cbe833cfa6fd",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_po2_s2/seed_43/complete.json",
+      "file_size_bytes": 6291358,
+      "method": "p0_po2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_po2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.99,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "b0c42dd2dff80bbc21cc0842b5c2d351bbd701d97b613559a28a5116b7990be1",
+      "episodes": 100,
+      "file_sha256": "e77c8f43e4204fec28dd8e499a686fd8074a7515d9dbc561b72e120a00eeb383",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_gf2_s2/seed_42/complete.json",
+      "file_size_bytes": 6064570,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_gf2_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "8d5377eb11563a3e7ebcc29040058f8cde9dd9bd32816f8874213510bbeb4d44",
+      "episodes": 100,
+      "file_sha256": "717889edbf7897e7b6f1e26226e8e12189e97c23979f2f784462434bc74918b6",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_gf2_s2/seed_43/complete.json",
+      "file_size_bytes": 6131216,
+      "method": "p0_gf2_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p0_gf2_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "6b18c50a2407d5f310a8de78f35e0468153a66c852a5b84d87f0d0bccf813d33",
+      "episodes": 100,
+      "file_sha256": "95394a80ecdfa0948682076b3c10fa0aa3d1eb3b6d7128fe3659245703bfd425",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_po5_s2/seed_42/complete.json",
+      "file_size_bytes": 6139590,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_po5_s2/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "ea5c512ff4acbb7b2b8dae9b106f966f52b0c13383655f56a7c295839e4efcae",
+      "episodes": 100,
+      "file_sha256": "d17745668115d161729eb593d509d5d84b4f9d34ce8ac115b2879f31d9b54437",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_po5_s2/seed_43/complete.json",
+      "file_size_bytes": 6129026,
+      "method": "p3_po5_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p3_po5_s2/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "3a1d31b0d0e7e96afa0e58d02a6c267795d7c9c94eb008d9f28ac8bb2c463aff",
+      "episodes": 100,
+      "file_sha256": "32419c38b5e8785435fc4b1328f8e5a057695ff147dacabbe06b5a6740a23899",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p1_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 7976682,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p1_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 0.91,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "8dd825ae977e84be8374bc1973118f4ba254d73709a3c5806240df8bc364d845",
+      "episodes": 100,
+      "file_sha256": "dacbe6ef96fc802b3421ae1b7a59114cb57279e51efe32626c9f61ba0ceafc71",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p1_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 7975943,
+      "method": "p1_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p1_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 0.91,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "f944f6bdb574161729f29a6e57cfb951c8288de0ab036b8434c169ed1c6a82ca",
+      "episodes": 100,
+      "file_sha256": "91bfbeb13a66b86c61aa78df157cb9185e314aea514eafc037c4fa8f295dfb4b",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_cem_300x30/seed_42/complete.json",
+      "file_size_bytes": 6371804,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_cem_300x30/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "eebdee8d17d1b8021ec2f15c5470e64a37363ae689613ca673ceac6cfb83d8ed",
+      "episodes": 100,
+      "file_sha256": "feed433d597ae7df2705728c09ae5fa28ad902f2b9ebdb82b8ca40de332b9072",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_cem_300x30/seed_43/complete.json",
+      "file_size_bytes": 6370298,
+      "method": "p2_cem_300x30",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_cem_300x30/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "7f81b410e94e0087ea3e4ec25de84e69bf5b0cb7257d76524f4b970efc7d46f4",
+      "episodes": 100,
+      "file_sha256": "442510647c3392c15ca3d1b22b55f29dac1bd0ae23652b423123fd4291fbe5ee",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_small_64x5/seed_42/complete.json",
+      "file_size_bytes": 6600435,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_small_64x5/seed_42/result.json",
+      "seed": 42,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    },
+    {
+      "canonical_json_sha256": "82ffddd932a2a88915731e73dd6d7025e050815152de11031118ae47f5ecf1af",
+      "episodes": 100,
+      "file_sha256": "4231edb984726cceb24beb28c6ce0775fc9d361b0a270c0b7b83c238753a1fe8",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_small_64x5/seed_43/complete.json",
+      "file_size_bytes": 6470846,
+      "method": "p2_small_64x5",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/tworoom/p2_small_64x5/seed_43/result.json",
+      "seed": 43,
+      "status": "completed",
+      "success_rate": 1.0,
+      "task": "tworoom"
+    }
+  ],
+  "mechanism_summaries": [
+    {
+      "file_sha256": "c0dc6360d4eff41e243a3171ac835e6900972488dcd83587d300ccd7a45effe1",
+      "path": "outputs/round5/phase1_6_seed3072/mechanism/candidate_consequences.json",
+      "role": "mechanism_summary",
+      "size_bytes": 56827
+    },
+    {
+      "file_sha256": "a44a3da38673efb9461d57b0dc1f332fbb87f5267cbfcdfb7efa9ec9b7298d82",
+      "path": "outputs/round5/phase1_6_seed3072/mechanism/candidate_selection_n_curve.csv",
+      "role": "mechanism_summary",
+      "size_bytes": 9913
+    },
+    {
+      "file_sha256": "ea21dff06d32ec281a991ce80d19d9067c84f4fdd114cee3b04b5625e083c46e",
+      "path": "outputs/round5/phase1_6_seed3072/mechanism/guidance/pusht/summary.json",
+      "role": "mechanism_summary",
+      "size_bytes": 7456
+    },
+    {
+      "file_sha256": "b0a594892fa6d5b881c77b8f2961476493d640f82334adae0041788993279f59",
+      "path": "outputs/round5/phase1_6_seed3072/mechanism/guidance/reacher/summary.json",
+      "role": "mechanism_summary",
+      "size_bytes": 3623
+    }
+  ],
+  "paper_figures": [
+    {
+      "file_sha256": "d4e662636ee67e6273732ada27b21da167cf6a33ee1ecde9166b614e2c4585c1",
+      "path": "paper/fig/phase1_6_candidate_selection_curve.pdf",
+      "role": "paper_figure",
+      "size_bytes": 21787
+    },
+    {
+      "file_sha256": "b03c4261ef1811587e0094b4274c44ca57ba82b167db6e74bb037f2b18b772bf",
+      "path": "paper/fig/phase1_6_success_latency_frontier.pdf",
+      "role": "paper_figure",
+      "size_bytes": 26599
+    }
+  ],
+  "paper_tables": [
+    {
+      "file_sha256": "b361b4a8afd8d5d3cd68120f582a63ff33fa7d04ebe801fd26788822f3b64f7a",
+      "path": "paper/tables/phase1_6/action_consequence.csv",
+      "role": "paper_table",
+      "size_bytes": 750
+    },
+    {
+      "file_sha256": "bc18dd15300fb86a776ac93a4bf82690bd337b79dddc751dbaafa00750808daf",
+      "path": "paper/tables/phase1_6/action_consequence_summary.csv",
+      "role": "paper_table",
+      "size_bytes": 715
+    },
+    {
+      "file_sha256": "675eeb27ade3f72b07b74e7012b2847d2d2bd7ca9854b76c436a15b617e7bde2",
+      "path": "paper/tables/phase1_6/action_consequence_summary.json",
+      "role": "paper_table",
+      "size_bytes": 1375
+    },
+    {
+      "file_sha256": "5978b576f3b326d8fd3761090ab6f52e06a7c1491284061e1718f7b7330ef4ce",
+      "path": "paper/tables/phase1_6/action_consequence_summary.tex",
+      "role": "paper_table",
+      "size_bytes": 385
+    },
+    {
+      "file_sha256": "94abf626bedea8a20186a72fabad1e2b4f9eb87ef5636f59f2c1e6bd78368c9b",
+      "path": "paper/tables/phase1_6/batch50_throughput.csv",
+      "role": "paper_table",
+      "size_bytes": 3058
+    },
+    {
+      "file_sha256": "5500f76ac2a0a67c11976f1103107005affa400568ea4609678af4d7fb95dded",
+      "path": "paper/tables/phase1_6/batch50_throughput.json",
+      "role": "paper_table",
+      "size_bytes": 11478
+    },
+    {
+      "file_sha256": "20b4c9715be4b67af39cc498793ea23648517e70f07e4c5a74469f826e112074",
+      "path": "paper/tables/phase1_6/batch50_throughput.tex",
+      "role": "paper_table",
+      "size_bytes": 461
+    },
+    {
+      "file_sha256": "a44a3da38673efb9461d57b0dc1f332fbb87f5267cbfcdfb7efa9ec9b7298d82",
+      "path": "paper/tables/phase1_6/candidate_selection_n_curve.csv",
+      "role": "paper_table",
+      "size_bytes": 9913
+    },
+    {
+      "file_sha256": "19fab8493e9d3251326f458b0e64cdabc1844f6841ba5a8a06ae4423a7c87b92",
+      "path": "paper/tables/phase1_6/candidate_selection_physical.csv",
+      "role": "paper_table",
+      "size_bytes": 406
+    },
+    {
+      "file_sha256": "be7f5cceebf8daee63642e025c16a113e34ad6ec4b896f7dfab97ce128f19dd7",
+      "path": "paper/tables/phase1_6/candidate_selection_physical.json",
+      "role": "paper_table",
+      "size_bytes": 759
+    },
+    {
+      "file_sha256": "c098774c10a1b3b2f77654e427cb63eebbab96d27e9cae90792a0fbe944f9c45",
+      "path": "paper/tables/phase1_6/candidate_selection_physical.tex",
+      "role": "paper_table",
+      "size_bytes": 284
+    },
+    {
+      "file_sha256": "ad0557eba55c9b1bb11491ceb28ba2f9ac86594c736736771fefec1b9d7bcaaa",
+      "path": "paper/tables/phase1_6/candidate_selection_summary.csv",
+      "role": "paper_table",
+      "size_bytes": 1136
+    },
+    {
+      "file_sha256": "114439cd2721e02d8fd9fb1bade44dfe8af9acf47892bb4bba64a438f7d9e717",
+      "path": "paper/tables/phase1_6/candidate_selection_summary.json",
+      "role": "paper_table",
+      "size_bytes": 3422
+    },
+    {
+      "file_sha256": "7dc97ae3d70a553be664afa02c1a47da4a050f6f0bf9038d39ad15800f7e9a22",
+      "path": "paper/tables/phase1_6/candidate_selection_summary.tex",
+      "role": "paper_table",
+      "size_bytes": 751
+    },
+    {
+      "file_sha256": "4da7d8aa3f11adae2dd0b7a732fd30bd533b92eda0a59ba781bb8abe76070ec4",
+      "path": "paper/tables/phase1_6/cem_reference_effects.csv",
+      "role": "paper_table",
+      "size_bytes": 1648
+    },
+    {
+      "file_sha256": "3ba88163a47b2c5593d53c527ca92061b202fb10fbc4401b1fd89c83fc8b8dee",
+      "path": "paper/tables/phase1_6/cem_reference_effects.json",
+      "role": "paper_table",
+      "size_bytes": 5118
+    },
+    {
+      "file_sha256": "a9efe11a7d1d4600e6d52684e5c2f4cfbcea4783c3129fe948fe35905bee3832",
+      "path": "paper/tables/phase1_6/cem_reference_effects.tex",
+      "role": "paper_table",
+      "size_bytes": 1575
+    },
+    {
+      "file_sha256": "5fcbc52ea57b642fabaa7a505a62d7e08229e9d176e95038be5591b1a97579db",
+      "path": "paper/tables/phase1_6/cem_substitution_assessment.json",
+      "role": "paper_table",
+      "size_bytes": 4449
+    },
+    {
+      "file_sha256": "5a1f50bfbe3d63e350dbf77ce45ab4f87618b5a31677dd895d4c3f7f736f5eca",
+      "path": "paper/tables/phase1_6/closed_loop_success.csv",
+      "role": "paper_table",
+      "size_bytes": 539
+    },
+    {
+      "file_sha256": "74b7ebcde2ae9c797983f00ebd040d926c8ac1ddc8cc92a81d582c0c13d1f1dc",
+      "path": "paper/tables/phase1_6/closed_loop_success.json",
+      "role": "paper_table",
+      "size_bytes": 2330
+    },
+    {
+      "file_sha256": "de4e1ab1331e7ec6eeb29a4b786d8b0e9995e6247b16d6185a36020afcc577f9",
+      "path": "paper/tables/phase1_6/closed_loop_success.tex",
+      "role": "paper_table",
+      "size_bytes": 621
+    },
+    {
+      "file_sha256": "6801086dd36c0ba2cf6a89b7977d40e584e8d0c131399ae7fa5437f3ad6c3a95",
+      "path": "paper/tables/phase1_6/closed_loop_table.csv",
+      "role": "paper_table",
+      "size_bytes": 2732
+    },
+    {
+      "file_sha256": "fc3bc3c1054b4d0181feabedc2955447c388b0b41afce54e2e0f5d7030469502",
+      "path": "paper/tables/phase1_6/closed_loop_table.json",
+      "role": "paper_table",
+      "size_bytes": 7599
+    },
+    {
+      "file_sha256": "c262444e0be16decd6f2ed36d4e60532e736faa80f4595ad2eb27f4c08322d90",
+      "path": "paper/tables/phase1_6/closed_loop_table.tex",
+      "role": "paper_table",
+      "size_bytes": 995
+    },
+    {
+      "file_sha256": "48cb6a49ca55cc5c1a532140f84f6569e551c2749597f37aedb1d357844b2c19",
+      "path": "paper/tables/phase1_6/guidance_table.csv",
+      "role": "paper_table",
+      "size_bytes": 1395
+    },
+    {
+      "file_sha256": "6a8430d910d60cede6f3e58d193d4ff186d50d096909b5b6b90efbf51b94401e",
+      "path": "paper/tables/phase1_6/guidance_table.json",
+      "role": "paper_table",
+      "size_bytes": 3693
+    },
+    {
+      "file_sha256": "3abada468312d2bd9f7c7d1c8ff61b4632c01a2a84a2152d6c15e0d4dce86f27",
+      "path": "paper/tables/phase1_6/guidance_table.tex",
+      "role": "paper_table",
+      "size_bytes": 631
+    },
+    {
+      "file_sha256": "ff2b1dff4d2663943cd0265dcae6bb39e1eda4352e108915979e8a135127ff67",
+      "path": "paper/tables/phase1_6/inference_timing.csv",
+      "role": "paper_table",
+      "size_bytes": 4773
+    },
+    {
+      "file_sha256": "50229780190bba9eed713682093b61cde345f3555b3aed1cb47b37377a455613",
+      "path": "paper/tables/phase1_6/inference_timing.json",
+      "role": "paper_table",
+      "size_bytes": 16233
+    },
+    {
+      "file_sha256": "99b23fc98796e6cef8a9947197428ab1772de58480240685cfe744c2769c25a5",
+      "path": "paper/tables/phase1_6/inference_timing.tex",
+      "role": "paper_table",
+      "size_bytes": 645
+    },
+    {
+      "file_sha256": "25322ead73f45095b861c14deaf5708caaf33658c3aa82b718aae0ae50e3d3f7",
+      "path": "paper/tables/phase1_6/primary_inference_effects.csv",
+      "role": "paper_table",
+      "size_bytes": 955
+    },
+    {
+      "file_sha256": "849661cfe51cda99bb95da30358d77f61cc74f870668a4938267f50f8872d79c",
+      "path": "paper/tables/phase1_6/primary_inference_effects.json",
+      "role": "paper_table",
+      "size_bytes": 3774
+    },
+    {
+      "file_sha256": "a7f116c367fe9977ff846bd173fbdf363489a2039da33fe2554dcc0d19a2bba0",
+      "path": "paper/tables/phase1_6/primary_inference_effects.tex",
+      "role": "paper_table",
+      "size_bytes": 1191
+    },
+    {
+      "file_sha256": "72e6bfe7aef9614af1a06e57d2e84416c696174601a887437b00b2bfa3185301",
+      "path": "paper/tables/phase1_6/training_intervention_effects.csv",
+      "role": "paper_table",
+      "size_bytes": 922
+    },
+    {
+      "file_sha256": "dc7079ca02171ed88fb507098b728912283acecd073a715e4a9e7584426906de",
+      "path": "paper/tables/phase1_6/training_intervention_effects.json",
+      "role": "paper_table",
+      "size_bytes": 3197
+    },
+    {
+      "file_sha256": "3464cb266d305254363de04f35bb121c62febe8f9f26353f8bf24d84123cd1f7",
+      "path": "paper/tables/phase1_6/training_intervention_effects.tex",
+      "role": "paper_table",
+      "size_bytes": 1075
+    },
+    {
+      "file_sha256": "dfd0a165ed2202263da3cdac206241035bf005b24a6e63767e5e44b0c3af5fca",
+      "path": "paper/tables/phase1_6/training_intervention_table.csv",
+      "role": "paper_table",
+      "size_bytes": 814
+    },
+    {
+      "file_sha256": "5a738607a50fc55b80294409953d2df971078e5e25c60b4dc8e79abca1a68636",
+      "path": "paper/tables/phase1_6/training_intervention_table.json",
+      "role": "paper_table",
+      "size_bytes": 3939
+    },
+    {
+      "file_sha256": "380d76c749a65177585be43b6e729e1d47279ff9ffc576c92e1993a15a7b2684",
+      "path": "paper/tables/phase1_6/training_intervention_table.tex",
+      "role": "paper_table",
+      "size_bytes": 316
+    }
+  ],
+  "protocol": {
+    "base_checkpoint": "R4-AB seed3072 epoch10",
+    "inference_seeds": [
+      42,
+      43
+    ],
+    "methods": [
+      "p0_s2",
+      "random64_s2",
+      "p3_s2",
+      "p0_po2_s2",
+      "p0_gf2_s2",
+      "p3_po5_s2",
+      "p1_cem_300x30",
+      "p2_cem_300x30",
+      "p2_small_64x5"
+    ],
+    "new_starts_per_task": 100,
+    "run_root": "outputs/round5/phase1_6_seed3072",
+    "short_training": {
+      "arms": [
+        "continue",
+        "detach",
+        "recorded"
+      ],
+      "freeze_encoder_projector": true,
+      "tasks": [
+        "pusht",
+        "reacher"
+      ],
+      "updates": 1000
+    },
+    "tasks": [
+      "cube",
+      "pusht",
+      "reacher",
+      "tworoom"
+    ],
+    "timing": {
+      "batch_sizes": [
+        1,
+        50
+      ],
+      "gpu_by_task": {
+        "cube": 0,
+        "pusht": 1,
+        "reacher": 2,
+        "tworoom": 3
+      },
+      "groups": 5,
+      "host_load_threshold_per_cpu": 0.75,
+      "runs_per_batch": 50
+    },
+    "training_eval_starts_per_task": 100
+  },
+  "schema_version": "round5_phase1_6_evidence_snapshot_v2",
+  "short_training_evaluation_results": [
+    {
+      "episodes": 100,
+      "file_sha256": "4dd319087e4a5a3aec3f3a04c8e042f0f3e2ee57c4a178b7734fa2891d0b4c32",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42_continue/complete.json",
+      "file_size_bytes": 10114482,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42_continue/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.97,
+      "task": "pusht",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "47076553913f12583f12f9ac97ca32b9f4c560837a441a70a27b4ec46ba3cae1",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42_detach/complete.json",
+      "file_size_bytes": 10302986,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42_detach/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.96,
+      "task": "pusht",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "98004805de9424a2d916170dc797d6ca8d401443023b2f47a667ad04dd6613d6",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42_recorded/complete.json",
+      "file_size_bytes": 10295395,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_42_recorded/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.96,
+      "task": "pusht",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "273dad13c02882fd7fea4c47f74497f871c69542dcf549179ffec60bcdb6485d",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43_continue/complete.json",
+      "file_size_bytes": 10279472,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43_continue/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.95,
+      "task": "pusht",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "febb1b7cbf66fe791480debe937174837233d5b78238336b1b36d0b748d19f26",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43_detach/complete.json",
+      "file_size_bytes": 10485406,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43_detach/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.93,
+      "task": "pusht",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "cf9889a642e2a630041bb3715d31a962ed9157cb0a5354af59fd6277d5686d41",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43_recorded/complete.json",
+      "file_size_bytes": 10488955,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p0_s2/seed_43_recorded/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.92,
+      "task": "pusht",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "47090b53c46407709073b1c2f20a59acaa1e57c340d13a67a0cf438fbde65dd8",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42_continue/complete.json",
+      "file_size_bytes": 10710112,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42_continue/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.94,
+      "task": "pusht",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "71e68b45d233a7c5d873a636d51d66245aba3745ee5aa48d16013a8657b680b1",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42_detach/complete.json",
+      "file_size_bytes": 10580390,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42_detach/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.95,
+      "task": "pusht",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "da9584999877860b28d43528ddd723e67be98781621e133fc87d6cecc45b1c1a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42_recorded/complete.json",
+      "file_size_bytes": 10497111,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_42_recorded/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.95,
+      "task": "pusht",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "fc3133bf948e98372a2a8f5dedb18edec358e1c6cbbad0f7f63b20b3f6606b92",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43_continue/complete.json",
+      "file_size_bytes": 10526515,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43_continue/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.96,
+      "task": "pusht",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "2c3486154ca7a4d5ffe8db79c3e014e86889eeef113115d3afa77c4a72336c38",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43_detach/complete.json",
+      "file_size_bytes": 10381736,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43_detach/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.97,
+      "task": "pusht",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "122a1c9c49843872a165ef29220d6904a88a65f48f65311078bc0e097489fad9",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43_recorded/complete.json",
+      "file_size_bytes": 10355341,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/pusht/p3_s2/seed_43_recorded/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.98,
+      "task": "pusht",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "4800ed806c654795fd2f37c9b4b624f0725ea34bef846acd6f29761fbb461ea4",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42_continue/complete.json",
+      "file_size_bytes": 11686129,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42_continue/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.81,
+      "task": "reacher",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "ebdfde11dd67e6225d52e980a5f4ee103b2fc3f876f4a1ab22c20674fe1091ea",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42_detach/complete.json",
+      "file_size_bytes": 11669877,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42_detach/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.81,
+      "task": "reacher",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "eebf71f91c03374ca40b609cd12041d6aca9ed70e542e382e8cd22559d76f104",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42_recorded/complete.json",
+      "file_size_bytes": 11569931,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_42_recorded/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.78,
+      "task": "reacher",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "f94a629ddde268e84360159afff5ad3294b9f61569bcad35bd57dc68f9cd51ef",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43_continue/complete.json",
+      "file_size_bytes": 11272963,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43_continue/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.85,
+      "task": "reacher",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "5ab87dcee9c94102dc2a28da65809826f42a08765ac9bad01d6bae638767d5ca",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43_detach/complete.json",
+      "file_size_bytes": 11411316,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43_detach/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.83,
+      "task": "reacher",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "3a83085efe5a47b6ef89d077dbb64f89ea08db718a15abd6aae3fbeece847d84",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43_recorded/complete.json",
+      "file_size_bytes": 11307104,
+      "method": "p0_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p0_s2/seed_43_recorded/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.85,
+      "task": "reacher",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "fdbd102e5bb8f0cab4f4f3b62fb6c431f29612490606955984ccd6f43ccd469a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42_continue/complete.json",
+      "file_size_bytes": 12227701,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42_continue/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.82,
+      "task": "reacher",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "2df1be87cac22298f3dad277e43e420a38c3d4f3bab69406ec2f5f52280de17a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42_detach/complete.json",
+      "file_size_bytes": 11816307,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42_detach/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.88,
+      "task": "reacher",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "ca971cf7fa8fdeb4022636264893d9b157bb6fec2214cf393713fb97217c6a09",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42_recorded/complete.json",
+      "file_size_bytes": 11643987,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_42_recorded/result.json",
+      "seed": 42,
+      "status": "ok",
+      "success_rate": 0.86,
+      "task": "reacher",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "4689d38dd6ba0f720e78b9bfef4a8faea1623b4e8a68c47e595ceae50f613964",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43_continue/complete.json",
+      "file_size_bytes": 11952699,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43_continue/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.83,
+      "task": "reacher",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "82389822bbe99a816110714072ad9a60b7354d67740b150f5a9f68c0f034bc8a",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43_detach/complete.json",
+      "file_size_bytes": 12396233,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43_detach/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.81,
+      "task": "reacher",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 100,
+      "file_sha256": "6b50ccb34c52d647074e578df3f842f0283074fdaf9afb856c135e266ba38f22",
+      "file_sha256_source": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43_recorded/complete.json",
+      "file_size_bytes": 12085229,
+      "method": "p3_s2",
+      "path": "outputs/round5/phase1_6_seed3072/conditions/reacher/p3_s2/seed_43_recorded/result.json",
+      "seed": 43,
+      "status": "ok",
+      "success_rate": 0.86,
+      "task": "reacher",
+      "training_arm": "recorded"
+    }
+  ],
+  "short_training_runs": [
+    {
+      "arm": "continue",
+      "checkpoint": {
+        "file_sha256": "142721dfa5fc449591840036dd7211ddca2ad50f66522904323ce04390ef78ab",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/continue/weights_step_1000.pt",
+        "size_bytes": 42666749
+      },
+      "checkpoint_hash_source": "outputs/round5/phase1_6_seed3072/short_train/pusht/continue/training_result.json",
+      "final_update": 1000,
+      "resume_bundle": {
+        "file_sha256": "caef23151c83f2089f23c3c4370b1d58ea6b5e429ad11c09e941577e229ecf3c",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/continue/step_1000.pt",
+        "size_bytes": 76284404
+      },
+      "resume_hash_source": "outputs/round5/phase1_6_seed3072/short_train/pusht/continue/training_result.json",
+      "status": "completed",
+      "task": "pusht",
+      "training_result": {
+        "file_sha256": "8878d4bece7d31ce069910062e0b87dace77eb5b67a75aabaf5138a72be7f324",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/continue/training_result.json",
+        "role": "short_training_result",
+        "size_bytes": 1503
+      },
+      "updates": 1000
+    },
+    {
+      "arm": "detach",
+      "checkpoint": {
+        "file_sha256": "40947a52fe317d05d0d4d573aad632a1f907b493c0d5868f0cd44ba0c0eee4e2",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/detach/weights_step_1000.pt",
+        "size_bytes": 42666749
+      },
+      "checkpoint_hash_source": "outputs/round5/phase1_6_seed3072/short_train/pusht/detach/training_result.json",
+      "final_update": 1000,
+      "resume_bundle": {
+        "file_sha256": "0e1cd6fa59705573a309590e55ea570740404031519e35d26d8bd1f6ce690ab7",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/detach/step_1000.pt",
+        "size_bytes": 76284404
+      },
+      "resume_hash_source": "outputs/round5/phase1_6_seed3072/short_train/pusht/detach/training_result.json",
+      "status": "completed",
+      "task": "pusht",
+      "training_result": {
+        "file_sha256": "d3e981869b94cd38a1c8b6c2eb37fb5e63457f185f534b9b903068dcdd3f4c90",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/detach/training_result.json",
+        "role": "short_training_result",
+        "size_bytes": 1492
+      },
+      "updates": 1000
+    },
+    {
+      "arm": "recorded",
+      "checkpoint": {
+        "file_sha256": "41077cbc6a835dad0230ac29c9d7565cda0ab8b24b95ef0ff0e5b0f2d16374e9",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/recorded/weights_step_1000.pt",
+        "size_bytes": 42666749
+      },
+      "checkpoint_hash_source": "outputs/round5/phase1_6_seed3072/short_train/pusht/recorded/training_result.json",
+      "final_update": 1000,
+      "resume_bundle": {
+        "file_sha256": "2942f029cc82347ca001d35480582226a23ce50754d73072259d15ac07e972da",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/recorded/step_1000.pt",
+        "size_bytes": 76284404
+      },
+      "resume_hash_source": "outputs/round5/phase1_6_seed3072/short_train/pusht/recorded/training_result.json",
+      "status": "completed",
+      "task": "pusht",
+      "training_result": {
+        "file_sha256": "9f021a408108cd4c2987ffe61d861d4bf7a8bc0619eedb2b8ad79ef9c0ccb745",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/pusht/recorded/training_result.json",
+        "role": "short_training_result",
+        "size_bytes": 1503
+      },
+      "updates": 1000
+    },
+    {
+      "arm": "continue",
+      "checkpoint": {
+        "file_sha256": "0f430be5a7dab119d5a3e42c123afe9d953941cda4bde39eb6c924feae09197a",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/continue/weights_step_1000.pt",
+        "size_bytes": 42666749
+      },
+      "checkpoint_hash_source": "outputs/round5/phase1_6_seed3072/short_train/reacher/continue/training_result.json",
+      "final_update": 1000,
+      "resume_bundle": {
+        "file_sha256": "8022b2b4885c01b4bca3cd645c5c8a2a44d593c69b28f1149a01c846df4a0b16",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/continue/step_1000.pt",
+        "size_bytes": 76284404
+      },
+      "resume_hash_source": "outputs/round5/phase1_6_seed3072/short_train/reacher/continue/training_result.json",
+      "status": "completed",
+      "task": "reacher",
+      "training_result": {
+        "file_sha256": "dd275af858241852303ca43bfe3caf60ba441f4248f15bebdda74b73cb8a63e7",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/continue/training_result.json",
+        "role": "short_training_result",
+        "size_bytes": 1505
+      },
+      "updates": 1000
+    },
+    {
+      "arm": "detach",
+      "checkpoint": {
+        "file_sha256": "2139bbed069b2b274658f31a3c4852e79d79fbd02271c3fe750b9f07069893b4",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/detach/weights_step_1000.pt",
+        "size_bytes": 42666749
+      },
+      "checkpoint_hash_source": "outputs/round5/phase1_6_seed3072/short_train/reacher/detach/training_result.json",
+      "final_update": 1000,
+      "resume_bundle": {
+        "file_sha256": "c2322631747cd13b2451ab82f2ab15bd97b394c98c733f0772745a60f99ed8ab",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/detach/step_1000.pt",
+        "size_bytes": 76284404
+      },
+      "resume_hash_source": "outputs/round5/phase1_6_seed3072/short_train/reacher/detach/training_result.json",
+      "status": "completed",
+      "task": "reacher",
+      "training_result": {
+        "file_sha256": "ef96710a62f09233364f945c7058b168598fd973b7b13e043efe405edfeb93d9",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/detach/training_result.json",
+        "role": "short_training_result",
+        "size_bytes": 1493
+      },
+      "updates": 1000
+    },
+    {
+      "arm": "recorded",
+      "checkpoint": {
+        "file_sha256": "dc33762c6e37358f6b07cd8af441ba38b42bf83ac48584788dc0369cec3d12d5",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/recorded/weights_step_1000.pt",
+        "size_bytes": 42666749
+      },
+      "checkpoint_hash_source": "outputs/round5/phase1_6_seed3072/short_train/reacher/recorded/training_result.json",
+      "final_update": 1000,
+      "resume_bundle": {
+        "file_sha256": "413318a134e983573a4cefa7e6426f1c3a485628c72ee7aae3edab3ff3fcfbc8",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/recorded/step_1000.pt",
+        "size_bytes": 76284404
+      },
+      "resume_hash_source": "outputs/round5/phase1_6_seed3072/short_train/reacher/recorded/training_result.json",
+      "status": "completed",
+      "task": "reacher",
+      "training_result": {
+        "file_sha256": "f733683d829374a6d04465bce18a6742397d22b865b770e2457fc488a98faf4b",
+        "path": "outputs/round5/phase1_6_seed3072/short_train/reacher/recorded/training_result.json",
+        "role": "short_training_result",
+        "size_bytes": 1506
+      },
+      "updates": 1000
+    }
+  ],
+  "sources": [
+    {
+      "file_sha256": "0dfa50a651c9db4f72c40102ba251213662b6a536cb8cfb62be711043ee3c6e9",
+      "path": "docs/plan/round5_phase1_6_plan.md",
+      "role": "source_or_analysis",
+      "size_bytes": 14477
+    },
+    {
+      "file_sha256": "de672c89ee3c547c2a2e05a0fb2f755d29f805e5f0214057b96a822385b9d6f2",
+      "path": "docs/report/round5/round5_phase1_6_report.md",
+      "role": "source_or_analysis",
+      "size_bytes": 14466
+    },
+    {
+      "file_sha256": "b8cf614e191d57d0835d6959b12303be0aeb221261375b8da0325937491c8e72",
+      "path": "config/round5/phase1_6.json",
+      "role": "source_or_analysis",
+      "size_bytes": 4988
+    },
+    {
+      "file_sha256": "e36c4a39a260dd332b5d6c34020e8c700a53191e2a5f9cc21661c76658f64899",
+      "path": "scripts/round5_phase1_6.py",
+      "role": "source_or_analysis",
+      "size_bytes": 36627
+    },
+    {
+      "file_sha256": "3014b5e832fa22be88e8f0cf129d68dfd65e7e90fff911b4eaaaf25a76664f58",
+      "path": "scripts/round5_phase1_6_timing.py",
+      "role": "source_or_analysis",
+      "size_bytes": 22953
+    },
+    {
+      "file_sha256": "626f55369687734219d4a071ae3064af8e4aaff92ab707a49e3412880bb85af3",
+      "path": "scripts/round5_phase1_6_merge_timing_shards.py",
+      "role": "source_or_analysis",
+      "size_bytes": 5211
+    },
+    {
+      "file_sha256": "819dd8c73d19bb6d0fbe63534df3a9b364fbcd81ebba41e23f58b1587a2fa8a8",
+      "path": "scripts/round5_phase1_6_export_paper.py",
+      "role": "source_or_analysis",
+      "size_bytes": 27344
+    },
+    {
+      "file_sha256": "d7874b0773e029b45c33fbc47e0c9407bf73b629faf637fec16839a29c557e25",
+      "path": "source/common/round5_phase1_6.py",
+      "role": "source_or_analysis",
+      "size_bytes": 8517
+    },
+    {
+      "file_sha256": "324ecc6875da84319292ef01a5d076658ce38854b4d54c204fe509ba16a33d63",
+      "path": "source/common/round5_phase1_6_analysis.py",
+      "role": "source_or_analysis",
+      "size_bytes": 24792
+    },
+    {
+      "file_sha256": "69835342362ad31333fe7fe95454a457af2141c10089631013a9f859cd857b73",
+      "path": "source/common/round5_phase1_6_train.py",
+      "role": "source_or_analysis",
+      "size_bytes": 27968
+    },
+    {
+      "file_sha256": "e3482068ebc9dcb0063b807fe2a1fca2089d92b576665dfe60f58d6f07604c4e",
+      "path": "paper/docs/DRAFT_GUIDE.md",
+      "role": "source_or_analysis",
+      "size_bytes": 11336
+    },
+    {
+      "file_sha256": "66865808820b76d2c936be62015130296b8f024c5ba6191328f0e008bcb088c1",
+      "path": "paper/sec/0_abstract.tex",
+      "role": "source_or_analysis",
+      "size_bytes": 1558
+    },
+    {
+      "file_sha256": "41dcb12a8b13cc7a7dd520493fe426d5b36a7baa679b11f101059d759739995f",
+      "path": "paper/sec/1_intro.tex",
+      "role": "source_or_analysis",
+      "size_bytes": 8288
+    },
+    {
+      "file_sha256": "c3429c70768b83515b015999960a9c66cdd7f9985ecc0707b846296ab5ff8123",
+      "path": "paper/sec/4_experiments.tex",
+      "role": "source_or_analysis",
+      "size_bytes": 17493
+    },
+    {
+      "file_sha256": "e40b506060fe5e3e042e0a4b5622c50038bc5c221faaebfb06c00fe0987887fa",
+      "path": "paper/sec/5_discussion.tex",
+      "role": "source_or_analysis",
+      "size_bytes": 3457
+    },
+    {
+      "file_sha256": "d20beea08b052f856c249749baeef6bf22f39ecd7e35dde9ba02669254fb0e4a",
+      "path": "outputs/round5/phase1_6_seed3072/analysis/paper_summary.json",
+      "role": "source_or_analysis",
+      "size_bytes": 1327696
+    },
+    {
+      "file_sha256": "94bdd491a5006f46466d66ce8340a77faa82bdcafc6cda0ab07a83ad3558e1d2",
+      "path": "outputs/round5/phase1_6_seed3072/timing/summary.json",
+      "role": "source_or_analysis",
+      "size_bytes": 1118995
+    },
+    {
+      "file_sha256": "5fcbc52ea57b642fabaa7a505a62d7e08229e9d176e95038be5591b1a97579db",
+      "path": "paper/tables/phase1_6/cem_substitution_assessment.json",
+      "role": "source_or_analysis",
+      "size_bytes": 4449
+    },
+    {
+      "file_sha256": "50229780190bba9eed713682093b61cde345f3555b3aed1cb47b37377a455613",
+      "path": "paper/tables/phase1_6/inference_timing.json",
+      "role": "source_or_analysis",
+      "size_bytes": 16233
+    },
+    {
+      "file_sha256": "5500f76ac2a0a67c11976f1103107005affa400568ea4609678af4d7fb95dded",
+      "path": "paper/tables/phase1_6/batch50_throughput.json",
+      "role": "source_or_analysis",
+      "size_bytes": 11478
+    }
+  ],
+  "timing": {
+    "rows": [
+      {
+        "batch1_p50_ms": 50.56869899999583,
+        "batch1_p95_ms": 53.56985810067272,
+        "batch50_p50_ms": 150.83453599982022,
+        "batch50_throughput_per_second": 320.22411864082517,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+GF",
+        "method": "p0_gf2_s2",
+        "peak_memory_bytes": 66859520,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 34.737478000351985,
+        "batch1_p95_ms": 36.23177340023176,
+        "batch50_p50_ms": 133.9410005002719,
+        "batch50_throughput_per_second": 359.11394658757587,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+PO",
+        "method": "p0_po2_s2",
+        "peak_memory_bytes": 66859520,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 13.405554500423023,
+        "batch1_p95_ms": 16.641845750746143,
+        "batch50_p50_ms": 140.74016499944264,
+        "batch50_throughput_per_second": 380.319555754446,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0",
+        "method": "p0_s2",
+        "peak_memory_bytes": 58339840,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 145.6843245005075,
+        "batch1_p95_ms": 175.1131694495598,
+        "batch50_p50_ms": 6944.237615999555,
+        "batch50_throughput_per_second": 7.197313325015064,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P1 CEM",
+        "method": "p1_cem_300x30",
+        "peak_memory_bytes": 95667712,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 144.38322500063805,
+        "batch1_p95_ms": 167.13433674995028,
+        "batch50_p50_ms": 6738.12748599903,
+        "batch50_throughput_per_second": 7.410899444569068,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2 CEM",
+        "method": "p2_cem_300x30",
+        "peak_memory_bytes": 95668736,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 41.715922000548744,
+        "batch1_p95_ms": 46.79145934960616,
+        "batch50_p50_ms": 1273.5355625009106,
+        "batch50_throughput_per_second": 39.3042338198528,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2-small",
+        "method": "p2_small_64x5",
+        "peak_memory_bytes": 69030912,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 65.00133099962113,
+        "batch1_p95_ms": 66.5269729004649,
+        "batch50_p50_ms": 702.7673005004544,
+        "batch50_throughput_per_second": 67.92016668162238,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3+PO",
+        "method": "p3_po5_s2",
+        "peak_memory_bytes": 102753792,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 21.347401499951957,
+        "batch1_p95_ms": 22.11715169987656,
+        "batch50_p50_ms": 313.294186499661,
+        "batch50_throughput_per_second": 160.34416579614725,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3",
+        "method": "p3_s2",
+        "peak_memory_bytes": 59297280,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 17.266701500375348,
+        "batch1_p95_ms": 17.83897710047313,
+        "batch50_p50_ms": 167.48335549982585,
+        "batch50_throughput_per_second": 293.0867960423074,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "Random-64",
+        "method": "random64_s2",
+        "peak_memory_bytes": 58339840,
+        "seed": 42,
+        "task": "cube"
+      },
+      {
+        "batch1_p50_ms": 43.35374249967572,
+        "batch1_p95_ms": 51.058676750017185,
+        "batch50_p50_ms": 153.8252789996477,
+        "batch50_throughput_per_second": 333.6959603776877,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+GF",
+        "method": "p0_gf2_s2",
+        "peak_memory_bytes": 66805248,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 28.513621000456624,
+        "batch1_p95_ms": 29.187150100005965,
+        "batch50_p50_ms": 116.4416554993295,
+        "batch50_throughput_per_second": 428.23340334227885,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+PO",
+        "method": "p0_po2_s2",
+        "peak_memory_bytes": 66805248,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 12.679706000199076,
+        "batch1_p95_ms": 13.011614550941886,
+        "batch50_p50_ms": 126.62458050090208,
+        "batch50_throughput_per_second": 398.17600388931896,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0",
+        "method": "p0_s2",
+        "peak_memory_bytes": 58285568,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 136.50377200065122,
+        "batch1_p95_ms": 169.78740964959798,
+        "batch50_p50_ms": 6784.770607499013,
+        "batch50_throughput_per_second": 7.3676531803529,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P1 CEM",
+        "method": "p1_cem_300x30",
+        "peak_memory_bytes": 95425024,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 141.64091299971915,
+        "batch1_p95_ms": 142.28301759967508,
+        "batch50_p50_ms": 6558.772600000339,
+        "batch50_throughput_per_second": 7.622222839212495,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2 CEM",
+        "method": "p2_cem_300x30",
+        "peak_memory_bytes": 95426048,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 34.93728000012197,
+        "batch1_p95_ms": 35.40060064915451,
+        "batch50_p50_ms": 1225.4924695007503,
+        "batch50_throughput_per_second": 40.75691422121513,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2-small",
+        "method": "p2_small_64x5",
+        "peak_memory_bytes": 68935680,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 53.042496000671235,
+        "batch1_p95_ms": 54.75677775011717,
+        "batch50_p50_ms": 552.8875469999548,
+        "batch50_throughput_per_second": 87.90402509677429,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3+PO",
+        "method": "p3_po5_s2",
+        "peak_memory_bytes": 102602240,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 16.37290600046981,
+        "batch1_p95_ms": 16.706922449793637,
+        "batch50_p50_ms": 309.8667585009025,
+        "batch50_throughput_per_second": 161.07195059304985,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3",
+        "method": "p3_s2",
+        "peak_memory_bytes": 59204096,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 13.248487999589997,
+        "batch1_p95_ms": 13.538178649832844,
+        "batch50_p50_ms": 171.64397750002536,
+        "batch50_throughput_per_second": 291.61109725125067,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "Random-64",
+        "method": "random64_s2",
+        "peak_memory_bytes": 58285568,
+        "seed": 42,
+        "task": "pusht"
+      },
+      {
+        "batch1_p50_ms": 40.676707501006604,
+        "batch1_p95_ms": 43.3055523008079,
+        "batch50_p50_ms": 157.05338399948232,
+        "batch50_throughput_per_second": 307.2735903009702,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+GF",
+        "method": "p0_gf2_s2",
+        "peak_memory_bytes": 66810368,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 27.407006499743147,
+        "batch1_p95_ms": 28.65504239916845,
+        "batch50_p50_ms": 155.3280364996681,
+        "batch50_throughput_per_second": 319.80498273739363,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+PO",
+        "method": "p0_po2_s2",
+        "peak_memory_bytes": 66810368,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 12.42470350007352,
+        "batch1_p95_ms": 12.63470105086526,
+        "batch50_p50_ms": 123.75995250022243,
+        "batch50_throughput_per_second": 393.90617982300074,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0",
+        "method": "p0_s2",
+        "peak_memory_bytes": 58290688,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 134.18141249894688,
+        "batch1_p95_ms": 168.99281999994855,
+        "batch50_p50_ms": 6666.2006785009,
+        "batch50_throughput_per_second": 7.5052915224267105,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P1 CEM",
+        "method": "p1_cem_300x30",
+        "peak_memory_bytes": 95430144,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 138.14023450049717,
+        "batch1_p95_ms": 139.0909601003841,
+        "batch50_p50_ms": 6522.759714000131,
+        "batch50_throughput_per_second": 7.639550666359474,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2 CEM",
+        "method": "p2_cem_300x30",
+        "peak_memory_bytes": 95431168,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 34.5572030000767,
+        "batch1_p95_ms": 34.950293200381566,
+        "batch50_p50_ms": 1239.0238594998664,
+        "batch50_throughput_per_second": 39.88382525662739,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2-small",
+        "method": "p2_small_64x5",
+        "peak_memory_bytes": 68940800,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 62.639131499963696,
+        "batch1_p95_ms": 64.26488114957465,
+        "batch50_p50_ms": 689.3490524998924,
+        "batch50_throughput_per_second": 71.9353133287381,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3+PO",
+        "method": "p3_po5_s2",
+        "peak_memory_bytes": 102607360,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 20.073516999218555,
+        "batch1_p95_ms": 21.52651069918647,
+        "batch50_p50_ms": 309.10277899965877,
+        "batch50_throughput_per_second": 156.67002267598087,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3",
+        "method": "p3_s2",
+        "peak_memory_bytes": 59209216,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 12.953574499988463,
+        "batch1_p95_ms": 13.186777350347256,
+        "batch50_p50_ms": 180.6155510003009,
+        "batch50_throughput_per_second": 276.28048679237185,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "Random-64",
+        "method": "random64_s2",
+        "peak_memory_bytes": 58290688,
+        "seed": 42,
+        "task": "reacher"
+      },
+      {
+        "batch1_p50_ms": 38.26371100058168,
+        "batch1_p95_ms": 40.592279600059555,
+        "batch50_p50_ms": 155.66764350023732,
+        "batch50_throughput_per_second": 320.4430530762416,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+GF",
+        "method": "p0_gf2_s2",
+        "peak_memory_bytes": 66808320,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 28.685487000075227,
+        "batch1_p95_ms": 29.40335769944795,
+        "batch50_p50_ms": 139.52870950015495,
+        "batch50_throughput_per_second": 357.82081297849254,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0+PO",
+        "method": "p0_po2_s2",
+        "peak_memory_bytes": 66808320,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 12.88844050031912,
+        "batch1_p95_ms": 13.07562749916542,
+        "batch50_p50_ms": 133.1372859995099,
+        "batch50_throughput_per_second": 375.12741615333147,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P0",
+        "method": "p0_s2",
+        "peak_memory_bytes": 58288640,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 136.9891859994823,
+        "batch1_p95_ms": 138.38866615014922,
+        "batch50_p50_ms": 6809.033610999904,
+        "batch50_throughput_per_second": 7.341726985623969,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P1 CEM",
+        "method": "p1_cem_300x30",
+        "peak_memory_bytes": 95428096,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 141.47549849985808,
+        "batch1_p95_ms": 142.22514409939322,
+        "batch50_p50_ms": 6546.415956499914,
+        "batch50_throughput_per_second": 7.634837204265193,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2 CEM",
+        "method": "p2_cem_300x30",
+        "peak_memory_bytes": 95429120,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 34.60831499978667,
+        "batch1_p95_ms": 34.99854534966289,
+        "batch50_p50_ms": 1237.7526299997044,
+        "batch50_throughput_per_second": 40.3193524775038,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P2-small",
+        "method": "p2_small_64x5",
+        "peak_memory_bytes": 68938752,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 57.95000800117123,
+        "batch1_p95_ms": 64.4644302996312,
+        "batch50_p50_ms": 608.6559984996711,
+        "batch50_throughput_per_second": 76.503395675524,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3+PO",
+        "method": "p3_po5_s2",
+        "peak_memory_bytes": 102605312,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 16.50929749939678,
+        "batch1_p95_ms": 16.901411400431243,
+        "batch50_p50_ms": 327.83231450048333,
+        "batch50_throughput_per_second": 154.40013292422552,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "P3",
+        "method": "p3_s2",
+        "peak_memory_bytes": 59207168,
+        "seed": 42,
+        "task": "tworoom"
+      },
+      {
+        "batch1_p50_ms": 13.375196499509912,
+        "batch1_p95_ms": 13.733041100113041,
+        "batch50_p50_ms": 187.92789850067493,
+        "batch50_throughput_per_second": 275.50243318125484,
+        "eligible_for_speedup_claim": true,
+        "host_pressure_observed": false,
+        "interference_observed": false,
+        "label": "Random-64",
+        "method": "random64_s2",
+        "peak_memory_bytes": 58288640,
+        "seed": 42,
+        "task": "tworoom"
+      }
+    ],
+    "shards": [
+      {
+        "file_sha256": "d6c1d8eb1031e232a9a77f54ee3b2b1f9b851c278ff59296cbf5152336735c31",
+        "path": "outputs/round5/phase1_6_seed3072/timing/shards/cube.json",
+        "role": "timing_shard_cube",
+        "size_bytes": 279089
+      },
+      {
+        "file_sha256": "bf66767fab6f6a10b68e968f4b456b90ea9913483bb5bc22e304eb7db3301b02",
+        "path": "outputs/round5/phase1_6_seed3072/timing/shards/pusht.json",
+        "role": "timing_shard_pusht",
+        "size_bytes": 279224
+      },
+      {
+        "file_sha256": "26bdb17e99d72a12e8d42cf8ead051aa050fbcc2a03b97bd9f1c0dd6a985dce7",
+        "path": "outputs/round5/phase1_6_seed3072/timing/shards/reacher.json",
+        "role": "timing_shard_reacher",
+        "size_bytes": 279518
+      },
+      {
+        "file_sha256": "a490dbc9a9825df21c7ee8b12bf290a939ae11d29fad214fa0e33a68d849bb4a",
+        "path": "outputs/round5/phase1_6_seed3072/timing/shards/tworoom.json",
+        "role": "timing_shard_tworoom",
+        "size_bytes": 279052
+      }
+    ],
+    "summary": {
+      "file_sha256": "94bdd491a5006f46466d66ce8340a77faa82bdcafc6cda0ab07a83ad3558e1d2",
+      "path": "outputs/round5/phase1_6_seed3072/timing/summary.json",
+      "role": "merged_timing_summary",
+      "size_bytes": 1118995
+    }
+  }
+}

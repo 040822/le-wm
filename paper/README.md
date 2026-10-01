@@ -2,17 +2,20 @@
 
 Start from [main.tex](main.tex). The English draft follows the action–dynamics coupling discussion in session `01a0ba23-c649-7b90-8acc-96716f894f9f` and the local CoWM notes. Read the [Chinese drafting guide](docs/DRAFT_GUIDE.md) for the argument, evidence boundaries, remaining experiments, and source provenance.
 
-The manuscript now focuses on shared A/B learning, three forms of coupling, action selection/refinement, and decision probes. CoWM is a provisional paper name; implementation and checkpoint names remain Fast-LeWAM/R4-AB. Online adaptation and C/D/E extensions are outside the core contribution.
+The 2026-10-01 revision fixes six experiment questions and centralizes result slots. Fill [results.tex](results.tex) following the [result filling guide](docs/RESULTS_FILL_GUIDE.md). Conditional rows do not require extending the run queue. CoWM remains a provisional name; online adaptation and C/D/E extensions stay outside the offline core.
 
 ## Files
 
 - `sec/0_abstract.tex` through `sec/5_discussion.tex`: main paper.
 - `sec/6_appendix.tex`: working supplement, excluded from `main.tex` by default.
 - `fig/draft_architecture.tex`: native LaTeX architecture sketch.
-- `tables/`: frozen exploratory table rows extracted from experiment artifacts.
+- `results.tex`, `tables/final_*.tex`: central result values and six fillable main tables.
+- `tables/phase1_7_snapshot.tex`: artifact-derived epoch-10 development checks.
+- `sec/7_reference_results.tex`, `tables/phase1_6/`: preserved measured reference results in the supplement.
 - `references.bib`: active bibliography.
 - `docs/evidence_snapshot.json`: numerical provenance and source SHA256 hashes; internal, not a submission artifact.
 - `docs/archive/pre_cowm_20260924.zip`: pre-edit manuscript backup.
+- `docs/archive/pre_fillable_20261001.zip`: backup of the 11 files changed in the fillable revision.
 - `sec/template_*.tex`, `main.bib`, `fig/teaser.tex`: retained author-kit examples, unused by the manuscript.
 
 ## Build

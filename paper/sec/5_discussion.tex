@@ -1,10 +1,30 @@
 \section{Discussion and Limitations}
 \label{sec:limitations}
-Coupling is a design variable, not an assurance of mutual improvement. The action estimate and predictor can co-adapt to the recorded target without becoming more accurate about the consequences of perturbed actions. Conversely, simple recorded-action multi-task training may already provide useful shared features. A detached or less coupled variant is a valid outcome of the study if it offers the strongest evidence. The formal claim should identify the effective connection rather than require an ordering from weak to strong coupling.
+Coupling is a design variable. Recorded-action multi-task training may suffice; estimated inputs may help without their gradients; or joint training may offer no reliable decision benefit.
 
-Our present evidence is limited to a single training seed, reused development cohorts, and partially completed diagnostics. High success on several tasks restricts discrimination among methods. Physical readout quality does not establish decision quality, and a fixed-pool oracle is not a long-horizon optimum. The parallel predictor also does not make refinement free: sequential backward passes may outweigh savings from using fewer candidates. Independent final evaluation and controlled timing are required to resolve these issues.
+The retained configuration is \PaperResult{discussion-configuration}.
 
-We focus on offline action--dynamics learning. Online adaptation, latent-path generation, and additional prediction modes introduce separate hypotheses and are not core contributions here. Likewise, causal attention enforces temporal information constraints without guaranteeing that the learned model captures physical causality.
+The supported training effect is \PaperResult{discussion-training-scope}. Its scope follows complete matched contrasts. Without Pred-Detach or a sharing control, input, gradient, and parameter effects cannot all be independently attributed.
+
+Estimated-action training retains the recorded future target. It may encourage consistency near recorded actions, but it does not observe their counterfactual futures.
+
+Temporal attention constraints likewise do not establish physical causality.
+
+Physical state readability, continuous ranking, top-1 selection, and closed-loop success are different endpoints.
+
+In current checkpoints, continuous ranking gains do not consistently transfer to control and do not replicate across every setting.
+
+The final task and seed variation is \PaperResult{discussion-generalization}. Reused evaluation episodes, training-data exposure, and incomplete contrasts limit the claims even when a particular metric improves.
+
+Latency describes the stated hardware and isolated policy call. Total training cost, resident parameters, history handling, and search budgets affect the comparison.
+
+The validated efficiency scope is \PaperResult{discussion-efficiency-scope}.
+
+Online branch supervision changes the data setting. Its exploratory improvement is reported separately in the supplement and is not evidence for the original offline training objective.
 
 \section{Conclusion}
-CoWM formulates action generation and parallel latent dynamics as a coupled learning problem with distinct parameter, input, and gradient connections. Its direct, selection, and refinement interfaces expose where future prediction participates in control. Exploratory results show task-dependent inference gains alongside substantial gaps in candidate selection, motivating simulator-grounded evaluation of the decision interface. Matched training ablations and measured performance--latency curves remain necessary to determine which coupling and inference combination is justified.
+CoWM combines action flow and parallel latent dynamics while distinguishing parameter, input, and gradient connections. Its evaluation connects physical consequences to action choice and measured decision cost.
+
+The completed comparisons support \PaperResult{conclusion-supported-claim}. The unresolved scope is \PaperResult{conclusion-unresolved-scope}.
+
+The fixed-checkpoint reference shows task-dependent selection value and lower latency without validated CEM replacement.

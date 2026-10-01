@@ -1,0 +1,179 @@
+% Preserved reference material from the pre-fillable draft; not final matched-training results.
+\section{Fixed-checkpoint Reference Results}
+\label{app:reference_results}
+We test which action--dynamics connections affect decision quality, when predicted consequences help select or refine actions, and how success trades against inference cost. Phase1.6 adds a confirmation cohort while keeping mechanism diagnostics explicitly exploratory.
+
+\subsection{Exploratory setup and evidence scope}
+The current experiments use Cube, Push-T, Reacher, and TwoRoom, with a separately trained model for each task. All inference comparisons use the corresponding R4-AB checkpoint at epoch 10, training seed 3072. Observations are $224\times224$ images; the latent width is 192. Each planned sequence contains $H=5$ action blocks of $k=5$ environment steps. The controller executes all five blocks before replanning, subject to termination, within a 50-step episode budget. Goal images are sampled 25 environment steps ahead under the frozen local Phase1 legacy protocol.
+
+Each task has 50 fixed development start--goal pairs. This is not an independent held-out evaluation, nor is it claimed to exactly reproduce every published LeWM setting. The cohort has been repeatedly used for inference selection, and the checkpoint's training-data exposure is not established as strictly disjoint. Additional inference seeds do not constitute additional training seeds. Percentages below describe these cohorts, not a population-level generalization guarantee.
+
+In the Phase1 comparisons, P3 uses $N=64$, while CEM uses 300 samples, 30 elites, 30 iterations, and initial variance scale one. PO and GF use $K=5$, $\eta=0.01$, and RMS radius $R=0.2$; GF guides the last $\min(5,S)$ flow steps. Reacher CEM uses the recorded action-clipping variant, whereas P0/P3 retain their recorded unclipped planner interface. Consequently, a CEM comparison here includes that action-handling difference. Formal comparisons must align the action semantics and give each planner a budget sweep.
+
+\subsection{What does inference-time dynamics add?}
+\begin{table*}[t]
+ \centering\small
+ \begin{tabular}{lrrrrr}
+ \toprule
+ Inference from the same task checkpoint & Flow steps & Cube & Push-T & Reacher & TwoRoom \\
+ \midrule
+ \input{tables/phase1_rows}
+ \bottomrule
+ \end{tabular}
+ \caption{Exploratory closed-loop success (\%) on the fixed 50-episode development cohort per task, using one training seed. PO refines every candidate before selection when combined with P3. One-step GF duplicates the PO update rule and is omitted. These are inference comparisons within R4-AB, not evidence that coupling outperforms independent training. CEM action-handling details are given in the text.}
+ \label{tab:reference_inference}
+\end{table*}
+
+Table~\ref{tab:reference_inference} shows that the value of B depends on the task and computation allocated to A. On Reacher, one-step selection changes success from 72\% to 74\%, only one additional successful episode. At two flow steps, selection reaches 90\% versus 76\% for direct execution. One-step P0-PO reaches 88\%, and refining all one-step candidates before selection reaches 92\%. These observations make both selection and local refinement relevant candidates for a budgeted controller; they do not identify the faster option.
+
+Cube and TwoRoom are close to saturation in several configurations, and Push-T offers little consistent separation. More computation is not uniformly beneficial: on Push-T, two-step direct execution reaches 100\%, versus 98\% for selection and 96\% for selection with PO. On Reacher, random-initialized CEM reaches 92\%, exceeding unrefined P3. Thus, the current evidence neither eliminates search nor supports universal gains from candidate selection. We retain flow steps as a necessary budget parameter without claiming step-count insensitivity or a particular diversity mechanism.
+
+\subsection{Can the predictor select an available successful action?}
+\label{app:reference_ranking}
+To separate proposal coverage from selection quality, Phase1.5 restores each initial simulator state and executes a fixed candidate pool. Each state has 256 candidates at each $S\in\{1,2,5,10,16,32\}$. The completed pools for Push-T, Reacher, and TwoRoom contain 76,800 executed candidates per task. For each state and step setting, we compare B's selection with random selection and an oracle indicating whether any candidate succeeds. Selection regret measures the selected physical goal distance minus the minimum distance in the same pool. Physical distances are task-specific and normalized by the diagnostic thresholds.
+
+\begin{table*}[t]
+ \centering\small
+ \begin{tabular}{lrrrr}
+ \toprule
+ Task & Pool oracle (\%) & B-selected (\%) & Random (\%) & B $-$ random (pp), 95\% CI \\
+ \midrule
+ \input{tables/candidate_rows}
+ \bottomrule
+ \end{tabular}
+ \caption{Exploratory fixed-pool diagnostics, averaged equally over six flow-step settings. Intervals use 10,000 bootstrap replicates clustered by the 50 initial states, preserving dependence among candidates and settings. Pool execution and success aggregation differ from the full closed-loop experiment in Table~\ref{tab:reference_inference}; these values must not be substituted for closed-loop success. Cube was omitted from this frozen table at the September 24 source snapshot; its later completed pool is not inserted into this historical aggregate.}
+ \label{tab:reference_ranking}
+\end{table*}
+
+Table~\ref{tab:reference_ranking} reveals substantial headroom between candidate availability and B's choice. On Reacher, the oracle reaches 94.7\% while B selects a successful candidate in 55.0\% of the state--setting pairs. B's improvement over random selection is 4.2 percentage points, with an interval spanning zero. Push-T has lower candidate coverage and a similar uncertainty in selection gains. TwoRoom is already near saturation under random selection. These findings identify decision tests that a stronger coupling must pass; the fixed-checkpoint experiment alone cannot attribute any limitation or benefit to a particular training connection. The oracle is only an upper bound within the sampled pool and diagnostic horizon.
+
+\subsection{Does refinement improve real consequences?}
+PO minimizes a learned latent cost, so a lower predicted cost is not sufficient evidence of a better action. The paired diagnostic starts from a common state and proposal, executes both original and refined actions, and records changes in predicted cost, actual future-latent cost, and physical goal distance. A matched-RMS random perturbation controls for displacement alone. We additionally measure the fraction of pairs for which the predicted cost decreases but the actual physical distance increases. Short-termination cases without matched execution horizons are reported separately rather than treated as valid pairs.
+
+Phase1.6 completes a paired, bound-aware PO/GF diagnostic with an equal-RMS random-direction control on the legacy states. We report it separately from the new closed-loop cohort below; it tests local action directions, not long-horizon policy value.
+
+\subsection{Physical readouts and predicted futures}
+Frozen-feature ridge and small-MLP probes test physical information in observed latents. Probe training and validation trajectories are disjoint from the diagnostic cohort; this split applies to the readout, not retroactively to world-model pretraining. A readout fitted on observed latents is then frozen and applied to B's predicted future latents. In the current Reacher diagnostic, the recorded readout MAE is 0.00871 on real future latents and 0.24587 on predicted futures. This gap combines prediction error and readout distribution shift; it does not show that all physical information is absent from B. The complete probe comparison belongs alongside ranking and refinement, rather than serving as their substitute.
+
+\subsection{Phase1.6 confirmation cohort and closed-loop comparison}
+We froze the R4-AB epoch-10 checkpoint for each task and sampled 100 new starts per task. Each method used inference seeds 42 and 43 on the same starts, for 200 episodes per task and method. Actions were clipped to each environment's physical bounds before scoring and execution.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/closed_loop_success}
+ \caption{Closed-loop success on the Phase1.6 confirmation cohort. Each cell pools 200 episodes from two inference seeds; the macro column weights the four tasks equally. This remains a fixed-checkpoint, single-training-seed evaluation.}
+ \label{tab:reference_phase16_success}
+\end{table*}
+
+P3 exceeds Random-64 by 2.0 percentage points in the equal-task macro estimate (95\% state-cluster interval: 0.4 to 3.6). Its largest task estimate is Reacher, +7.5 points (2.0 to 13.0); the task-family Holm-adjusted $p$-value is 0.169. Push-T is $-$1.0 point ($-$3.5 to 2.0), so the evidence supports a Reacher-specific signal rather than a uniform selection gain.
+
+P0+PO versus P0 is +1.4 points in the macro estimate ($-$0.3 to 3.0). GF versus PO is $-$0.4 points ($-$2.0 to 1.3). These intervals do not identify a reliable closed-loop advantage for either local guidance method.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/primary_inference_effects}
+ \caption{Paired success differences on common starts. Effects are averaged over the two inference seeds within each start; intervals resample starts. Task-level inference comparisons form one Holm-corrected family. Macro estimates weight tasks equally.}
+ \label{tab:reference_phase16_inference_effects}
+\end{table*}
+
+\subsection{Does B distinguish action consequences?}
+On the legacy 50-state S=2 pool, the cosine between predicted and observed latent changes is 0.124 on Push-T and 0.440 on Reacher. Both exceed within-state shuffled nulls, but the physical-cost sign accuracy is only 51.6\% on Push-T and 59.2\% on Reacher.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/action_consequence_summary}
+ \caption{Paired action-consequence diagnostics. Push-T excludes one state whose stored candidates changed under the physical action-bound rule. Bootstrap intervals cluster by state; shuffle $p$-values use 1,000 within-state permutations.}
+ \label{tab:reference_phase16_consequences}
+\end{table*}
+
+At $N=64$, B's selection success differs from random by $-$0.7 points on Push-T (95\% CI: $-$8.2 to 7.1) and 0.0 on Reacher ($-$11.1 to 11.2). On Reacher, B lowers distance by 0.014 units versus random (0.001 to 0.027), yet remains 0.063 above the physical oracle.
+
+On Push-T, B is 4.0 distance units worse than random (95\% CI: $-$11.0 to 3.0) and 58.0 units above the physical oracle. The future-latent and physical oracles are diagnostic upper bounds within this fixed pool, not deployable policies.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/candidate_selection_summary}
+ \caption{Nested candidate-count results on the legacy 50-state cohort. Curves use a common action-bound-compatible state set and state-cluster intervals.}
+ \label{tab:reference_phase16_selection_curve}
+\end{table*}
+\begin{figure}[t]
+ \centering
+ \includegraphics[width=\linewidth]{fig/phase1_6_candidate_selection_curve.pdf}
+ \caption{Success by step 25 as the candidate pool grows. The latent and physical oracles use observed outcomes and serve only as diagnostic bounds.}
+ \label{fig:reference_phase16_selection_curve}
+\end{figure}
+
+\begin{table}[t]
+ \centering\small
+ \input{tables/phase1_6/candidate_selection_physical}
+ \caption{At $N=64$, positive random-minus-B distance improvement favors B. Regret is B's distance above the best physical outcome in the sampled pool; units are task-specific.}
+ \label{tab:reference_phase16_selection_distance}
+\end{table}
+
+\subsection{Do PO and GF improve executed outcomes?}
+On Push-T, PO improves step-25 distance by 47.3 units over the original proposal and by 43.6 units over matched-RMS random perturbations. GF's corresponding advantage over random is 42.4 units. On Reacher, PO's advantage over random is 0.011 distance units, with an interval spanning zero; GF and PO are indistinguishable at this scale.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/guidance_table}
+ \caption{Legacy-cohort local direction test. Positive distance improvement and positive guided-minus-random effects favor guidance. Candidate 0 and 1 are averaged within state; intervals and the Holm family use states as the sampling unit. The A/B forward and B backward counts describe work per guided branch.}
+ \label{tab:reference_phase16_guidance}
+\end{table*}
+
+\subsection{Short training interventions with a frozen representation}
+Continue, Detach, and Recorded were trained for 1,000 updates from the same epoch-10 checkpoint, with the encoder and projector frozen. Continue retained a nonzero action-mediated B gradient path; Detach and Recorded measured zero path norm. Frozen parameters remained bitwise equal to initialization.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/training_intervention_table}
+ \caption{Confirmation-cohort success after short training interventions. Each arm uses the same 100 starts and two inference seeds; these are not independent training seeds.}
+ \label{tab:reference_phase16_training_success}
+\end{table*}
+
+Detach-minus-Continue and Recorded-minus-Detach intervals cross zero for both tasks under P0 and P3. The 1,000-update frozen-representation experiment therefore verifies the intervention paths but does not confirm a decision benefit from gradient or predicted-action input coupling.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/training_intervention_effects}
+ \caption{Paired short-training effects in percentage points. Training contrasts use state-cluster intervals; the two primary contrasts, Detach-minus-Continue and Recorded-minus-Detach, are Holm-corrected as a family. Continue-minus-Frozen is shown as an exploratory extra-training contrast.}
+ \label{tab:reference_phase16_training_effects}
+\end{table*}
+
+\subsection{Can P3 replace large-budget CEM?}
+We compare P3 and P3+PO against P2 CEM with 300 samples and 30 iterations on identical confirmation starts. We require the prespecified macro and per-task non-inferiority margins as well as at least a 20\% reduction in isolated batch-1 p50 latency before claiming a lower-cost replacement.
+
+Timing runs use one task worker on each of GPUs 0--3, with BLAS/OpenMP and PyTorch intra/inter-op threads fixed to one. We synchronously time the complete \texttt{policy.get\_action} call on five fixed real-observation groups for each batch size, excluding environment execution steps. Each five-group window records the assigned GPU's compute processes and host load at its boundaries; a window is flagged if another compute process uses that GPU or host load exceeds 0.75 per CPU. Interfered conditions are retried up to twice, and any remaining flagged condition is excluded from speedup claims. All 36 task-method conditions passed these checks; the maximum observed host load was 0.096 per CPU.
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/cem_reference_effects}
+ \caption{Paired success differences from the large-budget P2 CEM reference. Negative values indicate lower success for the flow-based method.}
+ \label{tab:reference_phase16_cem}
+\end{table*}
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/inference_timing}
+ \caption{Per-task isolated batch-1 planning p50/p95 latency in milliseconds. All reported timing conditions passed the GPU and host-pressure checks.}
+ \label{tab:reference_phase16_latency}
+\end{table*}
+
+\begin{table*}[t]
+ \centering\small
+ \input{tables/phase1_6/batch50_throughput}
+ \caption{Per-task isolated batch-50 throughput in observations per second. All reported timing conditions passed the GPU and host-pressure checks.}
+ \label{tab:reference_phase16_throughput}
+\end{table*}
+
+The P3-minus-P2 CEM macro success difference is +4.1 points (two-sided 95\% state-cluster CI: +1.8 to +6.5; one-sided 95\% lower bound: +2.25). Its Reacher difference is $-$1.5 points (two-sided CI: $-$7.0 to +4.5; one-sided lower bound: $-$6.0), failing the strict $-$4-point task margin. P3+PO has a macro one-sided lower bound of +1.875, but its task bounds are $-$4.0 on Push-T and $-$5.0 on Reacher; the strict task criterion requires values greater than $-$4. Neither candidate passes the full performance gate, regardless of measured latency.
+
+P3 batch-1 p50 latency ranges from 16.4 to 21.3 ms, an 85.2--88.4\% reduction from P2 CEM's 138.1--144.4 ms. P0 is faster at 12.4--13.4 ms (90.7--91.0\% lower than P2 CEM); P3+PO takes 53.0--65.0 ms and reduces latency by 54.7--62.6\%. The batch-50 throughput table gives per-task rates rather than an average across tasks. These measurements nominate P3 as the primary inference candidate and P0 as the low-latency fallback. The choice is an observed operating-point recommendation, not evidence that either method meets the full CEM replacement criterion.
+
+\begin{figure*}[t]
+ \centering
+ \includegraphics[width=0.92\linewidth]{fig/phase1_6_success_latency_frontier.pdf}
+ \caption{Confirmation-cohort success against per-task isolated single-environment p50 planning latency. All timing windows passed the GPU and host-pressure checks.}
+ \label{fig:reference_phase16_frontier}
+\end{figure*}
+
+The measured table and frontier support P3 as the primary inference candidate and P0 as a low-latency fallback, subject to task-level needs; neither is a validated replacement for large-budget CEM under the prespecified performance gate. Training evidence remains narrower: a full, multi-seed training ablation with an unfrozen representation is still required to identify which coupling, if any, improves the learned model rather than only its fixed-checkpoint inference interface.

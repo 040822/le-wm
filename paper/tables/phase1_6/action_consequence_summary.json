@@ -1,0 +1,36 @@
+{
+  "rows": [
+    {
+      "candidate_pairs": 6272,
+      "cost_latent_sign_accuracy": 0.49558128737754886,
+      "cost_physical_sign_accuracy": 0.5157844387755102,
+      "excluded_clip_incompatible_states": 1,
+      "latent_delta_ci95_high": 0.14682562188722442,
+      "latent_delta_ci95_low": 0.10223405394015249,
+      "latent_identifiability_coverage": 0.9969706632653061,
+      "physical_sign_ci95_high": 0.5385841836734694,
+      "physical_sign_ci95_low": 0.49378188775510207,
+      "predicted_true_latent_delta_cosine": 0.1243189286627286,
+      "shuffle_latent_p_one_sided": 0.000999000999000999,
+      "shuffle_physical_sign_p_one_sided": 0.025974025974025976,
+      "states": 49,
+      "task": "pusht"
+    },
+    {
+      "candidate_pairs": 6400,
+      "cost_latent_sign_accuracy": 0.59609375,
+      "cost_physical_sign_accuracy": 0.59203125,
+      "excluded_clip_incompatible_states": 0,
+      "latent_delta_ci95_high": 0.5011489251077367,
+      "latent_delta_ci95_low": 0.3783972488291739,
+      "latent_identifiability_coverage": 1.0,
+      "physical_sign_ci95_high": 0.63125,
+      "physical_sign_ci95_low": 0.55390625,
+      "predicted_true_latent_delta_cosine": 0.4398066338931376,
+      "shuffle_latent_p_one_sided": 0.000999000999000999,
+      "shuffle_physical_sign_p_one_sided": 0.000999000999000999,
+      "states": 50,
+      "task": "reacher"
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "p3_po5_s2": {
+    "all_tasks_latency_reduction_at_least_20_percent": true,
+    "cem_reference": "P2 CEM 300x30",
+    "macro_noninferiority_margin_pp": -2.0,
+    "macro_noninferiority_pass": true,
+    "macro_success_ci95_pp": [
+      1.5000000000000002,
+      6.25
+    ],
+    "macro_success_difference_pp": 3.875,
+    "macro_success_one_sided_95_lower_pp": 1.8750000000000002,
+    "replace_large_cem_performance_latency_criteria_pass": false,
+    "task_results": {
+      "cube": {
+        "latency_reduction_fraction": 0.5497999784993453,
+        "latency_reduction_pass": true,
+        "p_holm": 0.0015998400159984002,
+        "success_ci95_pp": [
+          10.5,
+          23.0
+        ],
+        "success_difference_pp": 16.5,
+        "success_one_sided_95_lower_pp": 11.5,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": true,
+        "timing_uninterrupted": true
+      },
+      "pusht": {
+        "latency_reduction_fraction": 0.6255143031958823,
+        "latency_reduction_pass": true,
+        "p_holm": 1.0,
+        "success_ci95_pp": [
+          -5.0,
+          5.0
+        ],
+        "success_difference_pp": 0.0,
+        "success_one_sided_95_lower_pp": -4.0,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": false,
+        "timing_uninterrupted": true
+      },
+      "reacher": {
+        "latency_reduction_fraction": 0.54655403817388,
+        "latency_reduction_pass": true,
+        "p_holm": 1.0,
+        "success_ci95_pp": [
+          -5.5,
+          4.0
+        ],
+        "success_difference_pp": -1.0,
+        "success_one_sided_95_lower_pp": -5.0,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": false,
+        "timing_uninterrupted": true
+      },
+      "tworoom": {
+        "latency_reduction_fraction": 0.5903883809165065,
+        "latency_reduction_pass": true,
+        "p_holm": 1.0,
+        "success_ci95_pp": [
+          0.0,
+          0.0
+        ],
+        "success_difference_pp": 0.0,
+        "success_one_sided_95_lower_pp": 0.0,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": true,
+        "timing_uninterrupted": true
+      }
+    }
+  },
+  "p3_s2": {
+    "all_tasks_latency_reduction_at_least_20_percent": true,
+    "cem_reference": "P2 CEM 300x30",
+    "macro_noninferiority_margin_pp": -2.0,
+    "macro_noninferiority_pass": true,
+    "macro_success_ci95_pp": [
+      1.7500000000000002,
+      6.5
+    ],
+    "macro_success_difference_pp": 4.124999999999999,
+    "macro_success_one_sided_95_lower_pp": 2.249999999999999,
+    "replace_large_cem_performance_latency_criteria_pass": false,
+    "task_results": {
+      "cube": {
+        "latency_reduction_fraction": 0.8521476334951126,
+        "latency_reduction_pass": true,
+        "p_holm": 0.0015998400159984002,
+        "success_ci95_pp": [
+          10.5,
+          23.5
+        ],
+        "success_difference_pp": 16.5,
+        "success_one_sided_95_lower_pp": 11.5,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": true,
+        "timing_uninterrupted": true
+      },
+      "pusht": {
+        "latency_reduction_fraction": 0.8844055318924534,
+        "latency_reduction_pass": true,
+        "p_holm": 1.0,
+        "success_ci95_pp": [
+          -1.5,
+          6.0
+        ],
+        "success_difference_pp": 2.0,
+        "success_one_sided_95_lower_pp": -1.0,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": true,
+        "timing_uninterrupted": true
+      },
+      "reacher": {
+        "latency_reduction_fraction": 0.8546873973987187,
+        "latency_reduction_pass": true,
+        "p_holm": 1.0,
+        "success_ci95_pp": [
+          -7.000000000000001,
+          4.5
+        ],
+        "success_difference_pp": -1.5,
+        "success_one_sided_95_lower_pp": -6.0,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": false,
+        "timing_uninterrupted": true
+      },
+      "tworoom": {
+        "latency_reduction_fraction": 0.8833063132877857,
+        "latency_reduction_pass": true,
+        "p_holm": 1.0,
+        "success_ci95_pp": [
+          -1.5,
+          0.0
+        ],
+        "success_difference_pp": -0.5,
+        "success_one_sided_95_lower_pp": -1.5,
+        "task_noninferiority_margin_pp": -4.0,
+        "task_noninferiority_pass": true,
+        "timing_uninterrupted": true
+      }
+    }
+  }
+}

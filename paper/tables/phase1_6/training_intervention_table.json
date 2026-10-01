@@ -1,0 +1,196 @@
+{
+  "rows": [
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": null,
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 95.5,
+      "task": "pusht",
+      "training_arm": "frozen"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": null,
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 96.5,
+      "task": "pusht",
+      "training_arm": "frozen"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": "continue",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 96.0,
+      "task": "pusht",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": "continue",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 95.0,
+      "task": "pusht",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": "detach",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 94.5,
+      "task": "pusht",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": "detach",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 96.0,
+      "task": "pusht",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": "recorded",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 94.0,
+      "task": "pusht",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": "recorded",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 96.5,
+      "task": "pusht",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": null,
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 80.0,
+      "task": "reacher",
+      "training_arm": "frozen"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": null,
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 89.5,
+      "task": "reacher",
+      "training_arm": "frozen"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": "continue",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 83.0,
+      "task": "reacher",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": "continue",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 82.5,
+      "task": "reacher",
+      "training_arm": "continue"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": "detach",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 82.0,
+      "task": "reacher",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": "detach",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 84.5,
+      "task": "reacher",
+      "training_arm": "detach"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p0_s2",
+      "result_tag": "recorded",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 81.5,
+      "task": "reacher",
+      "training_arm": "recorded"
+    },
+    {
+      "episodes": 200,
+      "inference_method": "p3_s2",
+      "result_tag": "recorded",
+      "seeds_present": [
+        42,
+        43
+      ],
+      "success_percent": 86.0,
+      "task": "reacher",
+      "training_arm": "recorded"
+    }
+  ]
+}

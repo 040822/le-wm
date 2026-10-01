@@ -1,0 +1,30 @@
+{
+  "checked_at_utc": "2026-09-30T18:46:25.095582+00:00",
+  "checks": "input graph, braces, environment order, labels/references, bibliography keys, graphics, result slots/aliases, new table columns, measured reference rows, numerical source hashes, rewritten prose lengths",
+  "entries": {
+    "main.tex": {
+      "labels": 28,
+      "references": 6,
+      "citation_keys": 12,
+      "environments": 29
+    },
+    "supplement.tex": {
+      "labels": 25,
+      "references": 2,
+      "citation_keys": 0,
+      "environments": 34
+    }
+  },
+  "active_files": 36,
+  "central_result_slots": 207,
+  "verified_numerical_sources": 6,
+  "errors": [],
+  "pdf_compiled": false,
+  "tex_engines_available": {
+    "latexmk": false,
+    "pdflatex": false,
+    "xelatex": false,
+    "tectonic": false
+  },
+  "page_limit_verified": false
+}

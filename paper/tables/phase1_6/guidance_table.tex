@@ -1,0 +1,10 @@
+\begin{tabular}{llrrrrrrr}
+\toprule
+Task & Method & $\Delta d$ vs base & 95\% CI & $\Delta d$ vs rand. & 95\% CI & $\Delta$ success (pp) & A/B fwd, B bwd & RMS match \\
+\midrule
+pusht & post_opt & 47.313 & [33.338, 62.164] & 43.572 & [30.621, 56.923] & 83.7 & 0.0/2.0/2.0 & 100.0\% \\
+pusht & guided_flow & 47.298 & [32.995, 61.904] & 42.351 & [29.445, 56.562] & 78.6 & 4.0/2.0/2.0 & 100.0\% \\
+reacher & post_opt & 0.011 & [-0.002, 0.024] & 0.011 & [-0.002, 0.024] & 0.0 & 0.0/2.0/2.0 & 100.0\% \\
+reacher & guided_flow & 0.009 & [0.001, 0.017] & 0.007 & [-0.000, 0.016] & 0.0 & 4.0/2.0/2.0 & 100.0\% \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "b_physical_oracle_regret": 57.98956214671288,
+      "improvement_ci95_high": 3.037603603680487,
+      "improvement_ci95_low": -10.977675006882516,
+      "random_minus_b_distance_improvement": -3.977931783514979,
+      "regret_ci95_high": 71.53054879742757,
+      "regret_ci95_low": 45.23334750230972,
+      "states": 49,
+      "task": "pusht"
+    },
+    {
+      "b_physical_oracle_regret": 0.06254000845746213,
+      "improvement_ci95_high": 0.02717739734672772,
+      "improvement_ci95_low": 0.0013781592027392747,
+      "random_minus_b_distance_improvement": 0.014165989023877475,
+      "regret_ci95_high": 0.08079378086302845,
+      "regret_ci95_low": 0.04699729877273352,
+      "states": 50,
+      "task": "reacher"
+    }
+  ]
+}

@@ -26,6 +26,15 @@
 \newcommand{\red}[1]{{\color{red}#1}}
 \newcommand{\todo}[1]{{\color{red}#1}}
 \newcommand{\TODO}[1]{\textbf{\color{red}[TODO: #1]}}
+% Unknown results remain visible; values are defined once in results.tex.
+\newcommand{\PendingResult}{\textcolor{cvprblue}{\textsf{TBD}}}
+\newcommand{\SetPaperResult}[2]{\expandafter\def\csname cowmresult@#1\endcsname{#2}}
+\newcommand{\PaperResult}[1]{%
+  \ifcsname cowmresult@#1\endcsname
+    \csname cowmresult@#1\endcsname
+  \else
+    \PendingResult
+  \fi}
 %%
 %% Disable for camera ready / submission by uncommenting these lines:
 %%

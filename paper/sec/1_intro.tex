@@ -1,34 +1,33 @@
 \section{Introduction}
 \label{sec:introduction}
 
-% 总起段（2026-09-26 调整）：从 LeWM-like 的视觉目标规划出发，先交代预测与搜索，再引出学习动作提议。
-% 潜在世界模型根据候选动作预测未来表征，并以目标图像为参照进行规划。
-% DINO-WM 和 LeWM 说明这一接口可以支持视觉控制，但每次重规划都需要评估和更新动作候选，
-% 反复查询动力学模型会带来计算成本。由此引出问题：能否学习动作提议以减少搜索负担，
-% 同时保留预测动作后果以进行选择和修正的能力？
-Latent world models enable visual goal-conditioned planning by predicting how candidate actions change the environment in a learned representation space. DINO-WM and LeWM use such predictions to search for action sequences that bring future representations toward an image goal~\cite{zhou2024dinowm,maes2026lewm}. At each replanning step, however, trajectory optimization evaluates and updates candidate sequences through repeated queries to the dynamics model. This search can account for a substantial part of the decision cost. Starting from this planning framework, we ask how learned action proposals can reduce the search burden while retaining the ability to assess and refine actions through predicted consequences.
+Latent world models support visual goal-conditioned control by predicting candidate outcomes. DINO-WM and LeWM search for actions that move future representations toward an image goal~\cite{zhou2024dinowm,maes2026lewm}.
 
-% 近期工作 -> 凝练科学问题：优先讲 latent planning 的两条改进路径，再引出训练耦合。
-% Fast LeWM 降低预测候选后果的成本；LeFlow 学习 latent 轨迹提议，再由冻结世界模型排序；
-% FlowMPC 将 flow 策略与模型规划结合。这些工作引出提议生成器与预测器如何共同学习的问题。
-% WAM 的训练/推理区分放在 related work 第三段展开，避免开篇偏离 LeWM-like 规划主线。
-Recent work addresses both prediction and search costs. Fast LeWorldModel predicts futures from action prefixes in parallel~\cite{gao2026fastlewm}. LeFlow learns latent trajectory proposals, decodes them into actions, and ranks them with a frozen world model~\cite{huang2026leflow}; FlowMPC combines a flow policy with model-based planning~\cite{hamel2026flowmpc}. These approaches motivate learning reusable proposals for world-model planning. They also raise a training question: how should proposal generation and consequence prediction be learned together? We investigate whether coupling these learning problems improves the predictor's ability to select or refine proposed actions under a limited decision budget.
+Repeated prediction and search contribute to decision cost. A learned action generator can supply reusable proposals, while a world model selects or refines them using their predicted consequences.
 
-% 这段进一步讨论问题，但是可能要和下一段提出CoWM的融合起来比较好。
-% 答案并非仅由预测准确性或架构决定。策略可能无法提出成功的动作；预测器可能将不成功的候选排在成功候选之前；或者梯度优化可能在减少预测目标距离的同时使执行结果恶化。共享参数可以传递有用信息，但也可能将这些误差耦合在一起。此外，在保留记录轨迹作为目标的同时，将策略估计的动作输入预测器，并不能提供这些动作的真实反事实结果。这些可能性使得耦合的形式，而非仅仅存在两个目标，成为该研究的核心。
-The answer does not follow from predictive accuracy or architecture alone. A policy may fail to propose a successful action; a predictor may rank an unsuccessful candidate above a successful one; or gradient optimization may reduce predicted goal distance while worsening the executed outcome. Sharing parameters can transfer useful information, but it can also couple these errors. Moreover, feeding a policy's estimated actions into a predictor while retaining the recorded trajectory as the target does not provide the true counterfactual outcome of those actions. These possibilities make the form of coupling, rather than simply the presence of two objectives, central to the study.
+Fast LeWorldModel predicts action-prefix futures in parallel~\cite{gao2026fastlewm}. LeFlow learns latent proposals for a frozen world model~\cite{huang2026leflow}; FlowMPC combines flow proposals with planning~\cite{hamel2026flowmpc}.
 
-% 引出方法。
-% 我们介绍了 \textbf{CoWM}，一种耦合的潜在世界--动作模型，具有共享的视觉编码器和扩散 Transformer（DiT）。其动作模式使用流匹配生成目标条件动作序列，而其动力学模式则基于因果可用的动作前缀并行预测未来潜在表示。我们明确区分了三种训练连接：共享参数、动力学输入的预测动作，以及从动力学损失经由这些输入到动作生成器的梯度路径。在推理时，模型要么直接执行一个提议，要么使用预测结果在多个提议中进行选择，要么通过下降学习到的目标代价来细化提议。该形式化方法支持对哪些连接有用进行受控研究，而不预设更强的耦合总是更好。
-We introduce \textbf{CoWM}, a coupled latent world--action model with a shared visual encoder and diffusion transformer (DiT). Its action mode generates goal-conditioned action sequences using flow matching, and its dynamics mode predicts future latents from causally available action prefixes in parallel. We explicitly distinguish three training connections: shared parameters, predicted-action inputs to dynamics, and a gradient path from the dynamics loss through those inputs to the action generator. At inference, the model either executes a proposal directly, selects among proposals using predicted outcomes, or refines proposals by descending a learned goal cost. This formulation supports a controlled study of which connections are useful, without presupposing that stronger coupling is always better.
+These interfaces raise a training question: does learning proposals and dynamics together improve decisions under a limited computation budget?
 
-% 进一步说明实验设计
-% 我们的评估遵循相同的分解。需要匹配的训练消融来隔离耦合效应；固定检查点推理比较衡量使用学习到的预测器的价值；模拟器分支测试候选分数和细化方向是否与真实结果一致。物理探针通过区分从观测到的潜变量中可读出的信息与预测潜变量中保留的信息，补充了这些决策测试。效率通过成功-延迟权衡来评估，包括细化所使用的反向传播，而不仅仅是流步数。
-Our evaluation follows the same decomposition. Matched training ablations are needed to isolate coupling effects; fixed-checkpoint inference comparisons measure the value of using the learned predictor; and simulator branches test whether candidate scores and refinement directions agree with real outcomes. Physical probes complement these decision tests by distinguishing information readable from an observed latent from information preserved in a predicted latent. Efficiency is assessed through success--latency trade-offs, including the backward passes used by refinement, rather than flow-step counts alone.
+Answering it requires separating training effects from the value of querying an existing predictor.
 
-% 分析实验结果
-% 本稿给出了耦合公式、其选择与精化接口，以及对其行为的探索性评估。在当前的 Reacher 队列上，生成后精化将一步直接执行从 72\% 提升到 88\%，而采用两个流步骤的候选选择达到 90\%。然而，候选池诊断表明，预测器无法可靠地恢复可用的成功率上界，并且其他任务已接近饱和。因此，核心假设——即在固定预算下，特定的训练耦合能够提高决策质量——仍然是匹配消融实验的目标。在此阶段，我们并不声称具有普遍的双向迁移、经过验证的加速效果，或对迭代搜索的替代。
-The present draft provides the coupled formulation, its selection and refinement interfaces, and an exploratory evaluation of their behavior. On the current Reacher cohort, post-generation refinement improves one-step direct execution from 72\% to 88\%, while candidate selection with two flow steps reaches 90\%. However, candidate-pool diagnostics show that the predictor does not reliably recover the available success upper bound, and other tasks are close to saturation. The central hypothesis---that a particular training coupling improves decision quality under a fixed budget---therefore remains the target of the matched ablations. We make no claim of universal bidirectional transfer, a validated speedup, or replacement of iterative search at this stage.
+CoWM shares a visual encoder and diffusion transformer between goal-conditioned action flow and parallel latent prediction.
 
-Our contributions are summarized as follows:
-% 1. 提出CoWM 2. 探索一种计算成本和任务性能之间平衡的方式 3. 实验、额外实验
+It exposes three connections: shared parameters, predicted-action inputs, and prediction gradients through those inputs.
+
+Sharing may transfer useful features, but the objectives can also interfere. Estimated actions still receive recorded future targets; this training objective does not supply their actual counterfactual outcomes.
+
+At inference, CoWM directly executes an action proposal, selects among proposals, or refines them through a learned goal cost. These alternatives permit a measured trade-off between success and decision time.
+
+We assess training variants on common physical actions and restored simulator states. Candidate coverage, top-1 selection, physical regret, and executed refinement distinguish available good actions from the ability to choose them.
+
+The fixed-checkpoint reference finds a modest mean selection gain and faster inference than large-budget CEM, while missing its task-level non-inferiority gate. The matched-training comparison estimates \PaperResult{intro-main-effect}.
+
+The final interpretation is \PaperResult{intro-evidence-scope}. We report task and training-seed variation, including absent or reversed effects, rather than infer control gains from prediction loss or continuous ranking alone.
+
+Our contributions are:
+\begin{itemize}
+\item A coupled action--dynamics formulation that distinguishes shared parameters, estimated-action inputs, and the action-mediated gradient path.
+\item A decision evaluation connecting candidate coverage, physical consequence ranking, local refinement, and closed-loop success.
+\item A comparison of success and measured inference cost against independent prediction and search, with training contrasts interpreted within their actual scope.
+\end{itemize}

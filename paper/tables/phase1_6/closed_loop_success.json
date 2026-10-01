@@ -1,0 +1,85 @@
+{
+  "rows": [
+    {
+      "cube_success_percent": 100.0,
+      "label": "P0",
+      "macro_success_percent": 93.625,
+      "method": "p0_s2",
+      "pusht_success_percent": 95.5,
+      "reacher_success_percent": 80.0,
+      "tworoom_success_percent": 99.0
+    },
+    {
+      "cube_success_percent": 100.0,
+      "label": "Random-64",
+      "macro_success_percent": 94.375,
+      "method": "random64_s2",
+      "pusht_success_percent": 97.5,
+      "reacher_success_percent": 82.0,
+      "tworoom_success_percent": 98.0
+    },
+    {
+      "cube_success_percent": 100.0,
+      "label": "P3",
+      "macro_success_percent": 96.375,
+      "method": "p3_s2",
+      "pusht_success_percent": 96.5,
+      "reacher_success_percent": 89.5,
+      "tworoom_success_percent": 99.5
+    },
+    {
+      "cube_success_percent": 100.0,
+      "label": "P0+PO",
+      "macro_success_percent": 95.0,
+      "method": "p0_po2_s2",
+      "pusht_success_percent": 95.5,
+      "reacher_success_percent": 85.0,
+      "tworoom_success_percent": 99.5
+    },
+    {
+      "cube_success_percent": 100.0,
+      "label": "P0+GF",
+      "macro_success_percent": 94.625,
+      "method": "p0_gf2_s2",
+      "pusht_success_percent": 95.5,
+      "reacher_success_percent": 83.0,
+      "tworoom_success_percent": 100.0
+    },
+    {
+      "cube_success_percent": 100.0,
+      "label": "P3+PO",
+      "macro_success_percent": 96.125,
+      "method": "p3_po5_s2",
+      "pusht_success_percent": 94.5,
+      "reacher_success_percent": 90.0,
+      "tworoom_success_percent": 100.0
+    },
+    {
+      "cube_success_percent": 49.5,
+      "label": "P1 CEM",
+      "macro_success_percent": 79.875,
+      "method": "p1_cem_300x30",
+      "pusht_success_percent": 87.5,
+      "reacher_success_percent": 91.5,
+      "tworoom_success_percent": 91.0
+    },
+    {
+      "cube_success_percent": 83.5,
+      "label": "P2 CEM",
+      "macro_success_percent": 92.25,
+      "method": "p2_cem_300x30",
+      "pusht_success_percent": 94.5,
+      "reacher_success_percent": 91.0,
+      "tworoom_success_percent": 100.0
+    },
+    {
+      "cube_success_percent": 88.0,
+      "label": "P2-small",
+      "macro_success_percent": 91.625,
+      "method": "p2_small_64x5",
+      "pusht_success_percent": 95.0,
+      "reacher_success_percent": 83.5,
+      "tworoom_success_percent": 100.0
+    }
+  ]
+}

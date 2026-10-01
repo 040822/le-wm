@@ -1,59 +1,105 @@
-\section{Implementation and Reproducibility Details}
+\section{Implementation and Reproducibility}
 \label{app:implementation}
-This working supplement distinguishes the implemented exploratory model from the matched training study still to be completed. Internal run identities and source hashes are maintained separately from the anonymous manuscript.
+This supplement separates measured reference results, interim matched-training checks, and conditional mechanism contrasts. Internal paths and hashes are maintained in the drafting guide, outside the anonymous manuscript.
 
-\paragraph{Architecture and training configuration.}
-The current R4-AB implementation uses a randomly initialized ViT-Tiny visual encoder with patch size 14, a projector to width 192, and six shared transformer blocks with six heads and MLP width 768. Mode embeddings condition the shared transformer. The registered configuration specifies a batch size of 128, BF16 training, AdamW at learning rate $5\times10^{-5}$ with weight decay $10^{-3}$, and gradient clipping at 1.0. The evaluated weights are designated epoch 10, seed 3072. This identifies the evaluated artifacts; it does not assert that every checkpoint was trained from scratch with identical historical continuation. Resolved training history, data exposure, and learning-rate schedules must accompany the final matched study.
+\paragraph{Architecture and training.}
+The R4-AB implementation uses a randomly initialized ViT-Tiny encoder with patch size 14, latent width 192, and six shared transformer blocks. Each block has six heads and MLP width 768.
 
-The implementation class also allocates parameters for unused C/D/E extensions. A/B-only training disables their objectives, but does not automatically remove their storage. Resource comparisons must distinguish total resident parameters, active parameters, and actual compute. No parameter-efficiency claim is derived from counting only the active heads.
+The matched configuration uses batch size 128, BF16, AdamW at learning rate $5\times10^{-5}$, weight decay $10^{-3}$, and gradient clipping at 1.0.
 
-\paragraph{Coupling details.}
-At fit time, the predicted-action probability is $\min(e/10,0.5)$ with the effective epoch including any continuation offset. The inherited non-fitting loss path instead uses predicted actions with probability one. Validation loss is therefore not interchangeable with the fitting mixture. The current B timestep condition uses the action estimate's flow time, while latent supervision is downweighted at low flow times. Matched ablations must control the conditioning and weighting rather than silently change both with the input source.
+Actual training visits, updates, and checkpoint histories are \PaperResult{appendix-training-history}.
 
-\section{Controlled Training Comparisons}
+Unused C/D/E extensions remain allocated in the implementation. A/B-only objectives do not remove their storage. Resource reporting distinguishes active compute from total resident parameters.
+
+\paragraph{Coupling and controls.}
+At fitting time, estimated-action probability is $\min(e/10,0.5)$ for effective epoch $e$. The inherited validation loss instead uses probability one; validation and fitting losses do not have the same input mixture.
+
+Recorded-control keeps the Joint arm's mask, B timestep, and sample weight while replacing B inputs with recorded actions. Recorded-clean uses recorded actions, time one, and unit weights; B-only also uses clean recorded-action supervision.
+
+Same-architecture arms share an initial state, episode split, training normalizer, and paired window schedule.
+
+Independent LeWM has a different architecture and history window, so matched update counts do not imply identical training examples or compute.
+
+\section{Training Comparison Inventory}
 \label{app:coupling}
 \begin{table*}[t]
 \centering\small
-\begin{tabular}{p{0.20\textwidth}p{0.29\textwidth}p{0.42\textwidth}}
+\begin{tabular}{p{0.20\textwidth}p{0.23\textwidth}p{0.48\textwidth}}
 \toprule
-Configuration & Changed connection & Question to be answered \\
+Configuration & Scope & Interpretation \\
 \midrule
-A-only & Remove dynamics objective & Does dynamics training improve the direct policy? \\
-B-only & Remove action objective & Does action learning improve prediction or decisions? \\
-Shared-GT & Shared A/B; recorded actions for B & What does shared multi-task training provide? \\
-Shared-Pred-Detach & Mix estimated actions; stop their gradients & What is the additional effect of estimated-action exposure? \\
-Full coupling & Retain gradients through estimated actions & Does the action-mediated gradient improve real decisions? \\
-Shared encoder, two DiTs & Separate predictors; preserve input and gradient coupling & Is predictor sharing necessary under explicit resource budgets? \\
-Independent A + B & Compose separately trained models at inference & Does the coupled system improve on modular composition? \\
+Joint (Full) & Matched main study & Shared A/B, estimated-action mixture and differentiable action input. \\
+Recorded-control & Matched main study & Changes input and its mediated gradient together; retains legacy conditioning and weighting. \\
+B-only & Matched main study & No A objective; clean recorded-action B training. \\
+Recorded-clean & Planned clean control & Shared A/B with recorded inputs, time one and unit weight. \\
+Pred-Detach & Conditional extension & Full minus Detach tests the mediated gradient; Detach minus Recorded-control tests input exposure. \\
+Shared encoder, two DiTs & Conditional extension & Matched clean supervision tests DiT sharing; total parameters and compute must be reported. \\
+A-only / independent A+B & Historical or conditional & A-only tests B supervision on A; independent composition is not Joint's P0. Historical protocols are not pooled with matched results. \\
 \bottomrule
 \end{tabular}
-\caption{Required training contrasts, not completed performance results. Independent A+B reuses the single-task models. Shared-GT versus a single-task model changes both objectives and shared learning; it does not alone isolate parameter sharing.}
+\caption{Scope of training contrasts. This inventory does not require additional runs to fill every row. Absent contrasts limit the corresponding mechanism claim; a fixed-checkpoint intervention does not count as a complete-training contrast.}
 \label{tab:ablation_design}
 \end{table*}
 
-Each contrast should use matched data, seeds, goal definitions, checkpoint rules, and documented training-budget accounting. Fixed data exposure and fixed total compute answer different fairness questions. Independent models must encode observations with their own encoders instead of treating separately learned latent coordinates as interchangeable. Predictor comparisons use common candidate pools; policy comparisons hold the evaluation protocol fixed. At least three training seeds are planned for the core contrasts, with 200 independent evaluation episodes per task and seed as an initial target. These are design targets, not completed sample counts.
+Completed training seeds and cohorts are \PaperResult{protocol-completed-scope}. Each seed is reported separately.
 
-\section{Decision Diagnostics}
+Repeated evaluation episodes across seeds remain dependent; inference seeds and readout seeds are not additional trained models.
+
+Conditional effects are: Full minus Detach, \PaperResult{optional-gradient-effect}; Detach minus Recorded-control, \PaperResult{optional-input-effect}; shared minus double DiT, \PaperResult{optional-sharing-effect}.
+
+Their actual budgets, counts, and intervals are \PaperResult{optional-contrast-scope}. Without these measurements, no separate benefit is attributed to the missing connection.
+
+\section{Interim Matched-training Checks}
+\label{app:interim}
+The epoch-10 development checks below use training seed 4096 and the same Joint actor within each task. The development starts have been inspected previously; these are not final independent confirmation results.
+
+\begin{table}[t]
+\centering\small
+\input{tables/phase1_7_snapshot}
+\caption{Epoch-10 development P3 success (\%) on 100 paired starts per task. Differences are Joint-B minus LeWM in percentage points, with paired 95\% intervals. Both intervals cross zero.}
+\label{tab:interim_closed_loop}
+\end{table}
+
+In the corresponding Push-T pool, Joint-B/LeWM pairwise accuracy is 0.505/0.499 and Spearman is 0.012/$-$0.006. Top-1 success is 16/13\%, with exact McNemar $p=0.508$. The continuous differences do not clearly separate the scorers.
+
+An earlier epoch-2 pool favored Joint-B in continuous ranking. The actor changes between checkpoints, changing its candidate distribution; this non-replication cannot be attributed solely to B becoming worse during training.
+
+\section{Decision and Readout Details}
 \label{app:diagnostics}
-\paragraph{Fixed-pool ranking.}
-The diagnostic pools use 50 restored initial states, six flow-step settings, and 256 candidates per setting. State restoration includes the registered simulator and random-state handling. Shared initial-noise identities support comparisons across flow steps. The reported aggregate is an equal mean across settings; settings from the same state remain together during bootstrap. Random success is estimated by the diagnostic's uniform candidate sampling; pool coverage means that at least one candidate succeeds. Physical-distance oracle and success-coverage oracle need not select the same candidate.
+\paragraph{Candidate pools.}
+Coverage means that at least one sampled candidate succeeds; top-1 success is the outcome selected by a scorer. Success and physical-distance oracles need not select the same action.
 
-For state $s$, candidate set $\mathcal A_s$, and task-specific executed-outcome distance $d_s$, selection regret is
+For state $s$, candidate set $\mathcal A_s$, and executed physical distance $d_s$, regret is
 \begin{equation}
- r_s=d_s\!\left(\operatorname*{arg\,min}_{a\in\mathcal A_s}J(a)\right)
-       -\min_{a\in\mathcal A_s}d_s(a).
+r_s=d_s\!\left(\operatorname*{arg\,min}_{a\in\mathcal A_s}J(a)\right)
+-\min_{a\in\mathcal A_s}d_s(a).
 \end{equation}
-The diagnostic normalizes Cube Euclidean position distance by 0.04, Reacher maximum absolute joint-coordinate error by 0.05, and TwoRoom Euclidean position distance by 16. Its Push-T distance takes the maximum of the norm over the first four recorded position fields divided by 20 and circular angle error divided by $\pi/9$. This records the actual diagnostic implementation; its distance is not silently substituted for the closed-loop success predicate. Formal evaluation must document the state-field mapping and align the intended physical quantities.
-
-The Phase1.5 snapshot reports mean regrets of 1.304, 1.323, and 0.232 for Push-T, Reacher, and TwoRoom. Their state-clustered 95\% intervals are [1.080, 1.540], [1.087, 1.583], and [0.219, 0.244], respectively. Different task dynamics and state definitions preclude a universal interpretation of these magnitudes. The incomplete Cube pool and control pools requiring protocol reconciliation are excluded from corresponding claims.
-
-\paragraph{Real refinement and intervention.}
-For identical starting actions, compare the changes in predicted cost and executed physical distance after PO or GF. Report valid paired counts, termination mismatches, and the rate of predicted improvement with real degradation. Matched-displacement random perturbations test whether the gradient direction contributes beyond movement magnitude. Action-order changes, local perturbations, and physical-zero controls test response to actions; zero in normalized coordinates is not assumed to be physical zero. These interventions require reliable state restoration and aligned action semantics.
+Distance units and termination validity are recorded per task. A pool oracle bounds that pool at its diagnostic horizon, not a long-horizon optimal policy. State-level resampling preserves dependence among candidates.
 
 \paragraph{Physical readouts.}
-Readout train/validation splits are made by source trajectory, excluding diagnostic trajectories. Ridge and small-MLP probes on frozen features, together with a random-encoder control, assess state readability. Freeze the trained readout before applying it to predicted latents. Report physical quantities and units individually; aggregate errors across heterogeneous units are not a common physical scale. Three MLP seeds concern readout fitting only, not world-model training. Strong state readout without improved ranking or real refinement does not establish a coupling mechanism.
+Readout train/validation splits exclude diagnostic trajectories. Ridge and small-MLP fits, with a random-encoder reference, test observed-feature readability. The fitted readout is frozen before application to predicted latents.
 
-\section{Budget and Reporting Protocol}
-The initial latency comparison should cover P0, P3, P0-PO, multi-step GF, and several P1/P2 CEM budgets. Synchronize device work, record warm-up and measurement counts, and isolate the single-environment decision path. Include feature encoding, candidate generation, scoring, backward passes, search updates, and action conversion. Report goal caching, precision, compilation, batch splitting, and resident memory. Environment stepping and multi-environment throughput are separate measurements. A reduction in sequential rollout depth alone is not a measured speedup or a new hardware algorithm.
+The current Cube target is block position. Additional physical quantities are reported only when measured with defined fields, units, and matched splits. Heterogeneous physical errors are not averaged as one common scale.
 
-\TODO{Final supplement: add resolved training histories, data exclusions, action-bound alignment, per-seed results, independent-cohort identities, completed paired refinement diagnostics, and audited timing curves.}
+\paragraph{Refinement.}
+PO/GF comparisons use a common initial action. After legal projection, the random control matches actual action displacement. Valid state counts, early termination, and predicted-improvement/physical-degradation rates accompany the result.
+
+\section{Online Data Extension}
+\label{app:online}
+The exploratory online branch freezes an epoch-2 actor and representation, then fine-tunes scorers with real simulator branches. It changes the supervision setting and is separate from the offline main study.
+
+The locked Joint-B rank arm has P3 success of 18.5\% versus LeWM's 10.0\% on Push-T (two-task Holm $p=0.012$). Reacher gives 15.0\% versus 11.0\% (Holm $p=0.291$), each on 200 locked starts.
+
+Against the original Joint-B, the changes are +4.5 and +4.0 points, with intervals crossing zero. The significant Push-T comparison against LeWM therefore does not alone establish an online gain over the original Joint model.
+
+Extra-update offline controls and both scorers' online arms are reported together. Secondary comparisons do not inherit the primary test's correction, and this cohort is not reused to choose a different online arm.
+
+\section{Timing and Final Reporting}
+\label{app:reporting}
+Isolated timing includes encoding, generation, conversion, scoring, backward passes, and search. Device work is synchronized; hardware, precision, goal caching, threads, warm-up, measurement counts, and interference checks are recorded.
+
+The resolved timing configuration is \PaperResult{appendix-timing-scope}. Batch-1 latency, batch throughput, total rollout time, training cost, and resident memory are separate quantities.
+
+Each final result is accompanied by checkpoint/cohort identities, actual counts, paired intervals, and the declared test family. Already inspected cohorts are labeled. An unmeasured conditional comparison stays unresolved.
+
+\input{sec/7_reference_results}

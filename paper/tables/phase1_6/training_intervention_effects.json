@@ -1,0 +1,136 @@
+{
+  "rows": [
+    {
+      "ci95_high_pp": 3.5000000000000004,
+      "ci95_low_pp": -2.0,
+      "comparison": "Continue - Frozen",
+      "difference_pp": 0.5,
+      "method": "P0",
+      "p_holm": null,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 0.0,
+      "ci95_low_pp": -3.5000000000000004,
+      "comparison": "Detach - Continue",
+      "difference_pp": -1.5,
+      "method": "P0",
+      "p_holm": 1.0,
+      "p_signflip": 0.2568743125687431,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 0.0,
+      "ci95_low_pp": -1.5,
+      "comparison": "Recorded - Detach",
+      "difference_pp": -0.5,
+      "method": "P0",
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 1.0,
+      "ci95_low_pp": -4.5,
+      "comparison": "Continue - Frozen",
+      "difference_pp": -1.5,
+      "method": "P3",
+      "p_holm": null,
+      "p_signflip": 0.501949805019498,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 4.0,
+      "ci95_low_pp": -2.0,
+      "comparison": "Detach - Continue",
+      "difference_pp": 1.0,
+      "method": "P3",
+      "p_holm": 1.0,
+      "p_signflip": 0.7535246475352465,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 1.5,
+      "ci95_low_pp": 0.0,
+      "comparison": "Recorded - Detach",
+      "difference_pp": 0.5,
+      "method": "P3",
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 8.0,
+      "ci95_low_pp": -2.0,
+      "comparison": "Continue - Frozen",
+      "difference_pp": 3.0,
+      "method": "P0",
+      "p_holm": null,
+      "p_signflip": 0.32286771322867713,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 4.0,
+      "ci95_low_pp": -6.0,
+      "comparison": "Detach - Continue",
+      "difference_pp": -1.0,
+      "method": "P0",
+      "p_holm": 1.0,
+      "p_signflip": 0.8436156384361564,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 3.0,
+      "ci95_low_pp": -4.0,
+      "comparison": "Recorded - Detach",
+      "difference_pp": -0.5,
+      "method": "P0",
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 0.5,
+      "ci95_low_pp": -14.499999999999998,
+      "comparison": "Continue - Frozen",
+      "difference_pp": -7.000000000000001,
+      "method": "P3",
+      "p_holm": null,
+      "p_signflip": 0.09659034096590341,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 9.5,
+      "ci95_low_pp": -5.0,
+      "comparison": "Detach - Continue",
+      "difference_pp": 2.0,
+      "method": "P3",
+      "p_holm": 1.0,
+      "p_signflip": 0.694030596940306,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 7.000000000000001,
+      "ci95_low_pp": -4.5,
+      "comparison": "Recorded - Detach",
+      "difference_pp": 1.5,
+      "method": "P3",
+      "p_holm": 1.0,
+      "p_signflip": 0.7373262673732627,
+      "states": 100,
+      "task": "reacher"
+    }
+  ]
+}

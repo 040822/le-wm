@@ -1,0 +1,3 @@
+task,states,candidate_pairs,latent_identifiability_coverage,predicted_true_latent_delta_cosine,latent_delta_ci95_low,latent_delta_ci95_high,cost_physical_sign_accuracy,physical_sign_ci95_low,physical_sign_ci95_high,cost_latent_sign_accuracy,shuffle_latent_p_one_sided,shuffle_physical_sign_p_one_sided,excluded_clip_incompatible_states
+pusht,49,6272,0.9969706632653061,0.1243189286627286,0.10223405394015249,0.14682562188722442,0.5157844387755102,0.49378188775510207,0.5385841836734694,0.49558128737754886,0.000999000999000999,0.025974025974025976,1
+reacher,50,6400,1.0,0.4398066338931376,0.3783972488291739,0.5011489251077367,0.59203125,0.55390625,0.63125,0.59609375,0.000999000999000999,0.000999000999000999,0

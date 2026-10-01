@@ -62,6 +62,11 @@ The joint objective is
 \end{equation}
 where latent regularization follows LeWM~\cite{maes2026lewm}, with $\lambda_B=1$ and $\lambda_R=0.09$ in the current configuration. A/B embedding targets retain encoder gradients. The core model trains A and B only; latent-path generation, inverse dynamics extensions, and online updates are outside its main formulation.
 
+\paragraph{Recorded-action controls.}
+Recorded-control preserves the mixture mask, time condition, and weighting, but replaces B inputs with recorded actions. Recorded-clean instead fixes B inputs to recorded actions, its condition to one, and weights to one.
+
+B-only removes the A objective and uses clean recorded-action supervision. Joint versus Recorded-control changes input exposure and the action-mediated gradient together; only a complete detached contrast separates them.
+
 \subsection{Selection and refinement under a decision budget}
 \label{sec:planning}
 For fixed $z_0,z_g$, define the terminal goal cost

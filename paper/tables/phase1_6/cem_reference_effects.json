@@ -1,0 +1,204 @@
+{
+  "rows": [
+    {
+      "ci95_high_pp": 23.5,
+      "ci95_low_pp": 10.5,
+      "comparison": "P3 - P2 CEM (300x30)",
+      "difference_pp": 16.5,
+      "p_holm": 0.0015998400159984002,
+      "p_signflip": 9.999000099990002e-05,
+      "states": 100,
+      "task": "cube"
+    },
+    {
+      "ci95_high_pp": 17.5,
+      "ci95_low_pp": 7.000000000000001,
+      "comparison": "P3 - P2-small CEM (64x5)",
+      "difference_pp": 12.0,
+      "p_holm": 0.0015998400159984002,
+      "p_signflip": 9.999000099990002e-05,
+      "states": 100,
+      "task": "cube"
+    },
+    {
+      "ci95_high_pp": 23.0,
+      "ci95_low_pp": 10.5,
+      "comparison": "P3+PO - P2 CEM (300x30)",
+      "difference_pp": 16.5,
+      "p_holm": 0.0015998400159984002,
+      "p_signflip": 9.999000099990002e-05,
+      "states": 100,
+      "task": "cube"
+    },
+    {
+      "ci95_high_pp": 17.5,
+      "ci95_low_pp": 7.000000000000001,
+      "comparison": "P3+PO - P2-small CEM (64x5)",
+      "difference_pp": 12.0,
+      "p_holm": 0.0015998400159984002,
+      "p_signflip": 9.999000099990002e-05,
+      "states": 100,
+      "task": "cube"
+    },
+    {
+      "ci95_high_pp": 6.0,
+      "ci95_low_pp": -1.5,
+      "comparison": "P3 - P2 CEM (300x30)",
+      "difference_pp": 2.0,
+      "p_holm": 1.0,
+      "p_signflip": 0.43345665433456654,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 4.5,
+      "ci95_low_pp": -1.5,
+      "comparison": "P3 - P2-small CEM (64x5)",
+      "difference_pp": 1.5,
+      "p_holm": 1.0,
+      "p_signflip": 0.5022497750224978,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 5.0,
+      "ci95_low_pp": -5.0,
+      "comparison": "P3+PO - P2 CEM (300x30)",
+      "difference_pp": 0.0,
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 4.0,
+      "ci95_low_pp": -5.5,
+      "comparison": "P3+PO - P2-small CEM (64x5)",
+      "difference_pp": -0.5,
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "pusht"
+    },
+    {
+      "ci95_high_pp": 4.5,
+      "ci95_low_pp": -7.000000000000001,
+      "comparison": "P3 - P2 CEM (300x30)",
+      "difference_pp": -1.5,
+      "p_holm": 1.0,
+      "p_signflip": 0.7341265873412659,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 12.0,
+      "ci95_low_pp": 0.0,
+      "comparison": "P3 - P2-small CEM (64x5)",
+      "difference_pp": 6.0,
+      "p_holm": 0.782021797820218,
+      "p_signflip": 0.0710928907109289,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 4.0,
+      "ci95_low_pp": -5.5,
+      "comparison": "P3+PO - P2 CEM (300x30)",
+      "difference_pp": -1.0,
+      "p_holm": 1.0,
+      "p_signflip": 0.841015898410159,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 12.5,
+      "ci95_low_pp": 0.5,
+      "comparison": "P3+PO - P2-small CEM (64x5)",
+      "difference_pp": 6.5,
+      "p_holm": 0.7127287271272873,
+      "p_signflip": 0.059394060593940604,
+      "states": 100,
+      "task": "reacher"
+    },
+    {
+      "ci95_high_pp": 0.0,
+      "ci95_low_pp": -1.5,
+      "comparison": "P3 - P2 CEM (300x30)",
+      "difference_pp": -0.5,
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "tworoom"
+    },
+    {
+      "ci95_high_pp": 0.0,
+      "ci95_low_pp": -1.5,
+      "comparison": "P3 - P2-small CEM (64x5)",
+      "difference_pp": -0.5,
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "tworoom"
+    },
+    {
+      "ci95_high_pp": 0.0,
+      "ci95_low_pp": 0.0,
+      "comparison": "P3+PO - P2 CEM (300x30)",
+      "difference_pp": 0.0,
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "tworoom"
+    },
+    {
+      "ci95_high_pp": 0.0,
+      "ci95_low_pp": 0.0,
+      "comparison": "P3+PO - P2-small CEM (64x5)",
+      "difference_pp": 0.0,
+      "p_holm": 1.0,
+      "p_signflip": 1.0,
+      "states": 100,
+      "task": "tworoom"
+    },
+    {
+      "ci95_high_pp": 6.5,
+      "ci95_low_pp": 1.7500000000000002,
+      "comparison": "P3 - P2 CEM (300x30)",
+      "difference_pp": 4.124999999999999,
+      "p_holm": null,
+      "p_signflip": null,
+      "states": 400,
+      "task": "equal-task macro"
+    },
+    {
+      "ci95_high_pp": 6.875000000000001,
+      "ci95_low_pp": 2.6250000000000004,
+      "comparison": "P3 - P2-small CEM (64x5)",
+      "difference_pp": 4.75,
+      "p_holm": null,
+      "p_signflip": null,
+      "states": 400,
+      "task": "equal-task macro"
+    },
+    {
+      "ci95_high_pp": 6.25,
+      "ci95_low_pp": 1.5000000000000002,
+      "comparison": "P3+PO - P2 CEM (300x30)",
+      "difference_pp": 3.875,
+      "p_holm": null,
+      "p_signflip": null,
+      "states": 400,
+      "task": "equal-task macro"
+    },
+    {
+      "ci95_high_pp": 6.875000000000001,
+      "ci95_low_pp": 2.125,
+      "comparison": "P3+PO - P2-small CEM (64x5)",
+      "difference_pp": 4.5,
+      "p_holm": null,
+      "p_signflip": null,
+      "states": 400,
+      "task": "equal-task macro"
+    }
+  ]
+}
