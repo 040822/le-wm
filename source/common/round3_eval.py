@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -60,11 +61,13 @@ def validate_gpu_visibility(device: str) -> None:
 
 
 def validate_round3_config(
-    cfg: Any, *, allow_solver_budget_overrides: bool = False
+    cfg: Any,
+    *,
+    allow_solver_budget_overrides: bool = False,
+    allow_evaluation_seed_override: bool = False,
 ) -> None:
     """Reject evaluation drift except for explicit guidance solver budgets."""
     expected = {
-        "seed": ROUND3_EVAL_DEFAULTS["seed"],
         "eval.goal_offset_steps": ROUND3_EVAL_DEFAULTS["goal_offset_steps"],
         "eval.eval_budget": ROUND3_EVAL_DEFAULTS["eval_budget"],
         "plan_config.horizon": ROUND3_EVAL_DEFAULTS["horizon"],
@@ -75,6 +78,8 @@ def validate_round3_config(
         "solver.topk": ROUND3_EVAL_DEFAULTS["topk"],
         "solver.var_scale": ROUND3_EVAL_DEFAULTS["var_scale"],
     }
+    if not allow_evaluation_seed_override:
+        expected["seed"] = ROUND3_EVAL_DEFAULTS["seed"]
     allowed = (
         {"solver.num_samples", "solver.topk"}
         if allow_solver_budget_overrides
@@ -99,9 +104,46 @@ def _result_infos(step_result: Any) -> Any:
     return step_result
 
 
+@contextmanager
+def _video_slot_limit(max_slots: int | None):
+    """Limit dataset-driven example videos without changing evaluated slots."""
+    if max_slots is None:
+        yield
+        return
+    from stable_worldmodel.world import world as world_module
+
+    original = world_module.save_panel_videos
+
+    def save_limited(video_dir, panels, fps=15):
+        limited = {}
+        for name, values in panels.items():
+            if isinstance(values, dict):
+                limited[name] = {
+                    key: value for key, value in values.items() if int(key) < int(max_slots)
+                }
+            else:
+                limited[name] = values[: int(max_slots)]
+        return original(video_dir, limited, fps=fps)
+
+    world_module.save_panel_videos = save_limited
+    try:
+        yield
+    finally:
+        world_module.save_panel_videos = original
+
+
 def _parameters(cfg: Any, manifest: CohortManifest, *, save_video: bool) -> dict[str, Any]:
     return {
         "seed": int(cfg.seed),
+        "environment_seed": int(cfg.seed),
+        "cohort_sampling_seed": int(manifest.seed),
+        "policy_seed": int(
+            OmegaConf.select(
+                cfg,
+                "eval.policy_seed",
+                default=OmegaConf.select(cfg, "solver.seed", default=cfg.seed),
+            )
+        ),
         "num_eval": len(manifest.entries),
         "goal_offset_steps": int(cfg.eval.goal_offset_steps),
         "eval_budget": int(cfg.eval.eval_budget),
@@ -117,6 +159,22 @@ def _parameters(cfg: Any, manifest: CohortManifest, *, save_video: bool) -> dict
         "solver": OmegaConf.to_container(cfg.solver, resolve=True),
         "save_video": bool(save_video),
     }
+
+
+def _attach_cem_archive_callback(policy: Any, cfg: Any):
+    """Attach candidate capture only when the policy config has a CEM budget."""
+    iterations = OmegaConf.select(cfg, "solver.n_steps")
+    topk = OmegaConf.select(cfg, "solver.topk")
+    if iterations is None or topk is None:
+        return None
+
+    from .cvpr_table1 import attach_cem_archive_callback
+
+    return attach_cem_archive_callback(
+        policy,
+        iterations=int(iterations),
+        topk=int(topk),
+    )
 
 
 def _bind_episode_identity(
@@ -142,6 +200,148 @@ def _bind_episode_identity(
     return bound
 
 
+class _PlanningEventTap(_PolicyTap):
+    """Measure a complete policy call and record which live slots replanned."""
+
+    def __init__(self, policy: Any, *, device: str):
+        super().__init__(policy)
+        self.device = str(device)
+        self.events: list[dict[str, Any]] = []
+
+    def _active_slots(self, info_dict) -> list[int]:
+        count = int(getattr(getattr(self.policy, "env", None), "num_envs", 1))
+        terminated = info_dict.get("terminated") if isinstance(info_dict, dict) else None
+        dead = (
+            np.asarray(terminated, dtype=bool)
+            if terminated is not None
+            else np.zeros(count, dtype=bool)
+        )
+        flush_value = info_dict.get("_needs_flush") if isinstance(info_dict, dict) else None
+        flush = (
+            np.asarray(flush_value, dtype=bool)
+            if flush_value is not None
+            else np.zeros(count, dtype=bool)
+        )
+        buffers = getattr(self.policy, "_action_buffer", None)
+        if buffers is None:
+            return [index for index in range(min(count, len(dead))) if not dead[index]]
+        return [
+            index
+            for index in range(min(count, len(dead), len(buffers)))
+            if not dead[index] and (flush[index] or not buffers[index])
+        ]
+
+    def _algorithm_events(self, before: dict[str, int]) -> list[dict[str, Any]]:
+        sources = []
+        direct = getattr(self.policy, "planning_events", None)
+        if isinstance(direct, list):
+            sources.append(("policy", direct))
+        cem_capture = getattr(self.policy, "cvpr_cem_capture", None)
+        cem_events = getattr(cem_capture, "events", None)
+        if isinstance(cem_events, list):
+            sources.append(("policy.cvpr_cem_capture", cem_events))
+        solver = getattr(self.policy, "solver", None)
+        for name in ("events", "planning_events"):
+            value = getattr(solver, name, None)
+            if isinstance(value, list):
+                sources.append((f"solver.{name}", value))
+        underlying = getattr(solver, "_solver", None)
+        value = getattr(underlying, "planning_events", None)
+        if isinstance(value, list):
+            sources.append(("solver._solver.planning_events", value))
+        result = []
+        seen = set()
+        for source, values in sources:
+            if id(values) in seen:
+                continue
+            seen.add(id(values))
+            start = before.get(source, 0)
+            result.extend(
+                {"source": source, "source_index": index, **dict(event)}
+                for index, event in enumerate(values[start:], start=start)
+            )
+        return result
+
+    def _call(self, fn, *args, **kwargs):
+        info_dict = args[0] if args else kwargs.get("info_dict", {})
+        active = self._active_slots(info_dict)
+        if not active:
+            action = fn(*args, **kwargs)
+            self.last_action = action
+            return action
+        solver = getattr(self.policy, "solver", None)
+        before = {}
+        for source, value in (
+            ("policy", getattr(self.policy, "planning_events", None)),
+            (
+                "policy.cvpr_cem_capture",
+                getattr(getattr(self.policy, "cvpr_cem_capture", None), "events", None),
+            ),
+            ("solver.events", getattr(solver, "events", None)),
+            ("solver.planning_events", getattr(solver, "planning_events", None)),
+            (
+                "solver._solver.planning_events",
+                getattr(getattr(solver, "_solver", None), "planning_events", None),
+            ),
+        ):
+            if isinstance(value, list):
+                before[source] = len(value)
+        if self.device.startswith("cuda"):
+            import torch
+
+            torch.cuda.synchronize(self.device)
+        started = time.perf_counter()
+        action = fn(*args, **kwargs)
+        if self.device.startswith("cuda"):
+            import torch
+
+            torch.cuda.synchronize(self.device)
+        elapsed = time.perf_counter() - started
+        self.events.append(
+            {
+                "event_index": len(self.events),
+                "replan_indices": [int(index) for index in active],
+                "environment_batch_size": len(active),
+                "wall_seconds": float(elapsed),
+                "algorithm_events": self._algorithm_events(before),
+            }
+        )
+        self.last_action = action
+        return action
+
+    def get_action(self, *args, **kwargs):
+        return self._call(self.policy.get_action, *args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        call = self.policy if callable(self.policy) else self.policy.get_action
+        return self._call(call, *args, **kwargs)
+
+
+def _bind_planning_events(records, events):
+    counts = [0 for _ in records]
+    indices = [[] for _ in records]
+    amortized = [0.0 for _ in records]
+    for event in events:
+        slots = [int(index) for index in event["replan_indices"]]
+        active = max(1, len(slots))
+        for slot in slots:
+            if 0 <= slot < len(records):
+                counts[slot] += 1
+                indices[slot].append(int(event["event_index"]))
+                amortized[slot] += float(event["wall_seconds"]) / active
+    for index, record in enumerate(records):
+        record["episode_replan_count"] = counts[index]
+        record["episode_replan_event_indices"] = indices[index]
+        record["episode_amortized_planning_seconds"] = amortized[index]
+    return {
+        "planning_events": events,
+        "batch_replan_count": len(events),
+        "batch_planning_wall_seconds": float(
+            sum(float(event["wall_seconds"]) for event in events)
+        ),
+    }
+
+
 def run_round3_evaluation(
     cfg: Any,
     *,
@@ -156,18 +356,24 @@ def run_round3_evaluation(
     trace: bool = True,
     allow_solver_budget_overrides: bool = False,
     planning_timing: bool = False,
+    allow_evaluation_seed_override: bool = False,
+    allow_cohort_seed_mismatch: bool = False,
+    timing_capture_callback: Callable[..., dict[str, Any]] | None = None,
+    video_slots: int | None = None,
 ) -> dict[str, Any]:
     """Run one registered weight and publish a Phase 1 result plus trace."""
     device = str(device or cfg.solver.get("device", "cuda"))
     validate_gpu_visibility(device)
     validate_round3_config(
-        cfg, allow_solver_budget_overrides=allow_solver_budget_overrides
+        cfg,
+        allow_solver_budget_overrides=allow_solver_budget_overrides,
+        allow_evaluation_seed_override=allow_evaluation_seed_override,
     )
     expected_count = int(cfg.eval.num_eval)
     validate_cohort_manifest(manifest, task=task, expected_count=expected_count)
     if int(cfg.eval.goal_offset_steps) != int(manifest.goal_offset_steps):
         raise ValueError("evaluation goal offset differs from the frozen cohort")
-    if int(cfg.seed) != int(manifest.seed):
+    if not allow_cohort_seed_mismatch and int(cfg.seed) != int(manifest.seed):
         raise ValueError("evaluation seed differs from the frozen cohort")
 
     policy_identity = {
@@ -208,6 +414,8 @@ def run_round3_evaluation(
         cohort=manifest.to_evaluation_cohort(),
     )
     policy = session._build_policy(policy_or_model, identity, device)
+    if timing_capture_callback is None:
+        _attach_cem_archive_callback(policy, cfg)
     if planning_timing and hasattr(policy, "solver"):
         # Reuse the Round 4 timing seam so LeWM's reference measurement uses
         # the same synchronized CEM boundary as the Fast-LeWAM conditions.
@@ -255,7 +463,13 @@ def run_round3_evaluation(
             normalized_action_bounds=action_bounds,
         )
     try:
-        world.set_policy(_PolicyTap(policy))
+        if timing_capture_callback is not None:
+            from .round4_eval import _FirstActionTimingTap
+
+            world.set_policy(_FirstActionTimingTap(policy, timing_capture_callback))
+        else:
+            policy_tap = _PlanningEventTap(policy, device=device)
+            world.set_policy(policy_tap)
         if collector is not None and envs is not None and hasattr(envs, "step"):
             original_step = envs.step
             step_counter = {"value": 0}
@@ -272,15 +486,27 @@ def run_round3_evaluation(
 
             envs.step = traced_step
         started = time.perf_counter()
-        metrics = evaluate_from_dataset_compat(
-            world=world,
-            dataset=session.dataset,
-            eval_start_idx=session.cohort.start_steps,
-            eval_episodes=session.cohort.episode_ids,
-            cfg=cfg,
-            video_path=video_dir,
-            save_video=save_video,
-        )
+        try:
+            with _video_slot_limit(video_slots if save_video else None):
+                metrics = evaluate_from_dataset_compat(
+                    world=world,
+                    dataset=session.dataset,
+                    eval_start_idx=session.cohort.start_steps,
+                    eval_episodes=session.cohort.episode_ids,
+                    cfg=cfg,
+                    video_path=video_dir,
+                    save_video=save_video,
+                )
+        except Exception as exc:
+            from .round4_eval import _TimingCaptureComplete
+
+            if not isinstance(exc, _TimingCaptureComplete):
+                raise
+            return {
+                "status": "timing_capture",
+                "timing_capture": exc.result,
+                "policy_metadata": dict(getattr(policy, "metadata", lambda: {})()),
+            }
         elapsed = time.perf_counter() - started
     finally:
         if envs is not None and original_step is not None:
@@ -311,6 +537,11 @@ def run_round3_evaluation(
             for index, entry in enumerate(manifest.entries)
         ]
     episode_records = _bind_episode_identity(episode_records, manifest)
+    batch_planning = (
+        _bind_planning_events(episode_records, policy_tap.events)
+        if trace and timing_capture_callback is None
+        else {"planning_events": [], "batch_replan_count": 0, "batch_planning_wall_seconds": 0.0}
+    )
     trace_records = episode_records if raw_trace_records is not None else None
     base = {
         "task": task,
@@ -326,6 +557,7 @@ def run_round3_evaluation(
         "success_rate": float(successes.mean()),
         "runtime_success_rate_percent": float(metrics["success_rate"]),
         "episodes": episode_records,
+        **batch_planning,
     }
     payload = enrich_result_payload(
         base,
@@ -334,6 +566,9 @@ def run_round3_evaluation(
         trace_records=trace_records,
     )
     payload["neutral_hold_diagnostic"] = neutral_hold_diagnostic
+    cem_capture = getattr(policy, "cvpr_cem_capture", None)
+    if cem_capture is not None:
+        payload["cem_candidate_archive"] = cem_capture.events
     if planning_timing:
         from .round4_eval import _planning_summary
 

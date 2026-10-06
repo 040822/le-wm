@@ -1,0 +1,58 @@
+% Source: cvpr_table3_paper_report.md; existing v2 results, no new experiments.
+% Requires \usepackage{booktabs}. Each table fits a single-column layout.
+% Bold in 3a denotes the better point estimate; dagger denotes Holm p < .05.
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llccc}
+\toprule
+Task & Scorer & $\rho\uparrow$ & Hit@5 (\%)$\uparrow$ & Regret$\downarrow$ \\
+\midrule
+Reacher & LeWM & $.204\pm.042$ & $9.0\pm3.7$ & $.0671\pm.0048$ \\
+& CoWM-B & $\mathbf{.255\pm.037}$ & $\mathbf{11.7\pm4.8}$ & $\mathbf{.0583\pm.0087}^{\dagger}$ \\
+\midrule
+PushT & LeWM & $.056\pm.022$ & $\mathbf{12.3\pm5.0}$ & $\mathbf{.2587\pm.0273}$ \\
+& CoWM-B & $\mathbf{.069\pm.027}$ & $11.7\pm2.3$ & $.2800\pm.0484$ \\
+\bottomrule
+\end{tabular}
+\caption{Candidate ranking on a shared pool of 64 actions per state (300 states per task). Values are mean $\pm$ SD across six evaluation seeds. Bold denotes the better point estimate; $\dagger$ indicates a paired difference from LeWM with Holm-adjusted $p<.05$ ($p=.021$). Random Hit@5 is 7.8\% on both tasks. Costs use joint-position L2 in radians for Reacher and $\max(\text{position L2}/20\,\text{px},\text{wrapped angle}/(\pi/9))$ for PushT; the position term includes agent and object XY. Outcomes are measured at native termination or the step-25 budget endpoint, so execution lengths can differ from the scorers' fixed prediction horizon.}
+\label{tab:table3a_reacher_pusht}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llccc}
+\toprule
+Task & Method & $\Delta c\uparrow$ & Improved (\%)$\uparrow$ & $N/300$ \\
+\midrule
+Reacher & LeWM-PO & $+.0103\pm.0053$ & $59.9\pm6.2$ & 166 \\
+& CoWM-PO & $+.0154\pm.0042$ & $67.7\pm5.9$ & 164 \\
+& CoWM-GF & $+.0127\pm.0026$ & $72.6\pm6.7$ & 164 \\
+\midrule
+PushT & LeWM-PO & $-.0225\pm.0397$ & $43.1\pm19.1$ & 46 \\
+& CoWM-PO & $+.0363\pm.0916$ & $68.6\pm29.9$ & 39 \\
+& CoWM-GF & $+.0229\pm.0460$ & $63.7\pm28.6$ & 41 \\
+\bottomrule
+\end{tabular}
+\caption{True action refinement. $\Delta c=c(\text{original})-c(\text{updated})$, with cost units as in Table~\ref{tab:table3a_reacher_pusht}; improved states satisfy $\Delta c>10^{-6}$. Values are mean $\pm$ SD across six evaluation seeds. $N$ counts states where both actions actually reach step 25. Methods have different valid sets; differences between these means do not establish method superiority. Early termination is excluded rather than imputed.}
+\label{tab:table3b_reacher_pusht}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lcccc}
+\toprule
+Task & Paired $\Delta c\uparrow$ & 95\% CI & $N/300$ & Holm $p$ \\
+\midrule
+Reacher & $\mathbf{+.01536}$ & $[+.00911,+.02136]$ & 164 & $\mathbf{.0015}$ \\
+PushT & $+.04340$ & $[-.00788,+.09499]$ & 39 & $1.0000$ \\
+\bottomrule
+\end{tabular}
+\caption{CoWM-PO minus amplitude-matched random refinement on jointly valid states. Random controls use five frozen directions per state, aggregated within each state. Confidence intervals use 10,000 source-episode cluster paired bootstrap resamples. Holm correction retains the original 15 estimable comparisons across four tasks. Evaluation seeds are sampling repeats, not independent training runs. The v2 endpoints and test family were defined after observing v1 and constitute a benchmark extension.}
+\label{tab:table3b_random_paired}
+\end{table}

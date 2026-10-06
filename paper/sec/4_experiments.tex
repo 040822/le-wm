@@ -1,159 +1,88 @@
 \section{Experiments}
 \label{sec:experiments}
-We ask whether joint training improves decisions, which connections account for any change, and what inference cost is required. The six comparisons below separate system performance, training, mechanisms, and deployment cost.
+Our evaluation addresses three questions: whether CoWM supports effective control, which training connections contribute to candidate evaluation and refinement, and how much decision time these capabilities require. We organize the study around system performance, coupling ablations, physical consequence diagnostics, inference choices, and success--latency trade-offs.
 
-% Fillable manuscript, not authorization to extend the experimental queue.
-% TBD means unknown; a dash means not applicable or outside the declared scope.
-\subsection{Evaluation protocol and evidence scope}
+\subsection{Experimental setup}
 \label{sec:eval_protocol}
-The benchmark covers Cube, Push-T, Reacher, and TwoRoom. Matched training focuses on Push-T and Reacher. Extension tasks are reported separately and do not change the core task set after observing results.
+\paragraph{Tasks and protocol.}
+We evaluate TwoRoom, Push-T, Reacher, and OGBench-Cube using common frozen start--goal cohorts. Goal images are 25 primitive steps after the start, and the episode budget is 50 steps. The default prediction and execution horizons are both 25 steps (five blocks of five actions), subject to early termination. CoWM uses two Euler generation steps; Selection (P3) scores 64 candidates, and Refinement (P0-PO-L) applies two post-generation updates to one proposal, with step size 0.01 and RMS offset bound 0.2. The main conditions retain native environment action handling without additional candidate clipping. Selection$^{\dagger}$ changes only Reacher to 10-step execution and scoring while retaining the same checkpoint and 25-step generation. Its other three task cells reuse Selection results.
 
-Images have resolution $224\times224$ and latents have width 192. Plans contain five blocks of five primitive actions. The controller executes the 25-step sequence before replanning, unless terminated, within a 50-step episode budget.
+\paragraph{Baselines and comparisons.}
+Table~\ref{tab:main_results} compares CoWM with LeWM using CEM~\cite{maes2026lewm}, LeFlow~\cite{huang2026leflow}, and Sub-JEPA. LeWM and Sub-JEPA use 300 CEM candidates, 30 iterations, and 30 elites. LeFlow uses 64 candidates and 16 flow steps with its paired frozen LeWM backbone. Baselines retain their native history interfaces and 25-step execution and scoring horizons. The completed scope is \PaperResult{protocol-completed-scope}. Same-actor scorer controls and training-coupling contrasts are separate studies.
 
-Goal images come from 25 primitive steps after each trajectory start. Every comparison records its cohort and goal identities; results from different start--goal distributions are not pooled.
+\paragraph{Metrics and uncertainty.}
+Success is reported as the mean and sample standard deviation ($\mathrm{ddof}=1$) across evaluation seeds 42, 100, 2026, 3407, 1234, and 4444. For the four-task average, we first average tasks within each seed and then compute the mean and standard deviation across seeds. These error bars measure evaluation-seed variation, not training-seed uncertainty or confidence intervals. Timing uses \PaperResult{appendix-timing-scope}. Table~\ref{tab:main_results} averages the four task mean latencies equally; it measures runtime-warmed initial replanning, not cached steady-state MPC or total episode time. Blue TBD fields denote remaining evidence in this working draft.
 
-Candidate selection uses Euler sampling with $S=2$ and $N=64$. Candidates are clipped to physical bounds before scoring and execution. Each scorer converts the same physical actions to its own input convention.
-
-LeWM encodes raw observations and goals using its own encoder, retains its standard history, and rolls out autoregressively. Its comparison with Joint-B is a system comparison, not an isolated test of transformer sharing.
-
-The ongoing matched study targets training seeds 3072 and 4096 at epoch 10. Completed models, evaluation counts, and data exposure are \PaperResult{protocol-completed-scope}. Additional seeds are reported only if actually completed.
-
-Training, development, and confirmation episode identities are recorded explicitly. A previously inspected confirmation set is labeled as reused; new starts from training episodes are not called training-unseen evaluation.
-
-Effects pair common starts and account for repeated inference and training seeds. Primary comparisons are Joint-B versus LeWM and Joint-B versus B-only; the actual task/contrast correction family is \PaperResult{protocol-test-family}.
-
-Tables with blue TBD entries reserve incomplete results. They do not assert completed runs or positive effects. Dashes identify entries outside the declared comparison; completed negative results remain in the tables.
-
-\subsection{Overall performance against planning baselines}
+\subsection{Closed-loop performance}
 \label{sec:overall}
-Table~\ref{tab:main_results} compares deployed systems on the same task protocol. The baseline roster follows the benchmark plan; implementations, data access, search budgets, and completed training counts accompany each row.
-
+Table~\ref{tab:main_results} reports the six declared system configurations. Success and latency are measured separately: success evaluation batches 50 environments, whereas latency uses a single environment.
 \begin{table*}[t]
-\centering\small
-\input{tables/final_main}
-\caption{Closed-loop success (\%) for the declared benchmark. TBD entries await protocol-matched results; they must not be filled from a different cohort. Macro averages use a common task set. Counts and training seeds are specified in the text.}
+\centering\scriptsize
+\resizebox{\textwidth}{!}{\input{tables/final_main}}
+\caption{Closed-loop success (\%, mean $\pm$ sample standard deviation across six evaluation seeds, 50 episodes per seed) and mean initial full-replanning latency. One fixed checkpoint is used per method and task. Average success is aggregated within each seed before computing its standard deviation; latency is the equally weighted mean of four task means on an RTX 4090. $\dagger$: only Reacher uses 10/10-step execution/scoring; other task cells reuse Selection. All other rows use 25/25 steps. Refinement is P0-PO-L with two updates. These are declared operating points, not equal-time comparisons.}
 \label{tab:main_results}
 \end{table*}
+CoWM-Selection achieves 96.25\% average success, compared with 96.17\% for LeFlow, 85.17\% for Sub-JEPA, and 79.92\% for LeWM. Its mean initial replanning latency is 29.88\,ms, versus 51.43\,ms for LeFlow and 625.67\,ms for LeWM (ratios of 1.72 and 20.94, respectively). The 0.08 percentage-point success difference from LeFlow is descriptive and does not establish superiority. Refinement reaches 94.50\% at 45.23\,ms, below Selection's success at higher latency. Selection$^{\dagger}$ raises Reacher success from 88.33\% to 100.00\% and the four-task average to 99.17\%, but changes the control horizon. More frequent replanning can increase episode computation even though its mean initial call costs 29.53\,ms. These system comparisons do not isolate a training-coupling effect.
 
-The same-actor A+LeWM row isolates scorer replacement; LeWM search is a separate deployed planner. P0 tests direct use of the jointly trained actor and is not an independently trained A-only baseline.
-
-The paired P3 minus A+LeWM effect is \PaperResult{main-scorer-effect}, with interval \PaperResult{main-scorer-ci}.
-
-The effect against the declared search reference is \PaperResult{main-search-effect}, with interval \PaperResult{main-search-ci}.
-
-The per-task and per-seed interpretation is \PaperResult{main-interpretation}. A pooled mean does not establish a uniform task advantage or equivalence when an interval crosses zero.
-
-\subsection{What does joint training contribute?}
+\subsection{Contribution of training coupling}
 \label{sec:training_results}
-The matched comparison uses a common initialization and data schedule for same-architecture arms. Encoder and projector remain trainable. Table~\ref{tab:training_results} separates same-actor scoring from each arm's direct policy.
-
+We distinguish parameter sharing, action-input exposure, and the gradient through the action input. \emph{Separate-Recorded} trains two DiT backbones using recorded actions for B; \emph{Shared-Recorded} shares the DiT with the same supervision. Their encoder-sharing setting and capacity are reported explicitly. \emph{Shared-Pred-Detach} mixes A estimates into B but stops their gradient, while \emph{Shared-Pred-Full} retains it. A-only and B-only provide single-task references. Table~\ref{tab:training_results} combines the configuration definitions with system and fixed-input measurements.
 \begin{table*}[t]
-\centering\small
-\input{tables/final_training}
-\caption{Complete-training results on Push-T and Reacher. Same-A P3 uses one locked actor per seed. Own-A P0 measures each trained actor without scoring; it is inapplicable to B-only. These cells exclude frozen-representation short interventions.}
+\centering\scriptsize
+\resizebox{\textwidth}{!}{\input{tables/final_training}}
+\caption{Coupling ablation template, instantiated per task and training seed. Own-A measures each configuration's actor; common-pool regret and executed refinement use fixed physical actions to compare dynamics models. Dashes are inapplicable entries. Pending conditional controls are not completed experiments.}
 \label{tab:training_results}
 \end{table*}
+For an input-only contrast, the recorded-input and detached-input arms must have identical timestep conditioning, loss weights, mixing masks, and training schedules apart from the action source. Full versus Detach isolates the additional action-mediated gradient. Sharing contrasts keep encoder sharing fixed and report both capacity and resource differences. Legacy Recorded-control and Recorded-clean runs differ in conditioning or weighting; their mapping and limitations are retained in the supplement. Their results are not silently relabeled as pure input ablations.
 
-Joint versus Recorded-control changes estimated-action exposure and its gradient path together. It estimates the combined effect under matched masks, timesteps, and weights; it cannot attribute the difference to either connection alone.
+Own-A comparisons measure the complete trained system, whereas common proposals isolate its ability to evaluate or refine given actions. The supported training effect is \PaperResult{training-interpretation}. Separate parameter, input, and gradient effects are reported only for completed matched contrasts. Resource measurements in the supplement distinguish total and active parameters, training time and memory, and complete decision latency.
 
-Recorded-clean versus B-only tests the added action objective under clean recorded-action supervision. Recorded-control versus Recorded-clean changes time conditioning and sample weights jointly.
-
-The primary Joint-B minus B-only effect is \PaperResult{training-joint-bonly-effect}, with interval \PaperResult{training-joint-bonly-ci}. Joint minus Recorded-control is \PaperResult{training-joint-recorded-effect}.
-
-The clean-supervision comparison yields \PaperResult{training-clean-bonly-effect}. Its interpretation is \PaperResult{training-interpretation}. All effects retain their task and seed identities.
-
-If a complete Pred-Detach contrast is available, it separates input exposure from the action-mediated gradient. A double-DiT contrast can test sharing. Otherwise these mechanisms remain unresolved; the supplement records their scope.
-
-The earlier 1,000-update experiment froze the representation and found no reliable coupling benefit. It is preserved in the supplement as a path intervention, not substituted for this full-training comparison.
-
-\subsection{Do predicted consequences support decisions?}
+\subsection{Candidate evaluation and executed refinement}
 \label{sec:ranking}
-\paragraph{Candidate ranking.}
-Table~\ref{tab:ranking_results} compares scorers on restored states and a fixed pool of 64 physical action sequences. All scorers receive the same candidates and outcomes.
-
-The pool's actor, checkpoint, state count, and valid branches are \PaperResult{ranking-pool-scope}.
-
+\paragraph{Common-pool ranking.}
+For each restored state, we generate a fixed pool of physical action sequences and execute each sequence to obtain its true task outcome. Every scorer receives the same pool. Pool coverage measures whether any candidate succeeds; selected success measures whether the scorer finds a successful candidate. For a task-specific physical cost $c$, regret is $c(\mathbf a^{\rm selected})-\min_i c(\mathbf a^{(i)})$. We additionally report Spearman correlation between predicted and physical costs. Pool identity, horizon, and valid-state counts are \PaperResult{ranking-pool-scope}.
 \begin{table*}[t]
 \centering\small
-\input{tables/final_ranking}
-\caption{Common-pool decision metrics. Coverage is the fraction of states with a successful candidate; random success averages candidate outcomes. Top-1 measures the selected branch. Regret uses task-specific physical units. Continuous metrics do not imply success gains.}
+\textbf{(a) Common-pool candidate ranking}\\[3pt]
+\input{tables/final_ranking}\\[7pt]
+\textbf{(b) Executed action refinement}\\[3pt]
+\resizebox{0.97\textwidth}{!}{\input{tables/final_refinement}}
+\caption{Decision diagnostics, repeated per task. (a) Common-pool coverage is shared across scorers. The physical-cost oracle has zero regret by definition; its success can differ from a success-based oracle. (b) Real cost decrease is measured by executing original and updated actions from the same state. Misleading updates lower predicted cost but worsen physical cost. Closed-loop success is a separate evaluation.}
 \label{tab:ranking_results}
 \end{table*}
+The selected-success difference between CoWM-B and LeWM is \PaperResult{ranking-topone-effect}, and their regret difference is \PaperResult{ranking-regret-effect}. Their relation to closed-loop control is \PaperResult{ranking-interpretation}. Pool coverage and ranking are kept separate because a better generator can improve coverage without improving the scorer.
 
-Joint-B minus LeWM top-1 success is \PaperResult{ranking-topone-effect}; physical regret differs by \PaperResult{ranking-regret-effect}. The corresponding closed-loop effect is \PaperResult{ranking-closed-loop-effect}.
+\paragraph{Physical effect of refinement.}
+PO starts from identical proposals for each model. An equal-RMS random perturbation controls for the size of the action change after legal action handling. GF is compared with its unguided generation trajectory using the same initial noise. We report true cost decrease, the fraction of improved states, and the fraction where a predicted improvement worsens the true outcome. A single-step GF update that equals PO is not counted as independent evidence. The physical effect is \PaperResult{guidance-real-effect}, and the corresponding closed-loop effect is \PaperResult{guidance-closed-loop-effect}.
 
-These endpoints distinguish candidate availability from selection quality. Their agreement or separation is \PaperResult{ranking-interpretation}. The oracle is restricted to the sampled pool and 25-step diagnostic horizon.
+\paragraph{Physical readouts.}
+Frozen linear and MLP readouts measure which physical quantities can be recovered from observed latents. The main Cube analysis covers eight robot, end-effector, gripper, and block attributes; matched auxiliary probes cover TwoRoom, Push-T, and Reacher. These readouts do not measure future-state prediction quality, and they do not establish that a scorer ranks or refines actions well. Full observed-latent results and target definitions are in the supplement; predicted-latent evaluation remains a separate extension.
 
-Current evidence is mixed. One epoch-2 locked pool favors Joint-B in continuous ranking on both tasks, but does not establish higher original-B closed-loop success.
-
-The epoch-10 Push-T development pool does not reproduce that ranking advantage.
-
-The epoch-10 development P3 check gives Joint-B/LeWM success of 94/95\% on Push-T and 25/16\% on Reacher; both paired intervals include zero. These checks are distinct from the pending multi-seed final comparison.
-
-\paragraph{Executed refinement.}
-PO/GF are compared with the same initial proposal and an equal-RMS random direction after legal action handling. We report physical change and the fraction of predicted improvements that worsen executed outcomes.
-
-The fixed-checkpoint Push-T test favors PO over random by 43.6 distance units; Reacher's interval crosses zero. Completed model-level repetition gives \PaperResult{guidance-real-effect}, with \PaperResult{guidance-valid-count} valid states.
-
-The exploitation rate is \PaperResult{guidance-exploitation-rate}; the closed-loop PO minus P0 effect is \PaperResult{guidance-closed-loop-effect}. Local improvement and policy improvement are reported separately.
-
-\subsection{Physical readouts of observed and predicted latents}
-\label{sec:physical_probe}
-Table~\ref{tab:physical_probe} compares frozen ridge and small-MLP readouts. Models use the same protocol; a readout fitted on observed features is frozen before evaluating predicted futures.
-
-\begin{table*}[t]
-\centering\small
-\input{tables/final_probe}
-\caption{Cube physical readout errors under a common protocol; lower is better. Units and target fields are reported per quantity. Unsupported or unmeasured optional quantities use a dash. World-model and readout seeds are counted separately.}
-\label{tab:physical_probe}
-\end{table*}
-
-Cube position is the current probe target; velocity and orientation rows are conditional on available measurements. Strong position readout alone cannot establish accurate dynamics or correction of other physical quantities.
-
-The observed-latent difference is \PaperResult{probe-observed-effect}; the predicted-future difference is \PaperResult{probe-predicted-effect}. Their relation to the decision results is \PaperResult{probe-interpretation}.
-
-Readout trajectory exclusions do not retroactively establish unseen world-model training data. Prediction errors and readout distribution shift both contribute to errors on predicted latents.
-
-\subsection{Selection versus refinement and search}
+\subsection{Selection, refinement, and search}
 \label{sec:inference_results}
-Table~\ref{tab:inference_results} compares decision interfaces within a model. A uniform random choice from the same 64 proposals controls for actor quality and candidate generation cost.
-
-\begin{table*}[t]
-\centering\small
-\input{tables/final_inference}
-\caption{Inference comparison. The measured reference uses one epoch-10 training seed and 100 new starts per task, each with two inference seeds. Pending matched-training rows have their own reported counts and must not be pooled with the reference.}
+With a fixed CoWM checkpoint, we compare direct execution, random choice from the same proposal pool, selection, PO, GF, and random- or actor-initialized CEM. Table~\ref{tab:inference_results} specifies their computation controls. Random-N versus P3 tests the usefulness of scoring with proposal quality held fixed. P0 versus PO/GF tests refinement of direct generation. These inference comparisons do not by themselves establish a benefit from joint training.
+\begin{table}[t]
+\centering\scriptsize
+\resizebox{\columnwidth}{!}{\input{tables/final_inference}}
+\caption{Fixed-checkpoint inference interfaces, repeated per task. $N$ is pool size or candidates per CEM round, $S$ is generation steps, $I$ is CEM rounds, and $K$ is total refinement updates. Numeric configurations are reported with each result.}
 \label{tab:inference_results}
-\end{table*}
+\end{table}
+Selection relative to random choice yields \PaperResult{inference-selection-effect}, with interval \PaperResult{inference-selection-ci}. Refinement relative to direct execution yields \PaperResult{inference-refinement-effect}. The selected operating point is \PaperResult{inference-operating-point}; a method is not chosen separately on each test task after observing its result.
 
-In the fixed-checkpoint reference, P3 minus Random-64 is +2.0 points (95\% interval [0.4, 3.6]). Reacher has the largest estimate, but its task-family Holm $p=0.169$; uniform selection improvement is not established.
-
-Reference macro effects are +1.4 points for PO minus P0 and $-$0.4 for GF minus PO; both intervals include zero. One-step GF reduces to the PO update rule and is not treated as an independent mechanism.
-
-The matched-training P3 minus Random-64 effect is \PaperResult{inference-selection-effect}, with interval \PaperResult{inference-selection-ci}. PO minus P0 is \PaperResult{inference-refinement-effect}.
-
-The selected operating point and its supported scope are \PaperResult{inference-operating-point}. Settings are locked using development data; final results do not reopen a larger hyperparameter search.
-
-\subsection{Success and inference cost}
+\subsection{Success under a decision-time budget}
 \label{sec:efficiency}
-Table~\ref{tab:efficiency_results} pairs measured success with isolated policy-call latency. Timing includes image encoding, action generation/conversion, scoring, history handling, and any backward or search updates.
-
+We vary candidate count, flow steps, and refinement updates, and compare against several CEM candidate/iteration budgets. Table~\ref{tab:efficiency_results} records the success--latency operating points and an equal-time comparison. Matching candidate count alone does not match computation: generation, recursive prediction, batching, and backward passes have different costs. Model-call counts are therefore reported alongside measured latency, with their batch sizes and horizons specified.
 \begin{table*}[t]
-\centering\small
-\input{tables/final_efficiency}
-\caption{Matched success--latency comparison. Latency is isolated batch-1 policy inference. Search budgets and counts are recorded. Peak device memory includes all resident weights, including unused parameters.}
+\centering\scriptsize
+\textbf{(a) Success and measured decision cost}\\[3pt]
+\resizebox{0.98\textwidth}{!}{\input{tables/final_efficiency}}\\[7pt]
+\textbf{(b) Success under a common time limit}\\[3pt]
+\resizebox{0.98\textwidth}{!}{\input{tables/final_budget}}
+\caption{Decision-budget comparison, instantiated for each task. Panel (a) retains small and large search budgets. Panel (b) selects configurations on development data under a common latency criterion and reports final success and overruns. Pending fields do not assert an achieved speedup.}
 \label{tab:efficiency_results}
 \end{table*}
+For each time limit, configurations are selected using development measurements and then evaluated without retuning. If admission uses p95 latency, the limit is a statistical criterion rather than a hard deadline; actual overruns are reported. The matched-budget result is \PaperResult{draft-budget-result}. A complementary comparison reports the minimum measured latency to reach a prespecified success threshold, with unattained thresholds marked explicitly.
 
-The measured single-seed reference gives P3 p50 of 16.4--21.3 ms versus 138.1--144.4 ms for 300-by-30 actor-initialized CEM. The 85--88\% reduction is specific to this fixed model and search budget.
+The latency change relative to the declared search reference is \PaperResult{efficiency-latency-reduction}, and the success bounds are \PaperResult{efficiency-success-bounds}. Any claim of replacing search additionally uses the prespecified non-inferiority criteria recorded in the supplement. Parallel-prediction speed and training-coupling quality are separate hypotheses: without a matched recursive/parallel implementation control, measured acceleration is attributed to the full decision system.
 
-The smaller 64-by-5 CEM reference takes 34.6--41.7 ms. We retain this operating point alongside large-budget search; a comparison against the slowest reference alone does not characterize the trade-off.
-
-P3's Reacher one-sided success bound is $-$6.0 points, below the strict $-$4-point margin. Thus the reference confirms lower latency but fails the complete CEM replacement gate.
-
-For the declared comparison, non-inferiority requires a macro one-sided 95\% lower bound above $-$2 points and each declared task above $-$4, together with at least 20\% lower p50 latency.
-
-The final bounds are \PaperResult{efficiency-success-bounds}; latency reduction is \PaperResult{efficiency-latency-reduction}. The gate outcome is \PaperResult{efficiency-gate}.
-
-Large-budget speed alone does not establish search replacement.
-
-Smaller completed search budgets are included in the trade-off. Timing failures and interference are disclosed; total rollout time, throughput, and single-environment latency are distinct measurements.
+% Optional real-robot design is in the supplement. It is not a completed result.

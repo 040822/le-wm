@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 6.2 Reacher execution-budget and replanning opportunity pre-experiment",
+  "protocol": "legacy",
+  "tasks": {
+    "reacher": {
+      "checkpoint": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "checkpoint_sha256": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553",
+      "cohort": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+      "cohort_sha256": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45",
+      "cohort_source": "Round 3 Phase 1 canonical legacy_50",
+      "action_dim": 10,
+      "existing_analysis": "outputs/round5/phase5_seed3072_legacy/analysis/analysis.json",
+      "existing_output_root": "outputs/round5/phase5_pre_report2"
+    }
+  },
+  "evaluation": {
+    "seed": 42,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "budgets": [50, 125],
+    "action_horizon_blocks": 5,
+    "action_block_env_steps": 5,
+    "execute_steps": [25, 10, 5, 1],
+    "score_steps_by_execute": {
+      "25": [25],
+      "10": [25, 10],
+      "5": [25, 10, 5],
+      "1": [25, 5]
+    },
+    "flow_steps": 2,
+    "integrator": "euler",
+    "best_of_n_candidates": 64,
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0
+  },
+  "guidance": {
+    "step_size": 0.01,
+    "last_steps": 5,
+    "inner_steps": 5,
+    "max_rms_offset": 0.2,
+    "p3_proposal_chunk_size": 512
+  },
+  "timing": {
+    "warmup": 10,
+    "runs": 50,
+    "batch_sizes": [1, 50],
+    "reuse_phase5_fixed_input_benchmarks": true
+  },
+  "output_root": "outputs/round5/phase6_2",
+  "report_output": "docs/report/round5/round5_phase6_2_report.md",
+  "gpu_policy": "Prefer GPU0-3; verify free VRAM before each run. This is a low-VRAM evaluation; GPU4-7 are authorized by the experiment plan when needed. Every worker must explicitly set CUDA_VISIBLE_DEVICES."
+}

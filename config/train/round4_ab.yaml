@@ -6,9 +6,11 @@ defaults:
 
 output_model_name: r4_ab
 subdir: null
+subdir_preserve_path: false
 resume_ckpt: null
 init_weights: null
 initial_epoch: 0
+episode_split_manifest: null
 num_workers: 8
 train_split: 0.9
 seed: 3072
@@ -25,6 +27,7 @@ latent_head_layers: 6
 latent_head_dim: 192
 latent_action_mix_epochs: 10
 detach_clean_action: false
+stage_b_action_source: joint
 stage_b_timestep_mode: legacy
 token_encoding: legacy
 stage_b_dynamics: parallel_prefix
@@ -82,6 +85,16 @@ epoch_eval:
 round4_diagnostics:
   enabled: true
   output_name: round4_diagnostics.jsonl
+
+cvpr_table2:
+  enabled: false
+  task: null
+  arm: null
+  dataset_sha256:
+    tworoom: null
+    pusht: null
+    reacher: null
+    cube: null
 
 wandb:
   enabled: true

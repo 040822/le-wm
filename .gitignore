@@ -41,3 +41,4 @@ wandb
 environment*.json
 requirements_frozen*.txt
 *.png
+paper_*.zip

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 5 five native action structures",
+  "scope": {
+    "tasks": ["pusht", "reacher"],
+    "seed": 3072,
+    "structures": [
+      {"name": "5x5", "action_block_steps": 5, "action_horizon": 5},
+      {"name": "1x25", "action_block_steps": 1, "action_horizon": 25},
+      {"name": "5x1", "action_block_steps": 5, "action_horizon": 1},
+      {"name": "1x5", "action_block_steps": 1, "action_horizon": 5},
+      {"name": "1x1", "action_block_steps": 1, "action_horizon": 1}
+    ]
+  },
+  "training": {
+    "model": "R4-AB",
+    "train_mode": "stage_ab",
+    "stage_a_goal_env_steps": 25,
+    "effective_training_window_steps": 25,
+    "common_clip_storage_steps": 30,
+    "train_split": 0.9,
+    "epochs": 10,
+    "effective_batch_size": 128,
+    "optimizer": "AdamW",
+    "learning_rate": 0.00005,
+    "loss_weights": {"latent": 1.0, "sigreg": 0.09, "d": 0.0, "e": 0.0},
+    "gradient_accumulation": "effective batch divided by measured micro-batch",
+    "reuse_5x5_checkpoints": false
+  },
+  "outputs": {
+    "root": "outputs/round5_phase5_expansion_seed3072",
+    "training_sample_manifests": "outputs/round5_phase5_expansion_seed3072/manifests"
+  },
+  "gpu_policy": "Train only on explicitly selected GPU0-3; keep at least 6 GiB free."
+}

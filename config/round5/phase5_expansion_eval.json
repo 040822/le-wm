@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 5 native action structure development evaluation",
+  "stage": "native_action_structure_development_evaluation",
+  "tasks": ["pusht", "reacher"],
+  "seed": 3072,
+  "training": {
+    "state": "outputs/round5_phase5_expansion_seed3072/scheduler_state.json",
+    "identity_pattern": "outputs/round5_phase5_expansion_seed3072_{task}_{structure}/round5_phase5_training_identity.json",
+    "checkpoint_pattern": "outputs/round5_phase5_expansion_seed3072_{task}_{structure}/checkpoints/r5_phase5_seed3072_{task}_{structure}_weights_epoch_10.pt"
+  },
+  "structures": [
+    {
+      "name": "5x5",
+      "action_block_steps": 5,
+      "action_horizon": 5,
+      "execute_steps": [1, 5, 10, 25],
+      "score_steps": [5, 10, 25]
+    },
+    {
+      "name": "1x25",
+      "action_block_steps": 1,
+      "action_horizon": 25,
+      "execute_steps": [1, 5, 10, 25],
+      "score_steps": [1, 5, 10, 25]
+    },
+    {
+      "name": "5x1",
+      "action_block_steps": 5,
+      "action_horizon": 1,
+      "execute_steps": [1, 5],
+      "score_steps": [5]
+    },
+    {
+      "name": "1x5",
+      "action_block_steps": 1,
+      "action_horizon": 5,
+      "execute_steps": [1, 5],
+      "score_steps": [1, 5]
+    },
+    {
+      "name": "1x1",
+      "action_block_steps": 1,
+      "action_horizon": 1,
+      "execute_steps": [1],
+      "score_steps": [1]
+    }
+  ],
+  "cohorts": {
+    "pusht": {
+      "path": "outputs/round3/phase1/cohorts/pusht/dev_round3_revised.json",
+      "sha256": "5b3cd95037c17bc6282bdd29cab4e550aff1a5205d051b2991263a1bac937560",
+      "protocol_variant": "round3_revised"
+    },
+    "reacher": {
+      "path": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+      "sha256": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45",
+      "protocol_variant": "legacy"
+    }
+  },
+  "evaluation": {
+    "seed": 42,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "p3_candidate_count": 64,
+    "action_flow_steps": 2,
+    "action_flow_integrator": "euler",
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "action_bound_mode": "clip",
+    "trace": true,
+    "save_video": false,
+    "minimum_free_mib": 8192
+  },
+  "conditions": ["P3", "P0", "Random-64"],
+  "output_root": "outputs/round5_phase5_expansion_seed3072_eval",
+  "gpu_policy": "One evaluator per explicitly selected physical GPU. GPU4-7 are authorized for this low-VRAM evaluation; retain at least 8 GiB free."
+}

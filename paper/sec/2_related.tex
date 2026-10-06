@@ -1,61 +1,6 @@
 \section{Related Work}
 \label{sec:related}
 
-% 这里得讨论一下放的小节，四节肯定多了，最后应该是2~3节。
-% lewm：World model；jepa；planning with latent dynamics
-% leflow：latent world model；Amortized planning and inverse dynamics；Generative models for trajectory planning
-% DeWM：Latent world model； Spatial Representations for Robotic Dynamics；Flow Matching for Latent Dynamics
-% Fast LeWM：Latent world models for planning；Reconstruction-Free Visual Dynamics
-% Sub Jepa：Latent world model；JEPA and End-to-End Training；Anti-Collapse Regularization；Subspace Methods and Random Projections
-
-% 补充调研（2026-09-26）：以下为所链接原文版本的标题，也包括未编号的段首标题。
-% DINO-WM：Model-based Learning；Generative Models as World Models；Pretrained Visual Representations
-% https://arxiv.org/html/2411.04983v2
-% V-JEPA 2：World models and planning；Vision-Language-Action models for Robotic Control；Vision Foundation Models
-% https://arxiv.org/html/2506.09985v1
-% UWM：Imitation Learning；Learning from Videos；Unified Inference
-% https://arxiv.org/html/2504.02792v3
-% FLARE：Generative World Models for Robotics；Vision Language Action Models；Learning from Egocentric Videos
-% https://arxiv.org/html/2505.15659v1
-% Fast-WAM：Vision-Language-Action Policies；World Action Models and Video-based Robot Policies
-% https://arxiv.org/html/2603.16666v2
-% Faster-WAM：Vision-Language-Action Models；World Action Models
-% https://arxiv.org/html/2608.04404v1
-% tau_0-WM：Robotic Video Action Models；Action-Conditioned Video Simulators for Robotics
-% https://arxiv.org/html/2606.01027v2
-
-% 本次结构讨论（2026-09-26）：
-% 1. 前提：CVPR 正文篇幅紧张时，related work 是优先压缩部分；从初稿起预留合并路径。
-% 2. 采用三个短段落：Latent World Models for Visual Planning；
-%    Generative Models for Planning；Joint Learning of Dynamics and Actions（第二标题按下方后续讨论收窄）。
-%    依次交代预测/规划基础、候选生成与模型引导、动作与动力学的联合学习。
-% 3. 第三段略长，优先保留与最近邻工作的具体比较，因为当前论文主线是训练耦合。
-%    Joint Learning of Dynamics and Actions 比 World--Action Models 更直接点明比较轴，
-%    也能容纳 FLARE 这样的未来表征辅助策略学习工作。
-% 4. 新增 UWM 和 FLARE：前者关联统一模型的策略/动力学接口，后者关联动作 flow 与未来表征共训。
-%    区分联合训练的价值与推理时使用预测器的价值；不预设更强耦合一定更好。
-% 5. Physical representation versus decision utility 不独立成节。
-%    LeWM 的物理 probe 在第一段简述；状态可读性、预测准确性、排序/修正效果的区分
-%    留给实验动机和分析展开。JEPA、防坍塌正则、flow matching 也不各自独立成节。
-% 6. 初稿预算约 350--450 个英文词；压缩版约 250--300 词，实际占页以编译为准。
-%    压缩顺序：通用背景/技术原理 -> 合并同类工作的逐篇介绍 -> 将实验动机和细节归位 -> 合并标题。
-%    两段版保留 Latent World Models for Visual Planning，第二、三段合并为
-%    Generative Planning and World--Action Models；内部仍按生成 -> 模型引导 -> 联合学习组织。
-% 7. 每段用简短的正面定位说明 CoWM 研究什么，避免重复“不宣称某某创新”的防御性表述。
-%    候选选择、梯度修正、并行预测都有前例；区别落在具体训练连接及其决策效果的受控研究。
-%    比较时仍需区分监督、预训练、任务接口和决策预算，不能由相关工作直接推断性能优势。
-
-% 后续定位与 baseline 讨论（2026-09-26）：
-% 用户澄清：工作最初从 LeWM 出发，主比较围绕 LeWM-like 的视觉目标规划。
-% Intro 据此改为预测/搜索成本 -> 学习动作提议 -> 提议器与预测器如何共同训练。
-% 第二标题从 Generative Policies and Trajectory Planning 收窄为 Generative Models for Planning，
-% DP 仅作为动作生成的技术背景简述，主要篇幅用于 LeFlow、FlowMPC 等生成式规划近邻。
-% 引用 DP 不自动意味着需要新增 DP baseline；实验范围应由具体主张决定。
-% A-only 已有 round1 E2（Fast Stage-A only，lambda_latent=0），是纯 goal-conditioned actor 对照；
-% 见 docs/report/round1_experiment_report.md。用户说明后续会增加进一步实验。
-% A-only 独立训练与联合训练模型推理时只用 A 的 P0 回答不同问题；不应把 A-only 写成完全未做。
-% 历史 E2 结果与当前协议下的进一步匹配比较需分别说明；此处不新增 DP 实验承诺。
-
 \paragraph{Latent World Models for Visual Planning.}
 Latent world models support visual planning by predicting the consequences of candidate actions in a learned representation space. DINO-WM predicts pretrained visual features and searches for actions that bring predicted futures toward an image goal~\cite{zhou2024dinowm}. LeWM jointly learns representations and dynamics from pixels using latent prediction and a Gaussian-distribution regularizer; its physical probes also examine information recoverable from the learned latents~\cite{maes2026lewm}. Fast LeWorldModel replaces recursive rollout with parallel prediction conditioned on action prefixes~\cite{gao2026fastlewm}. CoWM builds on these latent prediction principles and couples the predictor with a learned action generator, studying how their training connections affect decisions made using predicted futures.
 
@@ -63,4 +8,4 @@ Latent world models support visual planning by predicting the consequences of ca
 Learning trajectory proposals can amortize part of the search required by world-model planning. Diffusion Policy illustrates generative action-sequence modeling~\cite{chi2023diffusion}, while flow matching provides a framework for training conditional generators~\cite{lipman2022flow}. Within latent world-model planning, LeFlow learns a flow-based trajectory prior, decodes latent transitions through inverse dynamics, and ranks the resulting candidates using a frozen world model~\cite{huang2026leflow}. FlowMPC uses a flow policy to propose actions for world-model-based MPPI planning~\cite{hamel2026flowmpc}. CoWM instead learns direct action proposals together with a parallel latent predictor and uses predicted consequences for candidate selection or bounded refinement. We study how this joint training affects the resulting planning interface and its success--latency trade-off.
 
 \paragraph{Joint Learning of Dynamics and Actions.}
-Joint models connect action learning with future prediction through shared representations and training objectives. UWM couples action and video diffusion in a unified transformer, using independent diffusion timesteps to support policy and dynamics inference~\cite{zhu2025uwm}. FLARE combines action flow matching with future latent representation alignment, focusing on policy co-training and leaving planning as a potential extension~\cite{zheng2025flare}. Fast-WAM studies the contributions of video co-training and test-time future generation~\cite{yuan2026fastwam}, while Faster-WAM retains future conditioning through efficient video--action interaction~\cite{zhao2026fasterwam}. Beyond action generation, $\tau_0$-WM uses predicted futures to evaluate and rectify proposals~\cite{zhou2026tauwm}. These works motivate distinguishing the training benefits of future prediction from its use during inference. CoWM examines this distinction in a compact, image-goal-conditioned latent model by separating parameter sharing, predicted-action inputs, and gradients through those inputs. Its controlled comparisons ask which connections improve candidate ranking and action refinement under a limited decision budget.
+Joint models connect action learning with future prediction through shared representations and training objectives. UWM couples action and video diffusion in a unified transformer, using independent diffusion timesteps to support policy and dynamics inference~\cite{zhu2025uwm}. FLARE combines action flow matching with future latent representation alignment, focusing on policy co-training and leaving planning as a potential extension~\cite{zheng2025flare}. Fast-WAM studies the contributions of video co-training and test-time future generation~\cite{yuan2026fastwam}, while Faster-WAM retains future conditioning through efficient video--action interaction~\cite{zhao2026fasterwam}. Beyond action generation, $\tau_0$-WM uses predicted futures to evaluate and rectify proposals~\cite{zhou2026tauwm}. These works motivate distinguishing the training benefits of future prediction from its use during inference. CoWM examines this distinction in a compact, image-goal-conditioned latent model by separating parameter-sharing coupling, action-input coupling, and action-mediated gradient coupling. Its controlled comparisons ask which connections improve candidate ranking and action refinement under a limited decision budget.

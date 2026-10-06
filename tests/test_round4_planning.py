@@ -11,6 +11,7 @@ from source.policy.round4 import (
     score_candidates_in_chunks,
 )
 from source.policy.fast_lewam_eval import ProjectedCEMSolver
+from source.common.cvpr_table3_bridge import make_state_indexed_schedules
 from omegaconf import OmegaConf
 from tests.test_round4_model import make_round4_model
 
@@ -485,6 +486,135 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(policy.metadata()["selection_rule"], "first")
         self.assertEqual(policy.metadata()["verifier"], "none")
 
+    def test_random_candidate_mode_uses_independent_seeded_selection_rng(self):
+        model = make_round4_model().eval()
+        first = Round4BestOfNPolicy(
+            model,
+            proposal_source="action",
+            num_candidates=64,
+            flow_steps=2,
+            action_block=1,
+            receding_horizon_blocks=5,
+            verifier="none",
+            selection_rule="random",
+            seed=42,
+        )
+        second = Round4BestOfNPolicy(
+            make_round4_model().eval(),
+            proposal_source="action",
+            num_candidates=64,
+            flow_steps=2,
+            action_block=1,
+            receding_horizon_blocks=5,
+            verifier="none",
+            selection_rule="random",
+            seed=42,
+        )
+        device = next(model.parameters()).device
+        proposal_rng_first = first._generator(device)
+        proposal_rng_second = second._generator(device)
+        selected_first = torch.randint(
+            64, (10,), generator=first._selection_generator(device), device=device
+        )
+        selected_second = torch.randint(
+            64, (10,), generator=second._selection_generator(device), device=device
+        )
+        self.assertTrue(torch.equal(selected_first, selected_second))
+        proposal_draw_first = torch.randn(10, generator=proposal_rng_first, device=device)
+        proposal_draw_second = torch.randn(10, generator=proposal_rng_second, device=device)
+        self.assertTrue(torch.equal(proposal_draw_first, proposal_draw_second))
+
+    def test_state_indexed_schedule_replays_same_pool_and_random_choice(self):
+        noise_schedule, selection_schedule, metadata = make_state_indexed_schedules(
+            task="cube", evaluation_seed=42, policy_seed=20042
+        )
+        keys = ((3, 0), (7, 1))
+        noise = noise_schedule(
+            keys,
+            num_candidates=4,
+            action_horizon=5,
+            action_dim=4,
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+        )
+        repeated_noise = noise_schedule(
+            keys,
+            num_candidates=4,
+            action_horizon=5,
+            action_dim=4,
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+        )
+        self.assertTrue(torch.equal(noise, repeated_noise))
+        self.assertFalse(torch.equal(noise[0], noise[1]))
+        self.assertEqual(
+            selection_schedule(keys, num_candidates=64, device="cpu").tolist(),
+            selection_schedule(keys, num_candidates=64, device="cpu").tolist(),
+        )
+        self.assertEqual(metadata["version"], "cvpr_table3_state_indexed_schedule_v1")
+
+        policy = Round4BestOfNPolicy(
+            make_round4_model().eval(),
+            proposal_source="action",
+            num_candidates=4,
+            flow_steps=2,
+            action_block=1,
+            receding_horizon_blocks=5,
+            candidate_noise_schedule=noise_schedule,
+        )
+        policy._active_schedule_keys = ((3, 0),)
+        z_start, z_goal = torch.randn(1, 8), torch.randn(1, 8)
+        first, _ = policy._propose_actions(
+            z_start, z_goal, torch.Generator().manual_seed(1)
+        )
+        second, _ = policy._propose_actions(
+            z_start, z_goal, torch.Generator().manual_seed(999)
+        )
+        self.assertTrue(torch.equal(first, second))
+
+    def test_state_indexed_selection_tracks_each_slots_replan_count(self):
+        class FakeEnv:
+            num_envs = 2
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(2, 4))
+
+        noise_schedule, selection_schedule, _metadata = make_state_indexed_schedules(
+            task="reacher", evaluation_seed=100, policy_seed=20100
+        )
+        policy = Round4BestOfNPolicy(
+            make_round4_model().eval(),
+            proposal_source="action",
+            num_candidates=8,
+            flow_steps=2,
+            action_block=1,
+            receding_horizon_blocks=1,
+            verifier="none",
+            selection_rule="random",
+            candidate_noise_schedule=noise_schedule,
+            selection_index_schedule=selection_schedule,
+        )
+        policy.set_env(FakeEnv())
+        info = {
+            "pixels": torch.randn(2, 1, 3, 8, 8),
+            "goal": torch.randn(2, 1, 3, 8, 8),
+            "terminated": np.asarray([False, False]),
+        }
+        policy.get_action(info)
+        first = policy.planning_events[-1]
+        self.assertEqual(first["state_indexed_schedule_keys"], [[0, 0], [1, 0]])
+        expected_first = selection_schedule(
+            ((0, 0), (1, 0)), num_candidates=8, device="cpu"
+        ).tolist()
+        self.assertEqual(first["selected_indices"], expected_first)
+
+        policy.get_action(info)
+        second = policy.planning_events[-1]
+        self.assertEqual(second["state_indexed_schedule_keys"], [[0, 1], [1, 1]])
+        expected_second = selection_schedule(
+            ((0, 1), (1, 1)), num_candidates=8, device="cpu"
+        ).tolist()
+        self.assertEqual(second["selected_indices"], expected_second)
+
     def test_policy_executes_one_receding_action_block_and_records_plan_metadata(self):
         class FakeEnv:
             num_envs = 1
@@ -672,6 +802,53 @@ class Round4PlanningTests(unittest.TestCase):
         self.assertEqual(tuple(events[0]["costs"].shape), (1, 4))
         self.assertEqual(tuple(events[0]["z_start"].shape), (1, 8))
         self.assertEqual(tuple(events[0]["predicted_latents"].shape[:3]), (1, 4, 5))
+
+    def test_p3_uses_separate_verifier_for_costs_and_predictions(self):
+        class FakeEnv:
+            num_envs = 1
+            single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(4,))
+            action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, 4))
+
+        proposal = make_round4_model().eval()
+        verifier = make_round4_model().eval()
+        with torch.no_grad():
+            verifier.latent_head.bias.add_(1.0)
+        events = []
+        policy = make_round4_policy(
+            proposal,
+            verifier_policy_or_model=verifier,
+            mode="P3",
+            plan_config={"horizon": 5, "receding_horizon": 5, "action_block": 1},
+            device="cpu",
+            action_flow_steps=2,
+            candidate_count=4,
+            diagnostic_callback=events.append,
+        )
+        policy.set_env(FakeEnv())
+        policy.get_action(
+            {
+                "pixels": torch.randn(1, 1, 3, 8, 8),
+                "goal": torch.randn(1, 1, 3, 8, 8),
+            }
+        )
+
+        event = events[0]
+        self.assertTrue(policy.metadata()["separate_verifier_model"])
+        expected_costs = verifier.get_cost_from_latents(
+            event["verifier_z_start"],
+            event["verifier_z_goal"],
+            event["candidates"],
+        )
+        torch.testing.assert_close(event["costs"], expected_costs)
+        expected_latents = verifier(
+            event["verifier_z_start"][:, None]
+            .expand(-1, event["candidates"].shape[1], -1)
+            .reshape(-1, verifier.latent_dim),
+            event["candidates"].reshape(-1, verifier.action_horizon, verifier.action_dim),
+            torch.ones(event["candidates"].shape[1]),
+            mode="stage_b",
+        )["predicted_latents"].reshape(1, 4, 5, -1)
+        torch.testing.assert_close(event["predicted_latents"], expected_latents)
 
     def test_p0_guidance_callback_pairs_same_initial_noise(self):
         class FakeEnv:

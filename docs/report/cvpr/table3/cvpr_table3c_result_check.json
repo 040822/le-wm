@@ -1,0 +1,90 @@
+{
+  "status": "pass",
+  "checked_at": "2026-10-05",
+  "tasks": {
+    "cube": {
+      "status": "pass",
+      "recomputed_final_readouts": 64,
+      "recomputed_paired_bootstrap_intervals": 32,
+      "hashes": {
+        "features.npz": "678a85ca80d49d154f60fa36c03aebc04cdfce91897d4ace8bc2c4ea8b1008b6",
+        "test_predictions.npz": "77e77a0a57c7082b639c4db6e17b84075c6aa2ed655b0757c4fd8ebb0f5e939a",
+        "row_manifest.csv": "d5e180f18407d841558b3fd1c85cf9257defad039cbba5e7a02357f65207d01f"
+      },
+      "frames": {
+        "train": 80000,
+        "validation": 10000,
+        "test": 10000
+      },
+      "episodes": {
+        "train": 800,
+        "validation": 100,
+        "test": 100
+      }
+    },
+    "tworoom": {
+      "status": "pass",
+      "recomputed_final_readouts": 8,
+      "recomputed_paired_bootstrap_intervals": 4,
+      "hashes": {
+        "features.npz": "35897b1642471981db7e875f53a2fe2421d90fb50a99b29b1fb244e75e3158a1",
+        "test_predictions.npz": "c9a94e227e14fed20e14823fdcf06ad47160059e780d1e7014c222bed698326d",
+        "row_manifest.csv": "8650dda8f33229f74705cb1861fc8ee69b9fbe169e73cb25fcbecb092f1a7746"
+      },
+      "frames": {
+        "train": 73175,
+        "validation": 8919,
+        "test": 9250
+      },
+      "episodes": {
+        "train": 800,
+        "validation": 100,
+        "test": 100
+      }
+    },
+    "pusht": {
+      "status": "pass",
+      "recomputed_final_readouts": 24,
+      "recomputed_paired_bootstrap_intervals": 12,
+      "hashes": {
+        "features.npz": "4d0de097884f007f345099d008b6a448970b967db41fc3d8fb2d6129dcbebe33",
+        "test_predictions.npz": "f099fdc61f93c35497d5221f0721002942e8adf84fdd4e039385746b8a9da252",
+        "row_manifest.csv": "670e86299733a1634d3ea9b15f52cf2464b040661266b0e1de0c020e7b9702b5"
+      },
+      "frames": {
+        "train": 75644,
+        "validation": 9261,
+        "test": 9402
+      },
+      "episodes": {
+        "train": 800,
+        "validation": 100,
+        "test": 100
+      }
+    },
+    "reacher": {
+      "status": "pass",
+      "recomputed_final_readouts": 16,
+      "recomputed_paired_bootstrap_intervals": 8,
+      "hashes": {
+        "features.npz": "fadeaf23abdcdb8b61158fd211a23992da5fcc5fd73a7c6a5851befe0afe7ba3",
+        "test_predictions.npz": "a224bf1b68292669796d073c2fdfd97b0e2fcc004b7bee69c28fd2a13a4dddf5",
+        "row_manifest.csv": "d5e180f18407d841558b3fd1c85cf9257defad039cbba5e7a02357f65207d01f"
+      },
+      "frames": {
+        "train": 80000,
+        "validation": 10000,
+        "test": 10000
+      },
+      "episodes": {
+        "train": 800,
+        "validation": 100,
+        "test": 100
+      }
+    }
+  },
+  "main_table_cells_match": true,
+  "linear_ci_table_matches": true,
+  "rotation_table_matches": true,
+  "scope": "CPU recomputation from persisted predictions; no encoder extraction, fitting, GPU experiment, or full dataset/checkpoint hash rerun"
+}

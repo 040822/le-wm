@@ -1,15 +1,16 @@
-\begin{tabular}{llrrrrr}
+\begin{tabular}{llrrrrl}
 \toprule
-Task & Planner / budget & Success (\%) & p50 (ms) & p95 (ms) & Peak MiB & A/B calls \\
+Planner & $N/S/I/K$ & SR $\uparrow$ & p50 ms $\downarrow$ & p95 ms $\downarrow$ & Peak MiB $\downarrow$ & Fwd/bwd calls \\
 \midrule
-Push-T & CoWM P3, $N=64$ & \PaperResult{eff-joint-pusht-sr} & \PaperResult{eff-joint-pusht-p50} & \PaperResult{eff-joint-pusht-p95} & \PaperResult{eff-joint-pusht-memory} & \PaperResult{eff-joint-pusht-calls} \\
- & Same A + LeWM, $N=64$ & \PaperResult{eff-lewm-pusht-sr} & \PaperResult{eff-lewm-pusht-p50} & \PaperResult{eff-lewm-pusht-p95} & \PaperResult{eff-lewm-pusht-memory} & \PaperResult{eff-lewm-pusht-calls} \\
- & Search, \PaperResult{eff-search-budget} & \PaperResult{eff-search-pusht-sr} & \PaperResult{eff-search-pusht-p50} & \PaperResult{eff-search-pusht-p95} & \PaperResult{eff-search-pusht-memory} & \PaperResult{eff-search-pusht-calls} \\
- & Smaller search, \PaperResult{eff-small-budget} & \PaperResult{eff-small-pusht-sr} & \PaperResult{eff-small-pusht-p50} & \PaperResult{eff-small-pusht-p95} & \PaperResult{eff-small-pusht-memory} & \PaperResult{eff-small-pusht-calls} \\
-\midrule
-Reacher & CoWM P3, $N=64$ & \PaperResult{eff-joint-reacher-sr} & \PaperResult{eff-joint-reacher-p50} & \PaperResult{eff-joint-reacher-p95} & \PaperResult{eff-joint-reacher-memory} & \PaperResult{eff-joint-reacher-calls} \\
- & Same A + LeWM, $N=64$ & \PaperResult{eff-lewm-reacher-sr} & \PaperResult{eff-lewm-reacher-p50} & \PaperResult{eff-lewm-reacher-p95} & \PaperResult{eff-lewm-reacher-memory} & \PaperResult{eff-lewm-reacher-calls} \\
- & Search, \PaperResult{eff-search-budget} & \PaperResult{eff-search-reacher-sr} & \PaperResult{eff-search-reacher-p50} & \PaperResult{eff-search-reacher-p95} & \PaperResult{eff-search-reacher-memory} & \PaperResult{eff-search-reacher-calls} \\
- & Smaller search, \PaperResult{eff-small-budget} & \PaperResult{eff-small-reacher-sr} & \PaperResult{eff-small-reacher-p50} & \PaperResult{eff-small-reacher-p95} & \PaperResult{eff-small-reacher-memory} & \PaperResult{eff-small-reacher-calls} \\
+LeWM + CEM, small & \PaperResult{draft-eff-cem-small-config} & \PaperResult{draft-eff-cem-small-sr} & \PaperResult{draft-eff-cem-small-p50} & \PaperResult{draft-eff-cem-small-p95} & \PaperResult{draft-eff-cem-small-memory} & \PaperResult{draft-eff-cem-small-calls} \\
+LeWM + CEM, medium & \PaperResult{draft-eff-cem-medium-config} & \PaperResult{draft-eff-cem-medium-sr} & \PaperResult{draft-eff-cem-medium-p50} & \PaperResult{draft-eff-cem-medium-p95} & \PaperResult{draft-eff-cem-medium-memory} & \PaperResult{draft-eff-cem-medium-calls} \\
+LeWM + CEM, reference & \PaperResult{draft-eff-cem-reference-config} & \PaperResult{draft-eff-cem-reference-sr} & \PaperResult{draft-eff-cem-reference-p50} & \PaperResult{draft-eff-cem-reference-p95} & \PaperResult{draft-eff-cem-reference-memory} & \PaperResult{draft-eff-cem-reference-calls} \\
+Same A + LeWM & \PaperResult{draft-eff-same-a-lewm-config} & \PaperResult{draft-eff-same-a-lewm-sr} & \PaperResult{draft-eff-same-a-lewm-p50} & \PaperResult{draft-eff-same-a-lewm-p95} & \PaperResult{draft-eff-same-a-lewm-memory} & \PaperResult{draft-eff-same-a-lewm-calls} \\
+CoWM P0 & \PaperResult{draft-eff-p0-config} & \PaperResult{draft-eff-p0-sr} & \PaperResult{draft-eff-p0-p50} & \PaperResult{draft-eff-p0-p95} & \PaperResult{draft-eff-p0-memory} & \PaperResult{draft-eff-p0-calls} \\
+CoWM P3, small & \PaperResult{draft-eff-p3-small-config} & \PaperResult{draft-eff-p3-small-sr} & \PaperResult{draft-eff-p3-small-p50} & \PaperResult{draft-eff-p3-small-p95} & \PaperResult{draft-eff-p3-small-memory} & \PaperResult{draft-eff-p3-small-calls} \\
+CoWM P3, medium & \PaperResult{draft-eff-p3-medium-config} & \PaperResult{draft-eff-p3-medium-sr} & \PaperResult{draft-eff-p3-medium-p50} & \PaperResult{draft-eff-p3-medium-p95} & \PaperResult{draft-eff-p3-medium-memory} & \PaperResult{draft-eff-p3-medium-calls} \\
+CoWM P3, large & \PaperResult{draft-eff-p3-large-config} & \PaperResult{draft-eff-p3-large-sr} & \PaperResult{draft-eff-p3-large-p50} & \PaperResult{draft-eff-p3-large-p95} & \PaperResult{draft-eff-p3-large-memory} & \PaperResult{draft-eff-p3-large-calls} \\
+CoWM PO & \PaperResult{draft-eff-po-config} & \PaperResult{draft-eff-po-sr} & \PaperResult{draft-eff-po-p50} & \PaperResult{draft-eff-po-p95} & \PaperResult{draft-eff-po-memory} & \PaperResult{draft-eff-po-calls} \\
+CoWM GF & \PaperResult{draft-eff-gf-config} & \PaperResult{draft-eff-gf-sr} & \PaperResult{draft-eff-gf-p50} & \PaperResult{draft-eff-gf-p95} & \PaperResult{draft-eff-gf-memory} & \PaperResult{draft-eff-gf-calls} \\
 \bottomrule
 \end{tabular}

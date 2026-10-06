@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 6.2 Reacher baseline budget sweep",
+  "task": "reacher",
+  "cohort": {
+    "path": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+    "sha256": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45",
+    "episodes": 50,
+    "seed": 42,
+    "goal_offset_steps": 25
+  },
+  "seed_policy": {
+    "environment_seed_offset": 10000,
+    "policy_seed_offset": 20000
+  },
+  "protocol": {
+    "baseline_budget": 50,
+    "budgets": [60, 75, 90, 110],
+    "execute_steps": 25,
+    "score_steps": 25,
+    "plan_horizon_blocks": 5,
+    "action_block_env_steps": 5,
+    "tail_policy": "execute only remaining environment steps; never round budget upward"
+  },
+  "methods": {
+    "cowm": {
+      "label": "CoWM-Selection",
+      "policy_kind": "fast_lewam",
+      "checkpoint": "outputs/cvpr/table1/v1/assets/cowm/reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "checkpoint_sha256": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553",
+      "baseline_result": "outputs/cvpr/table1/v1/runs/cowm_p3__main__reacher__seed_42/attempt_002/result.json",
+      "settings": {
+        "mode": "P3",
+        "candidate_count": 64,
+        "action_flow_steps": 2,
+        "action_flow_integrator": "euler",
+        "action_bound_mode": "none",
+        "guidance_mode": "none",
+        "solver_batch_size": 1,
+        "candidate_batch_size": 64,
+        "proposal_chunk_size": 512
+      }
+    },
+    "lewm": {
+      "label": "LeWM",
+      "policy_kind": "lewm",
+      "checkpoint": "outputs/lewm/reacher/0721_/checkpoints/lewm_weights_epoch_10.pt",
+      "checkpoint_sha256": "b675ee4fb6cbdcb694bec720b0e44cbe087f63eb0890cc02cf6b181d6ad9b04b",
+      "baseline_result": "outputs/round5/phase5_baseline_horizons/lewm/25_25/result.json",
+      "settings": {
+        "native_solver": "CEM",
+        "num_samples": 300,
+        "iterations": 30,
+        "topk": 30,
+        "warm_start": true
+      }
+    },
+    "leflow": {
+      "label": "LeFlow",
+      "policy_kind": "leflow",
+      "checkpoint": "data/checkpoints/leflow/reacher/latent_planner.pt",
+      "checkpoint_sha256": "b591caa70ffde7b88b72f00066e9db9e0d91bbf63046ea87d5ec8c338e425106",
+      "baseline_result": "outputs/round5/phase5_baseline_horizons/leflow/25_25/result.json",
+      "settings": {
+        "native_sampler_candidates": 64,
+        "native_flow_steps": 16
+      }
+    }
+  },
+  "resources": {
+    "preferred_gpus": [0, 1, 2, 3],
+    "minimum_free_vram_mib": 12288,
+    "maximum_workers_per_gpu": 1,
+    "cuda_visible_devices_required": true
+  },
+  "output_root": "outputs/round5/phase6_2_baseline_budgets"
+}

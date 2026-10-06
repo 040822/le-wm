@@ -1,7 +1,8 @@
 """面向环境的 Fast-LeWAM Stage A、B、C 推理 policy 适配器。"""
 
-from collections import deque
+import hashlib
 import time
+from collections import deque
 from typing import Callable
 
 import hydra
@@ -25,6 +26,24 @@ _STAGE_B_Z0 = "_fast_lewam_stage_b_z0"
 _STAGE_B_GOAL = "_fast_lewam_stage_b_goal"
 _STAGE_B_CONTEXT_PIXELS = "_fast_lewam_stage_b_context_pixels"
 _STAGE_B_CONTEXT_GOAL = "_fast_lewam_stage_b_context_goal"
+_PHASE6_1_LATENT_NOISE = "_phase6_1_latent_noise"
+
+
+def _phase6_latent_noise(info_dict):
+    """Read one shared latent-noise path from a planning context, if present."""
+    value = info_dict.get(_PHASE6_1_LATENT_NOISE)
+    if not torch.is_tensor(value):
+        return None
+    if value.ndim == 5:
+        return value[:, 0, 0]
+    if value.ndim == 4:
+        return value[:, 0]
+    if value.ndim == 3:
+        return value
+    raise ValueError(
+        "Phase 6.1 latent noise must be [B,H,D] or candidate-expanded, "
+        f"got {tuple(value.shape)}"
+    )
 
 
 def _sync(device: torch.device) -> None:
@@ -170,15 +189,29 @@ def _finish_bound_metric_accumulator(
 class StageBModelView(nn.Module):
     """仅暴露 latent cost 的 Stage B 模型视图，阻止 solver 调用 actor warm start。"""
 
-    def __init__(self, model):
+    def __init__(self, model, *, score_horizon_blocks=None):
         """保存底层 FastLeWAM 模型，但不转发其动作生成接口。"""
         super().__init__()
         self.model = model
+        self.score_horizon_blocks = (
+            None
+            if score_horizon_blocks is None
+            else int(score_horizon_blocks)
+        )
+        if self.score_horizon_blocks is not None and not 1 <= self.score_horizon_blocks <= int(model.action_horizon):
+            raise ValueError(
+                "score_horizon_blocks must be in "
+                f"[1,{int(model.action_horizon)}], got {self.score_horizon_blocks}"
+            )
 
     def get_cost(self, info_dict, action_candidates):
         """Reuse one exactly-matching visual context across CEM iterations."""
         if action_candidates.ndim != 4:
-            return self.model.get_cost(info_dict, action_candidates)
+            return self.model.get_cost(
+                info_dict,
+                action_candidates,
+                score_horizon_blocks=self.score_horizon_blocks,
+            )
         batch, samples = action_candidates.shape[:2]
         pixels = info_dict.get("pixels")
         goal = info_dict.get("goal")
@@ -193,7 +226,11 @@ class StageBModelView(nn.Module):
             and goal.stride(1) == 0
         )
         if not shared_observations:
-            return self.model.get_cost(info_dict, action_candidates)
+            return self.model.get_cost(
+                info_dict,
+                action_candidates,
+                score_horizon_blocks=self.score_horizon_blocks,
+            )
 
         current = self.model._last_frame(pixels[:, 0])
         goal_frame = self.model._last_frame(goal[:, 0])
@@ -219,7 +256,11 @@ class StageBModelView(nn.Module):
             if goal_latent.ndim == 3:
                 goal_latent = goal_latent[:, 0]
             return self.model.get_cost_from_latents(
-                z0, goal_latent, action_candidates
+                z0,
+                goal_latent,
+                action_candidates,
+                score_horizon_blocks=self.score_horizon_blocks,
+                latent_noise=_phase6_latent_noise(info_dict),
             )
 
         z0 = self.model.encode_pixels(current)
@@ -229,7 +270,13 @@ class StageBModelView(nn.Module):
         info_dict[_STAGE_B_GOAL] = goal_latent
         info_dict[_STAGE_B_CONTEXT_PIXELS] = current.detach().clone()
         info_dict[_STAGE_B_CONTEXT_GOAL] = goal_frame.detach().clone()
-        return self.model.get_cost_from_latents(z0, goal_latent, action_candidates)
+        return self.model.get_cost_from_latents(
+            z0,
+            goal_latent,
+            action_candidates,
+            score_horizon_blocks=self.score_horizon_blocks,
+            latent_noise=_phase6_latent_noise(info_dict),
+        )
 
 
 class ProjectedCEMSolver:
@@ -543,8 +590,9 @@ class ActorWarmStartModelView(StageBModelView):
         guidance_last_steps=5,
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
+        score_horizon_blocks=None,
     ):
-        super().__init__(model)
+        super().__init__(model, score_horizon_blocks=score_horizon_blocks)
         self.seed = int(seed)
         self.inference_steps = inference_steps
         self.action_scale = float(action_scale)
@@ -568,6 +616,8 @@ class ActorWarmStartModelView(StageBModelView):
         self.guidance_max_rms_offset = float(guidance_max_rms_offset)
         self.action_bounds = None
         self.last_action_bound_projection = None
+        self.last_warm_start_stats = {}
+        self.timing_mode = False
         self._generators = {}
 
     def set_action_bounds(self, bounds: NormalizedActionBounds):
@@ -589,11 +639,15 @@ class ActorWarmStartModelView(StageBModelView):
             self.action_bounds,
             mode=self.action_projection,
         )
-        self.last_action_bound_projection = _projection_summary(
-            actions,
-            projected,
-            self.action_bounds,
-            mode=self.action_projection,
+        self.last_action_bound_projection = (
+            None
+            if self.timing_mode
+            else _projection_summary(
+                actions,
+                projected,
+                self.action_bounds,
+                mode=self.action_projection,
+            )
         )
         return projected
 
@@ -635,6 +689,12 @@ class ActorWarmStartModelView(StageBModelView):
                 guidance_last_steps=self.guidance_last_steps,
                 guidance_inner_steps=self.guidance_inner_steps,
                 guidance_max_rms_offset=self.guidance_max_rms_offset,
+                score_horizon_blocks=self.score_horizon_blocks,
+                collect_guidance_diagnostics=not self.timing_mode,
+                latent_noise=_phase6_latent_noise(info),
+            )
+            self.last_warm_start_stats = dict(
+                getattr(self.model, "last_guidance_stats", {})
             )
             return self._project_actions(actions * self.action_scale)
 
@@ -668,6 +728,8 @@ class FastLeWAMStageBPolicy(swm.policy.WorldModelPolicy):
         fast_model,
         action_block,
         action_bound_mode="none",
+        execute_steps=None,
+        latent_noise_schedule=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -683,11 +745,89 @@ class FastLeWAMStageBPolicy(swm.policy.WorldModelPolicy):
                 "warm_start_scale",
             ),
         )
+        self.execute_steps = None if execute_steps is None else int(execute_steps)
+        self.latent_noise_schedule = latent_noise_schedule
+        max_steps = int(fast_model.action_horizon) * self.fast_action_block
+        if self.execute_steps is not None and not 1 <= self.execute_steps <= max_steps:
+            raise ValueError(f"execute_steps must be in [1,{max_steps}]")
         self.action_bounds = None
+
+    def get_action(self, info_dict, **kwargs):
+        planning_info = dict(info_dict)
+        active_slots = []
+        if (
+            bool(getattr(self.fast_model, "latent_flow_matching", False))
+            and self.latent_noise_schedule is not None
+        ):
+            if not hasattr(self, "_phase6_replan_counts"):
+                self._phase6_replan_counts = [0] * int(self.env.num_envs)
+            needs_flush = info_dict.get("_needs_flush")
+            if needs_flush is not None:
+                for index, flush in enumerate(needs_flush):
+                    if flush:
+                        self._phase6_replan_counts[index] = 0
+            terminated = info_dict.get("terminated")
+            dead = (
+                np.asarray(terminated, dtype=bool)
+                if terminated is not None
+                else np.zeros(self.env.num_envs, dtype=bool)
+            )
+            active_slots = [
+                index
+                for index in range(self.env.num_envs)
+                if not dead[index] and not self._action_buffer[index]
+            ]
+            keys = tuple(
+                (int(index), int(self._phase6_replan_counts[index]))
+                for index in active_slots
+            )
+            device = next(self.fast_model.parameters()).device
+            noise_rows = self.latent_noise_schedule(
+                keys,
+                horizon=int(self.fast_model.action_horizon),
+                latent_dim=int(self.fast_model.latent_dim),
+                device=device,
+                dtype=torch.float32,
+            )
+            expected = (
+                len(active_slots),
+                int(self.fast_model.action_horizon),
+                int(self.fast_model.latent_dim),
+            )
+            if tuple(noise_rows.shape) != expected:
+                raise ValueError(
+                    f"latent noise schedule must return {expected}, "
+                    f"got {tuple(noise_rows.shape)}"
+                )
+            full_noise = torch.zeros(
+                self.env.num_envs,
+                int(self.fast_model.action_horizon),
+                int(self.fast_model.latent_dim),
+                device=device,
+                dtype=torch.float32,
+            )
+            if active_slots:
+                full_noise[active_slots] = noise_rows
+            planning_info[_PHASE6_1_LATENT_NOISE] = full_noise
+            self.fast_model.last_forward_count = 0
+        action = super().get_action(planning_info, **kwargs)
+        if active_slots:
+            for index in active_slots:
+                self._phase6_replan_counts[index] += 1
+            self.last_latent_flow_forward_count = int(
+                getattr(self.fast_model, "last_forward_count", 0)
+            )
+        if self.execute_steps is not None:
+            keep = self.execute_steps - 1
+            for queue in self._action_buffer:
+                while len(queue) > keep:
+                    queue.pop()
+        return action
 
     def set_env(self, env):
         _validate_action_dim(self.fast_model, env, self.fast_action_block)
         super().set_env(env)
+        self._phase6_replan_counts = [0] * int(env.num_envs)
         if self.action_bound_mode == "none":
             return
         processor = self.process.get("action") if self.process else None
@@ -729,6 +869,9 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
         diagnostic_callback: Callable[[dict], None] | None = None,
+        execute_steps=None,
+        score_horizon_blocks=None,
+        latent_noise_schedule=None,
     ):
         """构造直接动作 policy，并冻结模型、记录动作块尺寸和采样参数。"""
         super().__init__()
@@ -748,6 +891,18 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self.mode = mode
         self.action_block = action_block
         self.receding_horizon_blocks = receding_horizon_blocks
+        self.execute_steps = None if execute_steps is None else int(execute_steps)
+        self.score_horizon_blocks = (
+            None if score_horizon_blocks is None else int(score_horizon_blocks)
+        )
+        max_steps = int(model.action_horizon) * int(action_block)
+        if self.execute_steps is not None and not 1 <= self.execute_steps <= max_steps:
+            raise ValueError(f"execute_steps must be in [1,{max_steps}]")
+        if self.score_horizon_blocks is not None and not 1 <= self.score_horizon_blocks <= int(model.action_horizon):
+            raise ValueError(
+                "score_horizon_blocks must be in "
+                f"[1,{int(model.action_horizon)}]"
+            )
         self.inference_steps = inference_steps
         self.seed = seed
         self.goal_mode = goal_mode
@@ -775,6 +930,9 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         self._generators = {}
         self.planning_events: list[dict] = []
         self.diagnostic_callback = diagnostic_callback
+        self.timing_mode = False
+        self.latent_noise_schedule = latent_noise_schedule
+        self._phase6_replan_counts = None
 
     def _generator(self, device):
         """按设备懒创建可复现的 torch.Generator，并在多次规划间保留随机状态。"""
@@ -800,6 +958,7 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
         """绑定向量环境、初始化每个环境的动作队列，并校验动作维度。"""
         self.env = env
         self._action_buffer = [deque() for _ in range(env.num_envs)]
+        self._phase6_replan_counts = [0] * int(env.num_envs)
         if self.goal_mode == "cyclic_shift":
             if env.num_envs < 2:
                 raise ValueError("cyclic_shift goal ablation requires num_envs >= 2")
@@ -845,6 +1004,8 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             for index, flush in enumerate(needs_flush):
                 if flush:
                     self._action_buffer[index].clear()
+                    if self._phase6_replan_counts is not None:
+                        self._phase6_replan_counts[index] = 0
 
         terminated = info_dict.get("terminated")
         dead = (
@@ -878,10 +1039,11 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             for key, value in selected.items():
                 if torch.is_tensor(value):
                     selected[key] = value.to(device)
-            timing_enabled = True
-            if device.type == "cuda":
+            timing_enabled = not self.timing_mode
+            if device.type == "cuda" and not self.timing_mode:
                 torch.cuda.reset_peak_memory_stats(device)
-            _sync(device)
+            if not self.timing_mode:
+                _sync(device)
             encode_started = time.perf_counter() if timing_enabled else None
             current_frames = self.model._last_frame(selected["pixels"])
             goal_latent = None
@@ -893,6 +1055,37 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                 z0, goal_latent = encoded.split(len(replan))
             else:
                 z0 = self.model.encode_pixels(current_frames)
+            latent_noise = None
+            latent_noise_sha256 = None
+            if (
+                bool(getattr(self.model, "latent_flow_matching", False))
+                and self.guidance_mode != "none"
+                and self.latent_noise_schedule is not None
+            ):
+                keys = tuple(
+                    (int(index), int(self._phase6_replan_counts[index]))
+                    for index in replan
+                )
+                latent_noise = self.latent_noise_schedule(
+                    keys,
+                    horizon=int(self.model.action_horizon),
+                    latent_dim=int(self.model.latent_dim),
+                    device=device,
+                    dtype=torch.float32,
+                )
+                expected = (
+                    len(replan),
+                    int(self.model.action_horizon),
+                    int(self.model.latent_dim),
+                )
+                if tuple(latent_noise.shape) != expected:
+                    raise ValueError(
+                        f"latent noise schedule must return {expected}, "
+                        f"got {tuple(latent_noise.shape)}"
+                    )
+                latent_noise_sha256 = hashlib.sha256(
+                    latent_noise.detach().cpu().contiguous().numpy().tobytes()
+                ).hexdigest()
             if encode_started is not None:
                 if device.type == "cuda":
                     torch.cuda.synchronize(device)
@@ -923,6 +1116,9 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                         guidance_last_steps=self.guidance_last_steps,
                         guidance_inner_steps=self.guidance_inner_steps,
                         guidance_max_rms_offset=self.guidance_max_rms_offset,
+                        score_horizon_blocks=self.score_horizon_blocks,
+                        collect_guidance_diagnostics=not self.timing_mode,
+                        latent_noise=latent_noise,
                     )
                 else:
                     chunk = self.model.sample_joint(
@@ -953,10 +1149,16 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                         guidance_mode="none",
                     )
                     predicted_before = self.model.get_cost_from_latents(
-                        z0, goal_latent, unguided[:, None]
+                        z0,
+                        goal_latent,
+                        unguided[:, None],
+                        latent_noise=latent_noise,
                     ).reshape(-1)
                     predicted_after = self.model.get_cost_from_latents(
-                        z0, goal_latent, chunk[:, None]
+                        z0,
+                        goal_latent,
+                        chunk[:, None],
+                        latent_noise=latent_noise,
                     ).reshape(-1)
                 diagnostic_record = {
                     "z_start": z0.detach().cpu(),
@@ -977,11 +1179,15 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                     self.action_bounds,
                     mode=self.action_bound_mode,
                 )
-                projection = _projection_summary(
-                    raw_chunk,
-                    chunk,
-                    self.action_bounds,
-                    mode=self.action_bound_mode,
+                projection = (
+                    None
+                    if self.timing_mode
+                    else _projection_summary(
+                        raw_chunk,
+                        chunk,
+                        self.action_bounds,
+                        mode=self.action_bound_mode,
+                    )
                 )
             else:
                 projection = None
@@ -993,12 +1199,15 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
             plan = chunk[:, :keep_blocks].reshape(
                 len(replan), keep_blocks * self.action_block, base_action_dim
             )
+            if self.execute_steps is not None:
+                plan = plan[:, : self.execute_steps]
             flow_steps = int(
                 getattr(self.model, "inference_steps", 16)
                 if self.inference_steps is None
                 else self.inference_steps
             )
-            event = {
+            if not self.timing_mode:
+                event = {
                     "proposal_source": self.mode,
                     "candidate_count": 1,
                     "flow_steps": flow_steps,
@@ -1025,6 +1234,10 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                     "guidance_last_steps": self.guidance_last_steps,
                     "guidance_inner_steps": self.guidance_inner_steps,
                     "guidance_max_rms_offset": self.guidance_max_rms_offset,
+                    "latent_flow_steps": int(
+                        getattr(self.model, "latent_flow_steps", 0)
+                    ),
+                    "latent_noise_sha256": latent_noise_sha256,
                     "guidance_stats": dict(
                         getattr(self.model, "last_guidance_stats", {})
                     ),
@@ -1034,16 +1247,18 @@ class FastLeWAMChunkPolicy(swm.policy.BasePolicy):
                     "verify_seconds": 0.0,
                     "peak_memory_bytes": (
                         int(torch.cuda.max_memory_allocated(device))
-                        if device.type == "cuda"
+                        if device.type == "cuda" and not self.timing_mode
                         else None
                     ),
                 }
-            self.planning_events.append(event)
-            if diagnostic_record is not None:
+                self.planning_events.append(event)
+            if diagnostic_record is not None and not self.timing_mode:
                 diagnostic_record["event"] = dict(event)
                 self.diagnostic_callback(diagnostic_record)
             for row, env_index in enumerate(replan):
                 self._action_buffer[env_index].extend(plan[row].cpu())
+                if self._phase6_replan_counts is not None:
+                    self._phase6_replan_counts[env_index] += 1
 
         base_action_dim = int(np.prod(self.env.single_action_space.shape))
         action = torch.full((self.env.num_envs, base_action_dim), float("nan"))
@@ -1077,6 +1292,9 @@ def make_fast_lewam_policy(
     guidance_inner_steps=5,
     guidance_max_rms_offset=0.20,
     diagnostic_callback=None,
+    execute_steps=None,
+    score_horizon_blocks=None,
+    latent_noise_schedule=None,
 ):
     """按 mode 创建 Stage A/C 直接动作 policy 或 Stage B solver-backed policy。"""
     model = getattr(policy_or_model, "model", policy_or_model)
@@ -1130,9 +1348,12 @@ def make_fast_lewam_policy(
                 guidance_last_steps=guidance_last_steps,
                 guidance_inner_steps=guidance_inner_steps,
                 guidance_max_rms_offset=guidance_max_rms_offset,
+                score_horizon_blocks=score_horizon_blocks,
             )
             if actor_warm_start
-            else StageBModelView(model)
+            else StageBModelView(
+                model, score_horizon_blocks=score_horizon_blocks
+            )
         )
         solver = hydra.utils.instantiate(solver_cfg, model=solver_model)
         if action_bound_mode in {"candidate_clip", "candidate_scale"}:
@@ -1148,6 +1369,8 @@ def make_fast_lewam_policy(
             fast_model=model,
             action_block=config.action_block,
             action_bound_mode=action_bound_mode,
+            execute_steps=execute_steps,
+            latent_noise_schedule=latent_noise_schedule,
         )
     if mode not in {"stage_a", "stage_c"}:
         raise ValueError("Fast-LeWAM policy mode must be stage_a, stage_b, or stage_c")
@@ -1173,6 +1396,9 @@ def make_fast_lewam_policy(
         guidance_inner_steps=guidance_inner_steps,
         guidance_max_rms_offset=guidance_max_rms_offset,
         diagnostic_callback=diagnostic_callback,
+        execute_steps=execute_steps,
+        score_horizon_blocks=score_horizon_blocks,
+        latent_noise_schedule=latent_noise_schedule,
     )
 
 

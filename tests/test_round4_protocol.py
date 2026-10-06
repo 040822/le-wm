@@ -11,7 +11,12 @@ from source.common.round4_artifacts import (
     validate_artifact_manifest,
     validate_leflow_manifest,
 )
-from source.common.round4_eval import _TimedSolver, validate_gpu_visibility
+from source.common.eval import compose_eval_config
+from source.common.round4_eval import (
+    _TimedSolver,
+    validate_gpu_visibility,
+    validate_round4_config,
+)
 from source.common.round4_protocol import (
     ROUND4_DEFAULTS,
     mode_spec,
@@ -21,6 +26,27 @@ from source.common.round4_protocol import (
 
 
 class Round4ProtocolTests(unittest.TestCase):
+    def test_native_action_structure_override_keeps_other_protocol_fields_frozen(self):
+        cfg = compose_eval_config(
+            "pusht",
+            (
+                "output.save_video=false",
+                "plan_config.horizon=25",
+                "plan_config.receding_horizon=25",
+                "plan_config.action_block=1",
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "plan_config.horizon"):
+            validate_round4_config(cfg, "P3")
+        validate_round4_config(
+            cfg, "P3", allow_action_structure_override=True
+        )
+        cfg.plan_config.receding_horizon = 26
+        with self.assertRaisesRegex(ValueError, "receding_horizon"):
+            validate_round4_config(
+                cfg, "P3", allow_action_structure_override=True
+            )
+
     def test_cem_solver_timing_records_planning_and_forward_counts(self):
         class FakeSolver:
             batch_size = 1
@@ -36,6 +62,35 @@ class Round4ProtocolTests(unittest.TestCase):
         self.assertEqual(timed.events[0]["forward_count"], 60)
         self.assertIsNone(timed.events[0]["peak_memory_bytes"])
         self.assertGreaterEqual(timed.events[0]["planning_seconds"], 0.0)
+
+    def test_cem_timing_includes_actor_warm_start_and_guidance_counts(self):
+        class WarmStartModel:
+            last_warm_start_stats = {"stale": True}
+
+        class FakeSolver:
+            batch_size = 2
+            n_steps = 3
+            device = "cpu"
+            model = WarmStartModel()
+
+            def solve(self, info_dict, init_action=None):
+                del init_action
+                self.model.last_warm_start_stats = {
+                    "stage_a_forward_count": 4,
+                    "stage_b_forward_count": 2,
+                    "backward_count": 2,
+                }
+                return {"actions": [len(info_dict["pixels"])]}
+
+        solver = FakeSolver()
+        timed = _TimedSolver(solver)
+        timed.solve({"pixels": [0, 1, 2]})
+        event = timed.events[0]
+        self.assertEqual(event["stage_a_forward_count"], 4)
+        self.assertEqual(event["stage_b_forward_count"], 8)
+        self.assertEqual(event["guidance_backward_count"], 2)
+        self.assertEqual(event["forward_count"], 12)
+        self.assertTrue(event["forward_count_is_exact"])
 
     def test_cem_timing_preserves_action_bound_projection_diagnostics(self):
         projection = {"mode": "clip", "projected_candidate_violation_fraction": 0.0}

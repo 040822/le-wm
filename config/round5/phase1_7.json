@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "experiment": "Round5 Phase1.7",
+  "protocol": "round3_revised",
+  "seed": 16027,
+  "evaluation": {
+    "tasks": ["cube", "pusht", "reacher", "tworoom", "scene", "humanoid"],
+    "core_tasks": ["pusht", "reacher"],
+    "extended_tasks": ["scene", "humanoid"],
+    "saturated_tasks": ["cube", "tworoom"],
+    "inference_seeds": [42, 43],
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "action_flow_steps": 2,
+    "candidate_count": 64,
+    "candidate_batch_size": 64,
+    "solver_batch_size": 1,
+    "action_bound_mode": "clip",
+    "integrator": "euler",
+    "cem": {
+      "id": "p2_cem_300x30",
+      "mode": "P2",
+      "samples": 300,
+      "iterations": 30,
+      "topk": 30,
+      "var_scale": 1.0,
+      "flow_steps": 1,
+      "action_bound_mode": "candidate_clip",
+      "protocol": "cem-clip",
+      "proposal_chunk_size": 512
+    },
+    "dev_count": {"cube": 100, "pusht": 100, "reacher": 100, "tworoom": 100, "scene": 50, "humanoid": 50},
+    "confirmation_count": {"cube": 100, "pusht": 200, "reacher": 200, "tworoom": 100, "scene": 100, "humanoid": 100}
+  },
+  "training": {
+    "seed3072": 3072,
+    "seed4096": 4096,
+    "optional_seed5120": 5120,
+    "epochs": 10,
+    "batch_size": 128,
+    "learning_rate": 0.00005,
+    "weight_decay": 0.001,
+    "arms": ["joint", "recorded_control", "b_only", "lewm", "recorded_clean"],
+    "core_seed_tasks": ["pusht", "reacher"],
+    "extended_tasks": ["scene", "humanoid"],
+    "extended_arms": ["joint", "lewm"]
+  },
+  "online": {
+    "tasks": ["pusht", "reacher"],
+    "states_per_task": 256,
+    "branches_per_state": 32,
+    "actor_candidates_per_state": 16,
+    "local_perturbations_per_state": 16,
+    "max_primitive_steps": 25,
+    "updates": 2000,
+    "batch_size": 128,
+    "learning_rate": 0.00001,
+    "ranking_loss_weights": [0.1, 1.0]
+  },
+  "budget": {
+    "wall_clock_hours": 72,
+    "training_vram_margin_gib": 6,
+    "evaluation_vram_margin_gib": 2,
+    "reserve_fraction": 0.25,
+    "preferred_gpus": [0, 1, 2, 3, 4, 5, 6, 7]
+  },
+  "checkpoints": {
+    "actor": {
+      "cube": "outputs/round4/ab_seed3072_cube/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "pusht": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "reacher": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "tworoom": "outputs/round4/ab_seed3072_tworoom/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "scene": "outputs/round5/phase3/training/fastlewam/scene/checkpoints/r4_ab_weights_epoch_10.pt",
+      "humanoid": "outputs/round5/phase3/training/fastlewam/humanoid/checkpoints/r4_ab_weights_epoch_10.pt"
+    },
+    "lewm": {
+      "cube": "outputs/lewm/cube/0803_e0_lewm_baseline_bs128/checkpoints/lewm_weights_epoch_10.pt",
+      "pusht": "outputs/lewm/pusht/0803_e0_lewm_baseline_bs128/checkpoints/lewm_weights_epoch_10.pt",
+      "reacher": "outputs/lewm/reacher/0721_/checkpoints/lewm_weights_epoch_10.pt",
+      "tworoom": "outputs/lewm/tworoom/0721_/checkpoints/lewm_weights_epoch_10.pt",
+      "scene": "outputs/round5/phase3/training/lewm/scene/checkpoints/lewm_weights_epoch_10.pt",
+      "humanoid": "outputs/round5/phase3/training/lewm/humanoid/checkpoints/lewm_weights_epoch_10.pt"
+    }
+  },
+  "paths": {
+    "output_root": "outputs/round5/phase1_7",
+    "report": "docs/report/round5/round5_phase1_7_report.md"
+  }
+}

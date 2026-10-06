@@ -584,7 +584,9 @@ class FastLeWAM(nn.Module):
         return noise.to(device=z0.device, dtype=z0.dtype).clone()
 
     @staticmethod
-    def _normalize_guidance_gradient(gradient: torch.Tensor) -> tuple[torch.Tensor, int]:
+    def _normalize_guidance_gradient(
+        gradient: torch.Tensor, *, count_zero: bool = True
+    ) -> tuple[torch.Tensor, int]:
         """Normalize each candidate independently and count zero gradients."""
         if not torch.isfinite(gradient).all():
             raise FloatingPointError("guidance gradient contains a non-finite value")
@@ -593,7 +595,8 @@ class FastLeWAM(nn.Module):
         zero = rms <= torch.finfo(rms.dtype).eps
         normalized = gradient.float() / rms.clamp_min(torch.finfo(rms.dtype).eps)
         normalized = torch.where(zero, torch.zeros_like(normalized), normalized)
-        return normalized.to(dtype=gradient.dtype), int(zero.sum().item())
+        zero_count = int(zero.sum().item()) if count_zero else 0
+        return normalized.to(dtype=gradient.dtype), zero_count
 
     @staticmethod
     def _clip_rms_displacement(
@@ -653,21 +656,79 @@ class FastLeWAM(nn.Module):
                 raise ValueError("guidance is currently defined only for Euler integration")
         return mode
 
+    @staticmethod
+    def reduce_goal_distance_costs(
+        predicted: torch.Tensor,
+        goal_latent: torch.Tensor,
+        *,
+        score_reduction: str = "endpoint",
+        terminal_weight: float = 1.0,
+    ) -> torch.Tensor:
+        """Reduce per-block goal distances to one cost per trajectory."""
+        if predicted.ndim != 3 or goal_latent.ndim != 2:
+            raise ValueError("predicted and goal_latent must have shapes [B,H,D] and [B,D]")
+        if predicted.shape[0] != goal_latent.shape[0] or predicted.shape[-1] != goal_latent.shape[-1]:
+            raise ValueError("predicted and goal_latent batch/latent dimensions differ")
+        mode = str(score_reduction).lower()
+        if mode not in {"endpoint", "minimum", "mixed"}:
+            raise ValueError("score_reduction must be endpoint, minimum, or mixed")
+        weight = float(terminal_weight)
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError("terminal_weight must be in [0, 1]")
+        distances = (predicted - goal_latent[:, None, :]).square().mean(dim=-1)
+        if mode == "endpoint":
+            return distances[:, -1]
+        if mode == "minimum":
+            return distances.min(dim=1).values
+        return weight * distances[:, -1] + (1.0 - weight) * distances.min(dim=1).values
+
     def _latent_cost_from_clean_actions(
         self,
         z0: torch.Tensor,
         goal_latent: torch.Tensor,
         clean_actions: torch.Tensor,
         task_condition: torch.Tensor | None,
+        score_horizon_blocks: int | None = None,
+        latent_noise: torch.Tensor | None = None,
+        score_reduction: str = "endpoint",
+        terminal_weight: float = 1.0,
     ) -> torch.Tensor:
-        """Return one Stage-B terminal latent cost per action candidate."""
-        predicted = self.rollout_latents(
-            z0,
-            clean_actions,
-            torch.ones(z0.shape[0], device=z0.device, dtype=z0.dtype),
-            task_condition,
+        """Return one Stage-B latent cost at a requested action-block prefix."""
+        score_horizon_blocks = (
+            self.action_horizon
+            if score_horizon_blocks is None
+            else int(score_horizon_blocks)
         )
-        return (predicted[:, -1] - goal_latent).square().mean(dim=-1)
+        if not 1 <= score_horizon_blocks <= self.action_horizon:
+            raise ValueError(
+                "score_horizon_blocks must be in "
+                f"[1,{self.action_horizon}], got {score_horizon_blocks}"
+            )
+        source_timestep = torch.ones(
+            z0.shape[0], device=z0.device, dtype=z0.dtype
+        )
+        if bool(getattr(self, "latent_flow_matching", False)):
+            predicted = self.sample_future_latents(
+                z0,
+                clean_actions,
+                source_timestep,
+                initial_noise=latent_noise,
+                num_steps=int(getattr(self, "latent_flow_steps", 2)),
+                task_condition=task_condition,
+            )
+        else:
+            predicted = self.rollout_latents(
+                z0,
+                clean_actions,
+                source_timestep,
+                task_condition,
+            )
+        return self.reduce_goal_distance_costs(
+            predicted[:, :score_horizon_blocks],
+            goal_latent,
+            score_reduction=score_reduction,
+            terminal_weight=terminal_weight,
+        )
 
     def _apply_post_opt_guidance(
         self,
@@ -680,6 +741,11 @@ class FastLeWAM(nn.Module):
         inner_steps: int,
         max_rms_offset: float,
         stats: dict[str, int],
+        score_horizon_blocks: int | None = None,
+        collect_diagnostics: bool = True,
+        latent_noise: torch.Tensor | None = None,
+        score_reduction: str = "endpoint",
+        terminal_weight: float = 1.0,
     ) -> torch.Tensor:
         """Apply cost descent after flow sampling inside a bounded trust region."""
         reference = actions.detach()
@@ -687,17 +753,36 @@ class FastLeWAM(nn.Module):
         for _ in range(int(inner_steps)):
             current = current.detach().requires_grad_(True)
             cost = self._latent_cost_from_clean_actions(
-                z0, goal_latent, current, task_condition
+                z0,
+                goal_latent,
+                current,
+                task_condition,
+                score_horizon_blocks,
+                latent_noise,
+                score_reduction,
+                terminal_weight,
             )
             gradient = torch.autograd.grad(cost.sum(), current)[0]
-            stats["stage_b_forward_count"] += 1
+            stats["stage_b_forward_count"] += int(
+                getattr(self, "latent_flow_steps", 2)
+                if bool(getattr(self, "latent_flow_matching", False))
+                else 1
+            )
             stats["backward_count"] += 1
-            normalized, zero_count = self._normalize_guidance_gradient(gradient)
+            normalized, zero_count = self._normalize_guidance_gradient(
+                gradient, count_zero=collect_diagnostics
+            )
             stats["zero_gradient_count"] += zero_count
             current = current.detach() - float(step_size) * normalized
             current = self._clip_rms_displacement(
                 current, reference, float(max_rms_offset)
             ).detach()
+        if collect_diagnostics:
+            displacement = (current - reference).detach().float()
+            rms = displacement.square().mean(dim=(1, 2)).sqrt()
+            stats["guidance_displacement_rms_sum"] = float(rms.sum().cpu())
+            stats["guidance_displacement_rms_max"] = float(rms.max().cpu())
+            stats["guidance_displacement_count"] = int(rms.numel())
         return current
 
     def _apply_guided_flow_step(
@@ -712,6 +797,11 @@ class FastLeWAM(nn.Module):
         inner_steps: int,
         max_rms_offset: float,
         stats: dict[str, int],
+        score_horizon_blocks: int | None = None,
+        collect_diagnostics: bool = True,
+        latent_noise: torch.Tensor | None = None,
+        score_reduction: str = "endpoint",
+        terminal_weight: float = 1.0,
     ) -> torch.Tensor:
         """Guide one Euler proposal using clean-estimate Stage-B cost gradients."""
         reference = proposal.detach()
@@ -730,18 +820,47 @@ class FastLeWAM(nn.Module):
                 1.0 - next_timestep[:, None, None]
             ) * velocity
             cost = self._latent_cost_from_clean_actions(
-                z0, goal_latent, clean, task_condition
+                z0,
+                goal_latent,
+                clean,
+                task_condition,
+                score_horizon_blocks,
+                latent_noise,
+                score_reduction,
+                terminal_weight,
             )
             gradient = torch.autograd.grad(cost.sum(), current)[0]
             stats["stage_a_forward_count"] += 1
-            stats["stage_b_forward_count"] += 1
+            stats["stage_b_forward_count"] += int(
+                getattr(self, "latent_flow_steps", 2)
+                if bool(getattr(self, "latent_flow_matching", False))
+                else 1
+            )
             stats["backward_count"] += 1
-            normalized, zero_count = self._normalize_guidance_gradient(gradient)
+            normalized, zero_count = self._normalize_guidance_gradient(
+                gradient, count_zero=collect_diagnostics
+            )
             stats["zero_gradient_count"] += zero_count
             current = current.detach() - float(step_size) * normalized
             current = self._clip_rms_displacement(
                 current, reference, float(max_rms_offset)
             ).detach()
+        if collect_diagnostics:
+            displacement = (current - reference).detach().float()
+            rms = displacement.square().mean(dim=(1, 2)).sqrt()
+            stats["guidance_displacement_rms_sum"] = float(
+                stats.get("guidance_displacement_rms_sum", 0.0)
+                + float(rms.sum().cpu())
+            )
+            stats["guidance_displacement_rms_max"] = float(
+                max(
+                    float(stats.get("guidance_displacement_rms_max", 0.0)),
+                    float(rms.max().cpu()),
+                )
+            )
+            stats["guidance_displacement_count"] = int(
+                stats.get("guidance_displacement_count", 0) + rms.numel()
+            )
         return current
 
     def post_optimize_actions(
@@ -754,6 +873,11 @@ class FastLeWAM(nn.Module):
         inner_steps: int = 5,
         max_rms_offset: float = 0.20,
         task_condition: torch.Tensor | None = None,
+        score_horizon_blocks: int | None = None,
+        collect_guidance_diagnostics: bool = True,
+        latent_noise: torch.Tensor | None = None,
+        score_reduction: str = "endpoint",
+        terminal_weight: float = 1.0,
     ) -> torch.Tensor:
         """Refine an existing clean action chunk with Stage-B cost descent.
 
@@ -780,6 +904,14 @@ class FastLeWAM(nn.Module):
             raise ValueError("inner_steps must be positive")
         if float(max_rms_offset) <= 0.0:
             raise ValueError("max_rms_offset must be positive")
+        if bool(getattr(self, "latent_flow_matching", False)) and latent_noise is None:
+            latent_noise = torch.randn(
+                actions.shape[0],
+                self.action_horizon,
+                self.latent_dim,
+                device=actions.device,
+                dtype=actions.dtype,
+            )
         stats: dict[str, int] = {
             "stage_b_forward_count": 0,
             "backward_count": 0,
@@ -795,6 +927,11 @@ class FastLeWAM(nn.Module):
                 inner_steps=int(inner_steps),
                 max_rms_offset=float(max_rms_offset),
                 stats=stats,
+                score_horizon_blocks=score_horizon_blocks,
+                collect_diagnostics=collect_guidance_diagnostics,
+                latent_noise=latent_noise,
+                score_reduction=score_reduction,
+                terminal_weight=terminal_weight,
             )
         self.last_guidance_stats = {
             "mode": "post_opt_refine",
@@ -803,6 +940,11 @@ class FastLeWAM(nn.Module):
             "guidance_max_rms_offset": float(max_rms_offset),
             "stage_b_forward_count": int(stats["stage_b_forward_count"]),
             "backward_count": int(stats["backward_count"]),
+            **{
+                key: value
+                for key, value in stats.items()
+                if key.startswith("guidance_displacement_")
+            },
         }
         return refined.detach()
 
@@ -872,6 +1014,11 @@ class FastLeWAM(nn.Module):
         guidance_last_steps=5,
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
+        score_horizon_blocks=None,
+        collect_guidance_diagnostics=True,
+        latent_noise=None,
+        score_reduction="endpoint",
+        terminal_weight=1.0,
     ):
         """Sample an action chunk with optional bounded latent-cost guidance."""
         steps = self.inference_steps if num_steps is None else int(num_steps)
@@ -888,6 +1035,16 @@ class FastLeWAM(nn.Module):
             guidance_max_rms_offset=guidance_max_rms_offset,
             integrator=integrator,
         )
+        if bool(getattr(self, "latent_flow_matching", False)) and (
+            mode_name != "none" and latent_noise is None
+        ):
+            latent_noise = torch.randn(
+                z0.shape[0],
+                self.action_horizon,
+                self.latent_dim,
+                device=z0.device,
+                dtype=z0.dtype,
+            )
         stats: dict[str, int | float | str] = {
             "mode": mode_name,
             "flow_steps": int(steps),
@@ -945,6 +1102,11 @@ class FastLeWAM(nn.Module):
                     inner_steps=int(guidance_inner_steps),
                     max_rms_offset=float(guidance_max_rms_offset),
                     stats=stats,
+                    score_horizon_blocks=score_horizon_blocks,
+                    collect_diagnostics=collect_guidance_diagnostics,
+                    latent_noise=latent_noise,
+                    score_reduction=score_reduction,
+                    terminal_weight=terminal_weight,
                 )
             stats["forward_count"] = int(
                 stats["stage_a_forward_count"] + stats["stage_b_forward_count"]
@@ -985,6 +1147,11 @@ class FastLeWAM(nn.Module):
                         inner_steps=int(guidance_inner_steps),
                         max_rms_offset=float(guidance_max_rms_offset),
                         stats=stats,
+                        score_horizon_blocks=score_horizon_blocks,
+                        collect_diagnostics=collect_guidance_diagnostics,
+                        latent_noise=latent_noise,
+                        score_reduction=score_reduction,
+                        terminal_weight=terminal_weight,
                     )
                 else:
                     actions = proposal
@@ -1009,6 +1176,11 @@ class FastLeWAM(nn.Module):
         guidance_last_steps=5,
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
+        score_horizon_blocks=None,
+        collect_guidance_diagnostics=True,
+        latent_noise=None,
+        score_reduction="endpoint",
+        terminal_weight=1.0,
     ):
         """Sample a Stage-A action chunk with optional latent-cost guidance."""
         return self._euler_sample(
@@ -1025,6 +1197,11 @@ class FastLeWAM(nn.Module):
             guidance_last_steps=guidance_last_steps,
             guidance_inner_steps=guidance_inner_steps,
             guidance_max_rms_offset=guidance_max_rms_offset,
+            score_horizon_blocks=score_horizon_blocks,
+            collect_guidance_diagnostics=collect_guidance_diagnostics,
+            latent_noise=latent_noise,
+            score_reduction=score_reduction,
+            terminal_weight=terminal_weight,
         )
 
     @torch.no_grad()
@@ -1079,6 +1256,11 @@ class FastLeWAM(nn.Module):
         guidance_last_steps=5,
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
+        score_horizon_blocks=None,
+        collect_guidance_diagnostics=True,
+        latent_noise=None,
+        score_reduction="endpoint",
+        terminal_weight=1.0,
     ):
         """Generate an actor warm start from an encoded planning context."""
         if not 1 <= horizon <= self.action_horizon:
@@ -1118,6 +1300,11 @@ class FastLeWAM(nn.Module):
             guidance_last_steps=guidance_last_steps,
             guidance_inner_steps=guidance_inner_steps,
             guidance_max_rms_offset=guidance_max_rms_offset,
+            score_horizon_blocks=score_horizon_blocks,
+            collect_guidance_diagnostics=collect_guidance_diagnostics,
+            latent_noise=latent_noise,
+            score_reduction=score_reduction,
+            terminal_weight=terminal_weight,
         )[:, :horizon]
 
     def get_action(
@@ -1134,6 +1321,10 @@ class FastLeWAM(nn.Module):
         guidance_last_steps=5,
         guidance_inner_steps=5,
         guidance_max_rms_offset=0.20,
+        score_horizon_blocks=None,
+        latent_noise=None,
+        score_reduction="endpoint",
+        terminal_weight=1.0,
     ):
         """Implement the Actionable interface from raw current/goal images."""
         z0 = self.encode_pixels(self._last_frame(info["pixels"]))
@@ -1155,9 +1346,22 @@ class FastLeWAM(nn.Module):
             guidance_last_steps=guidance_last_steps,
             guidance_inner_steps=guidance_inner_steps,
             guidance_max_rms_offset=guidance_max_rms_offset,
+            score_horizon_blocks=score_horizon_blocks,
+            latent_noise=latent_noise,
+            score_reduction=score_reduction,
+            terminal_weight=terminal_weight,
         )
 
-    def get_cost_from_latents(self, z0, goal_latent, action_candidates):
+    def get_cost_from_latents(
+        self,
+        z0,
+        goal_latent,
+        action_candidates,
+        score_horizon_blocks=None,
+        latent_noise=None,
+        score_reduction="endpoint",
+        terminal_weight=1.0,
+    ):
         """Score candidate actions from one encoded current/goal context."""
         if action_candidates.ndim != 4:
             raise ValueError(
@@ -1165,6 +1369,16 @@ class FastLeWAM(nn.Module):
                 f"{tuple(action_candidates.shape)}"
             )
         batch, samples, horizon, action_dim = action_candidates.shape
+        score_horizon_blocks = (
+            self.action_horizon
+            if score_horizon_blocks is None
+            else int(score_horizon_blocks)
+        )
+        if not 1 <= score_horizon_blocks <= self.action_horizon:
+            raise ValueError(
+                "score_horizon_blocks must be in "
+                f"[1,{self.action_horizon}], got {score_horizon_blocks}"
+            )
         if horizon != self.action_horizon or action_dim != self.action_dim:
             raise ValueError(
                 "candidate shape must match configured horizon/action_dim; got "
@@ -1181,6 +1395,42 @@ class FastLeWAM(nn.Module):
                 "goal_latent must have shape "
                 f"{expected_context_shape}, got {tuple(goal_latent.shape)}"
             )
+        if bool(getattr(self, "latent_flow_matching", False)):
+            if latent_noise is None:
+                latent_noise = torch.randn(
+                    batch,
+                    self.action_horizon,
+                    self.latent_dim,
+                    device=z0.device,
+                    dtype=z0.dtype,
+                )
+            latent_noise = torch.as_tensor(
+                latent_noise, device=z0.device, dtype=z0.dtype
+            )
+            if tuple(latent_noise.shape) == (
+                batch,
+                samples,
+                self.action_horizon,
+                self.latent_dim,
+            ):
+                noise_flat = latent_noise.reshape(
+                    batch * samples, self.action_horizon, self.latent_dim
+                )
+            elif tuple(latent_noise.shape) == (
+                batch,
+                self.action_horizon,
+                self.latent_dim,
+            ):
+                noise_flat = latent_noise[:, None].expand(
+                    batch, samples, self.action_horizon, self.latent_dim
+                ).reshape(batch * samples, self.action_horizon, self.latent_dim)
+            else:
+                raise ValueError(
+                    "latent_noise must have shape [B,H,D] or [B,S,H,D], got "
+                    f"{tuple(latent_noise.shape)}"
+                )
+        else:
+            noise_flat = None
         z0 = z0[:, None].expand(batch, samples, self.latent_dim).reshape(
             batch * samples, self.latent_dim
         )
@@ -1190,16 +1440,44 @@ class FastLeWAM(nn.Module):
         candidates = action_candidates.reshape(
             batch * samples, self.action_horizon, self.action_dim
         )
-        predicted = self(
-            z0,
-            candidates,
-            torch.ones(batch * samples, device=z0.device, dtype=z0.dtype),
-            mode="stage_b",
-        )["predicted_latents"]
-        cost = (predicted[:, -1] - goal_latent).square().mean(dim=-1)
+        source_timestep = torch.ones(
+            batch * samples, device=z0.device, dtype=z0.dtype
+        )
+        if bool(getattr(self, "latent_flow_matching", False)):
+            predicted = self.sample_future_latents(
+                z0,
+                candidates,
+                source_timestep,
+                initial_noise=noise_flat,
+                num_steps=int(getattr(self, "latent_flow_steps", 2)),
+            )
+            self.last_forward_count = int(
+                getattr(self, "last_forward_count", 0)
+                + int(getattr(self, "latent_flow_steps", 2))
+            )
+        else:
+            predicted = self(
+                z0,
+                candidates,
+                source_timestep,
+                mode="stage_b",
+            )["predicted_latents"]
+        cost = self.reduce_goal_distance_costs(
+            predicted[:, :score_horizon_blocks],
+            goal_latent,
+            score_reduction=score_reduction,
+            terminal_weight=terminal_weight,
+        )
         return cost.reshape(batch, samples)
 
-    def get_cost(self, info_dict, action_candidates):
+    def get_cost(
+        self,
+        info_dict,
+        action_candidates,
+        score_horizon_blocks=None,
+        score_reduction="endpoint",
+        terminal_weight=1.0,
+    ):
         """用一次并行 Stage B 因果预测计算候选动作终点到目标 latent 的代价。"""
         if action_candidates.ndim != 4:
             raise ValueError(
@@ -1215,19 +1493,49 @@ class FastLeWAM(nn.Module):
             )
         current = self._last_frame(info_dict["pixels"])
         goal = self._last_frame(info_dict["goal"])
-        z0 = self.encode_pixels(current).reshape(batch * samples, self.latent_dim)
-        goal_latent = self.encode_pixels(goal).reshape(batch * samples, self.latent_dim)
-        candidates = action_candidates.reshape(
-            batch * samples, self.action_horizon, self.action_dim
+        z0 = self.encode_pixels(current)
+        goal_latent = self.encode_pixels(goal)
+        if z0.shape[0] == batch:
+            z0 = z0[:, None].expand(batch, samples, self.latent_dim)
+            goal_latent = goal_latent[:, None].expand(batch, samples, self.latent_dim)
+        elif z0.shape[0] == batch * samples:
+            z0 = z0.reshape(batch, samples, self.latent_dim)
+            goal_latent = goal_latent.reshape(batch, samples, self.latent_dim)
+        else:
+            raise ValueError(
+                "encoded context batch must match either B or B*S; got "
+                f"{z0.shape[0]} for candidates {(batch, samples)}"
+            )
+        latent_noise = info_dict.get("_phase6_1_latent_noise")
+        if torch.is_tensor(latent_noise):
+            if latent_noise.ndim == 5:
+                # Some wrappers add a singleton context axis before CEM adds
+                # its sample axis. The scheduled path is shared on both axes.
+                latent_noise = latent_noise[:, 0, 0]
+            elif latent_noise.ndim == 4 and tuple(latent_noise.shape[:2]) == (
+                batch,
+                samples,
+            ):
+                pass
+            elif latent_noise.ndim == 4 and latent_noise.shape[0] == batch:
+                # CEM-expanded [B,S,H,D] (including the single-candidate case).
+                pass
+            elif latent_noise.ndim == 3 and latent_noise.shape[0] == batch:
+                pass
+            else:
+                raise ValueError(
+                    "Phase 6.1 latent noise must be [B,H,D] or [B,S,H,D], got "
+                    f"{tuple(latent_noise.shape)}"
+                )
+        return self.get_cost_from_latents(
+            z0[:, 0],
+            goal_latent[:, 0],
+            action_candidates,
+            score_horizon_blocks=score_horizon_blocks,
+            latent_noise=latent_noise,
+            score_reduction=score_reduction,
+            terminal_weight=terminal_weight,
         )
-        predicted = self(
-            z0,
-            candidates,
-            torch.ones(batch * samples, device=z0.device, dtype=z0.dtype),
-            mode="stage_b",
-        )["predicted_latents"]
-        cost = (predicted[:, -1] - goal_latent).square().mean(dim=-1)
-        return cost.reshape(batch, samples)
 
 
 __all__ = ["FastLeWAM"]

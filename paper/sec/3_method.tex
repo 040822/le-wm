@@ -1,105 +1,102 @@
-\section{Coupled Latent World--Action Modeling}
+\section{Coupled Latent World Model}
 \label{sec:method}
 \input{fig/draft_architecture}
 
-\subsection{Shared representation and complementary modes}
-An offline training window contains observations and normalized action blocks,
-$ (o_0,a_0,o_1,\ldots,a_{H-1},o_H) $,
-where each block contains $k$ environment actions. A visual encoder and projector $f_\phi$ produce $z_h=f_\phi(o_h)\in\mathbb R^d$. The training goal is $z_g=z_H$; at test time it is the encoding of the supplied goal image. A shared DiT $T_\theta$ implements two modes with separate input layouts and output heads. Sharing does not imply that their masks, token projections, or heads are identical.
+\subsection{Visual control under a decision budget}
+Given a current observation $o_0$ and goal image $o_g$, the controller proposes an action sequence $\mathbf a=a_{0:H-1}$, executes a configured prefix, and replans from a new observation. Each $a_h$ contains $k$ primitive environment actions. We define the decision budget as the time available for one complete policy call, including observation encoding, proposal generation, consequence prediction, selection, and any refinement. Candidate count $N$, flow integration steps $S$, and refinement updates $K$ determine how this budget is allocated. Our objective is to support useful action decisions with a limited number of model queries and updates.
 
-\paragraph{Goal-conditioned action flow (A).}
-For recorded actions $\mathbf a=a_{0:H-1}$, noise $\epsilon\sim\mathcal N(0,I)$, and $\tau\sim\mathcal U[0,1]$, let
+An offline training window contains $(o_0,a_0,o_1,\ldots,a_{H-1},o_H)$. A visual encoder and projector $f_\phi$ map observations to $z_h=f_\phi(o_h)\in\mathbb R^d$. During training, $z_g=z_H$; at deployment, $z_g=f_\phi(o_g)$. A shared diffusion transformer (DiT) $T_\theta$ implements action generation (A) and dynamics prediction (B), using mode-specific token projections, output heads, and attention masks. Figure~\ref{fig:architecture} summarizes their training connections and decision interfaces.
+
+\subsection{Action generation and parallel latent dynamics}
+\paragraph{Goal-conditioned action generation.}
+We train the action mode with conditional flow matching~\cite{lipman2022flow}. For recorded actions $\mathbf a$, Gaussian noise $\epsilon$, and interpolation time $\tau\sim\mathcal U[0,1]$, define
 \begin{equation}
  x_\tau=(1-\tau)\epsilon+\tau\mathbf a,\qquad v^\star=\mathbf a-\epsilon.
 \end{equation}
-The action mode predicts $v_\theta(x_\tau,\tau;z_0,z_g)$ with loss
+The generator predicts the action velocity $v_\theta(x_\tau,\tau;z_0,z_g)$ and minimizes
 \begin{equation}
- \mathcal L_A=\mathbb E\left[\operatorname{mse}(v_\theta,v^\star)\right].
+ \mathcal L_A=\mathbb E\left[\operatorname{mse}\left(v_\theta(x_\tau,\tau;z_0,z_g),v^\star\right)\right].
  \label{eq:action_loss}
 \end{equation}
-Action tokens attend to one another and to the current and goal anchors; anchor queries do not read noisy actions. Euler integration from noise to time one yields an action sequence. We denote this sampler by $A_\theta(z_0,z_g;\epsilon,S)$, where $S$ counts integration steps.
+Action tokens attend to one another and to current and goal anchors; anchor queries do not attend to noisy actions. At inference, $S$ Euler steps integrate the velocity field from noise to an action proposal, denoted $A_\theta(z_0,z_g;\epsilon,S)$.
 
-\paragraph{Action-conditioned dynamics (B).}
-B uses the interleaved layout
-$[z_0,a_0,q_1,a_1,q_2,\ldots,a_{H-1},q_H]$
-with latent queries and a lower-triangular attention mask. Query $q_h$ can use the current latent and actions $a_{0:h-1}$, but not later actions. All future latents are predicted in one transformer evaluation:
+\paragraph{Parallel action-conditioned prediction.}
+The dynamics mode receives the interleaved sequence $[z_0,a_0,q_1,a_1,q_2,\ldots,a_{H-1},q_H]$, where $q_h$ is a future-latent query. A lower-triangular attention mask lets $q_h$ access $z_0$ and the action prefix $a_{0:h-1}$ while excluding later actions. All future latents are predicted in one transformer evaluation:
 \begin{equation}
  \hat{\mathbf z}_{1:H}=B_\theta(z_0,\mathbf a;s).
  \label{eq:dynamics}
 \end{equation}
-The scalar $s$ is a training condition defined below. B does not receive the goal. Parallel prefix prediction removes recursive calls across imagined time steps; its mask constrains information access rather than certifying learned physical causality.
+Here $s$ is a training condition specified below. B receives no goal input: it predicts action consequences, which are subsequently compared with the goal. Parallel prefix prediction~\cite{gao2026fastlewm} removes recursive model calls across the imagined horizon. Candidate batching provides an additional, separate source of parallel execution.
 
 \subsection{Three forms of training coupling}
 \label{sec:coupling}
-\paragraph{Parameter coupling.}
-Both losses update the shared encoder and transformer. This is a shared multi-task model even when B receives only recorded actions. Its advantage over separate predictors requires explicit parameter and training-budget comparisons.
+\paragraph{Parameter-sharing coupling.}
+A and B reuse the DiT backbone and visual representation. Their losses jointly update the shared parameters, including when B is trained exclusively on recorded actions. This implements both tasks in one model; its parameter, training, and decision costs are compared with a separate-DiT control in our resource evaluation.
 
 \paragraph{Action-input coupling.}
-The action velocity defines a clean-action estimate
+The action mode provides a clean-action estimate from its training-time velocity:
 \begin{equation}
  \tilde{\mathbf a}=x_\tau+(1-\tau)v_\theta(x_\tau,\tau;z_0,z_g).
  \label{eq:clean}
 \end{equation}
-For each sample, draw $m\sim\operatorname{Bernoulli}(p_e)$ and feed
-$\mathbf a^{\rm in}=(1-m)\mathbf a+m\tilde{\mathbf a}$
-to B. The current configuration uses $p_e=\min(e/10,0.5)$ for effective zero-based epoch $e$. Its legacy condition is $s=1$ for recorded actions and $s=\tau$ for estimated actions. The dynamics loss is
+For a Bernoulli mask $m\sim\operatorname{Bernoulli}(p_e)$, the dynamics input is
 \begin{equation}
- \begin{split}
- \mathcal L_B&=\mathbb E\left[w(s)\operatorname{mse}\big(B_\theta(z_0,\mathbf a^{\rm in};s),\mathbf z_{1:H}\big)\right],\\
- w(s)&=\min(s/0.2,1).
- \end{split}
+ \mathbf a^{\rm in}=(1-m)\mathbf a+m\tilde{\mathbf a}.
+\end{equation}
+This mixture exposes B to estimates produced by A as well as recorded actions, motivated by the difference between recorded-action supervision and generated candidates at deployment. Training estimates need not have the same distribution as fully sampled inference proposals. We use $s=1$ for recorded inputs and $s=\tau$ for estimated inputs, with the weighted latent objective
+\begin{equation}
+ \mathcal L_B=\mathbb E\left[w(s)\operatorname{mse}\left(B_\theta(z_0,\mathbf a^{\rm in};s),\mathbf z_{1:H}\right)\right].
  \label{eq:dynamics_loss}
 \end{equation}
-The targets remain recorded future embeddings in both branches. When $\tilde{\mathbf a}\ne\mathbf a$, they are not observations of the estimated action's consequence. We study mixing as a coupling objective whose decision effects require verification, not as counterfactual dynamics supervision.
+The mixture schedule and weighting are given in the supplement. Both input branches use the recorded future embeddings as targets. Thus, for an estimate that differs from the recorded action, this objective couples generation to the recorded transition without observing the estimate's counterfactual outcome. Its decision value is assessed through actual executed consequences.
 
-\paragraph{Gradient coupling.}
-The full configuration leaves $\tilde{\mathbf a}$ differentiable, so $\mathcal L_B$ updates the generator through B's action input. The detached variant substitutes $\operatorname{sg}(\tilde{\mathbf a})$ at that interface. Detachment removes this action-mediated path, but B still updates shared parameters. These two gradient routes must not be conflated.
-
-The joint objective is
+\paragraph{Action-mediated gradient coupling.}
+We retain differentiability of $\tilde{\mathbf a}$ so that $\mathcal L_B$ reaches the action-generation computation through B's action input. For shared DiT parameters, the two routes are
+\begin{equation}
+ \nabla_\theta\mathcal L_B=
+ \left.\frac{\partial\mathcal L_B}{\partial\theta}\right|_{\tilde{\mathbf a}\ \mathrm{fixed}}
+ +\frac{\partial\mathcal L_B}{\partial\tilde{\mathbf a}}
+   \frac{\partial\tilde{\mathbf a}}{\partial\theta}.
+ \label{eq:gradient_routes}
+\end{equation}
+The first term updates shared parameters through B. The second lets the future prediction objective participate in learning A. Replacing $\tilde{\mathbf a}$ by $\operatorname{sg}(\tilde{\mathbf a})$ removes only the second route; parameter sharing remains. The full objective is
 \begin{equation}
  \mathcal L=\mathcal L_A+\lambda_B\mathcal L_B+\lambda_R\mathcal L_{\rm SIGReg},
  \label{eq:joint}
 \end{equation}
-where latent regularization follows LeWM~\cite{maes2026lewm}, with $\lambda_B=1$ and $\lambda_R=0.09$ in the current configuration. A/B embedding targets retain encoder gradients. The core model trains A and B only; latent-path generation, inverse dynamics extensions, and online updates are outside its main formulation.
+where SIGReg follows LeWM~\cite{maes2026lewm}. The encoder is jointly trained, with gradients retained through the embedding targets. The three connections are evaluated through recorded-input, detached-input, and separate-backbone controls.
 
-\paragraph{Recorded-action controls.}
-Recorded-control preserves the mixture mask, time condition, and weighting, but replaces B inputs with recorded actions. Recorded-clean instead fixes B inputs to recorded actions, its condition to one, and weights to one.
-
-B-only removes the A objective and uses clean recorded-action supervision. Joint versus Recorded-control changes input exposure and the action-mediated gradient together; only a complete detached contrast separates them.
-
-\subsection{Selection and refinement under a decision budget}
+\subsection{Fast action selection and refinement}
 \label{sec:planning}
-For fixed $z_0,z_g$, define the terminal goal cost
+For fixed $z_0,z_g$, define a differentiable terminal goal cost
 \begin{equation}
- J(\mathbf a)=\operatorname{mse}\big(B_\theta(z_0,\mathbf a;1)_H,z_g\big).
+ J(\mathbf a)=\operatorname{mse}\left(B_\theta(z_0,\mathbf a;1)_H,z_g\right).
  \label{eq:score}
 \end{equation}
-The goal enters only this external cost. B is a learned scorer, not a simulator-grounded verifier.
+This learned cost supplies both candidate scores and action gradients. Model parameters remain fixed during decision-making.
 
-\paragraph{Direct execution and candidate selection.}
-Direct execution (P0) samples one sequence from A and executes it without B. Candidate selection (P3) generates $N$ sequences with independent noise and chooses
+\paragraph{Candidate selection.}
+We sample $N$ proposals with independent noise, $\mathbf a^{(i)}=A_\theta(z_0,z_g;\epsilon_i,S)$, evaluate their predicted futures in a batch, and select
 \begin{equation}
  \mathbf a^\star=\mathbf a^{(i^\star)},\qquad
  i^\star=\operatorname*{arg\,min}_{1\leq i\leq N}J(\mathbf a^{(i)}).
 \end{equation}
-The candidates can be scored in a batch. P3 performs no CEM iterations. Increasing $N$ changes both coverage and the opportunity to exploit prediction error, so larger pools need not improve execution.
+This procedure uses learned proposals followed by one scoring stage, avoiding iterative resampling. We call it P3 in the experiments. Direct execution of one proposal without B is P0 and provides a minimal-computation reference.
 
 \paragraph{Post-generation refinement (PO).}
-From a proposal $\mathbf a^0$, PO takes $K$ normalized gradient steps in normalized action coordinates:
+Starting from a generated proposal $\mathbf a^0$, we perform $K$ gradient updates in normalized action coordinates:
 \begin{equation}
  \begin{split}
  g^j&=\nabla_{\mathbf a}J(\mathbf a^j),\\
- \mathbf a^{j+1}&=\Pi_{\mathcal B_R(\mathbf a^0)}
- \left(\mathbf a^j-\eta\frac{g^j}{\max(\operatorname{RMS}(g^j),\varepsilon)}\right).
+ \mathbf a^{j+1}&=\Pi_{\mathcal B_R(\mathbf a^0)}\left(
+ \mathbf a^j-\eta\frac{g^j}{\max(\operatorname{RMS}(g^j),\varepsilon)}\right).
  \end{split}
  \label{eq:po}
 \end{equation}
-The projection bounds RMS displacement from the initial proposal by $R$; numerically zero gradients produce zero updates. This trust region does not itself enforce physical action bounds. PO can refine one proposal (P0-PO), every candidate before selection (P3-PO), or only the selected candidate (select-then-refine). Model parameters remain frozen.
+The trust region $\mathcal B_R$ bounds RMS displacement from the original proposal; physical action bounds are enforced separately. PO can refine a single proposal or the candidate selected by P3. Refining every candidate before selection is a distinct, more expensive configuration.
 
 \paragraph{Guidance during generation (GF).}
-After an Euler step reaches time $u$, GF forms
-$\hat{\mathbf a}(x,u)=x+(1-u)v_\theta(x,u;z_0,z_g)$
-and differentiates $J(\hat{\mathbf a})$ with respect to $x$. Bounded updates use that Euler proposal as their local reference. At $S=1$, $u=1$ and $\hat{\mathbf a}=x$: with matched noise and update settings, this rule reduces to PO. The current GF implementation still evaluates A, so mathematical equivalence does not imply identical runtime. Multi-step GF is a separate comparison, not additional evidence from duplicating the one-step case.
+After an Euler step reaches time $u$ and state $x$, we form $\hat{\mathbf a}(x,u)=x+(1-u)v_\theta(x,u;z_0,z_g)$. We differentiate $J(\hat{\mathbf a}(x,u))$ with respect to $x$ and apply bounded normalized updates before continuing generation. Each update uses the current Euler proposal as its local reference. For $S=1$, $u=1$ and $\hat{\mathbf a}=x$, so matched PO and GF updates coincide mathematically. Their implementations can still have different runtimes; multi-step guidance is evaluated separately.
 
-\paragraph{Search references and computational accounting.}
-Random-initialized CEM (P1) and actor-initialized CEM (P2) optimize the same cost. P3 uses $S$ generation rounds followed by B scoring; PO adds $K$ sequential B forward/backward updates. Their costs depend on candidate count, batching, precision, and hardware. We compare measured latency at matched success or success at matched latency. After selection or refinement, the configured action prefix is executed and a new observation triggers replanning.
+\paragraph{Allocating decision computation.}
+Selection requires $S$ batched generation rounds and a B scoring stage; PO adds $K$ B forward/backward updates, while GF interleaves generation and cost-based updates. Increasing $N$, $S$, or $K$ changes both computation and decision behavior. We compare these choices against random-initialized CEM (P1) and actor-initialized CEM (P2), using measured decision latency to account for batch size, horizon, precision, and hardware. The selected or refined action prefix is executed before replanning.

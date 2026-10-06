@@ -1,0 +1,105 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: pusht
+  - policy: round4_ab
+
+output_model_name: r5_phase5_expansion
+subdir: null
+resume_ckpt: null
+init_weights: null
+initial_epoch: 0
+num_workers: 8
+train_split: 0.9
+seed: 3072
+img_size: 224
+embed_dim: 192
+action_horizon: 5
+history_size: 1
+num_preds: ${action_horizon}
+checkpoint_interval_steps: 1000
+
+train_mode: stage_ab
+stage_a_goal_injection: token
+latent_head_layers: 6
+latent_head_dim: 192
+latent_action_mix_epochs: 10
+detach_clean_action: false
+stage_b_timestep_mode: legacy
+token_encoding: legacy
+stage_b_dynamics: parallel_prefix
+stage_b_attention_mode: strict_causal
+latent_loss_noise_threshold: 0.2
+inference_steps: 16
+d_flow_steps: 16
+activation_checkpointing: true
+
+trainer:
+  max_epochs: 10
+  max_steps: -1
+  devices: 1
+  accelerator: gpu
+  strategy: auto
+  precision: bf16
+  accumulate_grad_batches: 4
+  gradient_clip_val: 1.0
+  use_distributed_sampler: false
+
+loader:
+  batch_size: 32
+  num_workers: ${num_workers}
+  persistent_workers: true
+  prefetch_factor: 3
+  pin_memory: true
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+loss:
+  latent:
+    weight: 1.0
+  sigreg:
+    weight: 0.09
+    kwargs:
+      knots: 17
+      num_proj: 1024
+  d:
+    lambda: 0.0
+  e:
+    lambda: 0.0
+
+data_pipeline:
+  gpu_image_preprocessing: true
+  hdf5_chunk_size: 100
+
+validation_diagnostics:
+  enabled: false
+
+epoch_eval:
+  enabled: false
+
+round4_diagnostics:
+  enabled: false
+
+round5_phase5_expansion:
+  enabled: true
+  task: pusht
+  structure: 5x5
+  action_block_steps: 5
+  stage_a_goal_index: 5
+  effective_window_steps: 25
+  clip_storage_steps: 30
+  effective_batch_size: 128
+  dataset_sha256: pending
+  manifest_root: outputs/round5_phase5_expansion_seed3072/manifests
+
+wandb:
+  enabled: false
+  config:
+    entity: wxflwyr-sun-yat-sen-university
+    project: LeWorldModel
+    name: ${output_model_name}
+    resume: allow
+    log_model: false

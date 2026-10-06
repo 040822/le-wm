@@ -1,0 +1,42 @@
+\section{Additional Templates for the CoWM Study}
+\label{app:budget_extensions}
+These panels reserve measurements required by specific resource or deployment claims. They contain no measured results and do not imply that conditional experiments have been completed.
+
+\paragraph{Sharing and resource cost.}
+Table~\ref{tab:resources} compares the resources of separate and shared backbones. Both total resident and active parameters are counted, including the visual encoder. Training steps, data exposure, precision, and hardware accompany per-update time and total GPU-hours. A same-width separate-DiT system has greater total capacity; an equal-capacity comparison is a distinct optional control.
+\begin{table*}[t]
+\centering\scriptsize
+\resizebox{\textwidth}{!}{\input{tables/final_resources}}
+\caption{Resource measurements for completed sharing contrasts. Decision latency uses matched $N/S/K$ and the same hardware. Sharing weights alone does not remove the separate A/B computations.}
+\label{tab:resources}
+\end{table*}
+
+\paragraph{Readouts.}
+Table~\ref{tab:physical_probe} reports linear and MLP readouts of observed latents. The main Cube panel covers all eight physical quantities; three auxiliary task panels use task-native state fields. Targets and units are fixed from the environment schema, and both models use identical episode-disjoint probe rows. These measurements test information recoverable by a readout, not the accuracy of future-state prediction. Applying the frozen observed-latent readouts to predicted futures remains a separate extension.
+\begin{table*}[t]
+\centering\small
+\resizebox{\textwidth}{!}{\input{tables/final_probe}}
+\caption{Observed-latent physical readouts. Entries report standardized-coordinate MSE and coordinate-mean Pearson $r$; MLP values are mean $\pm$ sample standard deviation over three readout seeds, while Linear is deterministic. Overall is an equal-weight mean over attributes. Cube is the main panel; TwoRoom, Push-T, and Reacher are auxiliary. Probe test episodes are disjoint from readout training and validation; this does not assert that the pretrained world models never saw those episodes.}
+\label{tab:physical_probe}
+\end{table*}
+
+\paragraph{Optional real-robot evaluation.}
+A real-robot extension would compare success and latency with matched initialization, control frequency, action interfaces, and trial counts (Table~\ref{tab:robot}). Policy time and observation-to-command time are measured separately. Completion time specifies how failed or truncated trials are treated. This is a design template, not evidence for real-world performance.
+\begin{table*}[t]
+\centering\scriptsize
+\resizebox{\textwidth}{!}{\input{tables/final_robot}}
+\caption{Optional real-robot template; no trials are asserted. SR/CI denotes success rate and its uncertainty.}
+\label{tab:robot}
+\end{table*}
+
+\paragraph{Search replacement criterion.}
+The historical prespecified criterion requires a macro one-sided 95\% success-difference bound above $-2$ percentage points and each declared task above $-4$ points, together with at least 20\% lower p50 decision latency. A new comparison must declare its task set, action semantics, and reference budget before applying the criterion. The historical reference did not pass the complete task-level gate. Lower latency alone therefore does not establish search replacement.
+
+\paragraph{Historical inference snapshot.}
+Table~\ref{tab:reference_inference_snapshot} preserves the previous manuscript's measured fixed-checkpoint panel alongside its unfilled matched-study fields. These protocols remain separate from the new main tables.
+\begin{table*}[t]
+\centering\small
+\input{tables/reference_inference_snapshot}
+\caption{Preserved historical inference snapshot. The measured panel uses one training seed and its original evaluation cohort; pending rows retain their original result slots.}
+\label{tab:reference_inference_snapshot}
+\end{table*}

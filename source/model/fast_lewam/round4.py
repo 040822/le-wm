@@ -46,16 +46,22 @@ class Round4FastLeWAM(FastLeWAM):
         self,
         *args,
         d_flow_steps: int = 16,
+        latent_flow_matching: bool = False,
+        latent_flow_steps: int = 2,
         activation_checkpointing: bool = True,
         **kwargs,
     ):
         if int(d_flow_steps) < 1:
             raise ValueError("d_flow_steps must be positive")
+        if int(latent_flow_steps) < 1:
+            raise ValueError("latent_flow_steps must be positive")
         super().__init__(*args, **kwargs)
-        if self.action_horizon < 2:
-            raise ValueError("Round 4 latent paths require action_horizon >= 2")
+        # Stage A/B support one-step action chunks.  Only the optional latent-
+        # path (D) branch needs an interior token and therefore a horizon >=2.
 
         self.d_flow_steps = int(d_flow_steps)
+        self.latent_flow_matching = bool(latent_flow_matching)
+        self.latent_flow_steps = int(latent_flow_steps)
         self.activation_checkpointing = bool(activation_checkpointing)
 
         # One condition embedding is shared by every branch.  A/B/C use the
@@ -85,8 +91,27 @@ class Round4FastLeWAM(FastLeWAM):
         self.e_adjacent_input = nn.Linear(3 * self.latent_dim, self.model_dim)
         self.inverse_dynamics_head = nn.Linear(self.model_dim, self.action_dim)
 
+        # Keep the historical Regression-B checkpoint schema unchanged.  The
+        # conditional latent-flow interface exists only in Phase 6.1 models;
+        # constructing the old default model therefore consumes the same
+        # initialization stream and still loads old checkpoints strictly.
+        if self.latent_flow_matching:
+            self.latent_flow_input = nn.Linear(self.latent_dim, self.model_dim)
+            self.latent_flow_time_mlp = nn.Sequential(
+                nn.Linear(self.model_dim, self.model_dim),
+                nn.SiLU(),
+                nn.Linear(self.model_dim, self.model_dim),
+            )
+            self.latent_flow_velocity_head = nn.Linear(
+                self.model_dim, self.latent_dim
+            )
+
         self.register_buffer(
-            "d_mask", d_attention_mask(self.action_horizon), persistent=False
+            "d_mask",
+            d_attention_mask(self.action_horizon)
+            if self.action_horizon >= 2
+            else None,
+            persistent=False,
         )
         self.register_buffer(
             "e_mask", e_attention_mask(self.action_horizon), persistent=False
@@ -231,6 +256,10 @@ class Round4FastLeWAM(FastLeWAM):
             return super().predict_one_step(*args, **kwargs)
 
     def _validate_path_inputs(self, z_start, z_goal, interior):
+        if self.action_horizon < 2:
+            raise ValueError(
+                "Round4 D latent-path operations require action_horizon >= 2"
+            )
         if z_start.ndim != 2 or tuple(z_start.shape) != tuple(z_goal.shape):
             raise ValueError(
                 "z_start and z_goal must both have shape [B, latent_dim]"
@@ -267,6 +296,128 @@ class Round4FastLeWAM(FastLeWAM):
         """Compatibility alias for callers that name D's output a flow."""
         return self.predict_latent_velocity(*args, **kwargs)
 
+    def predict_future_latent_velocity(
+        self,
+        z0: torch.Tensor,
+        actions: torch.Tensor,
+        source_timestep: torch.Tensor,
+        noisy_latents: torch.Tensor,
+        latent_flow_timestep: torch.Tensor,
+        task_condition: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Predict causal prefix velocities for a noisy future latent path.
+
+        The token sequence is ``[z0, a1, z1_tau, ..., aH, zH_tau]``.  The
+        existing strict lower-triangular mask means query k can read only
+        actions through k and noisy latents through k.
+        """
+        if not self.latent_flow_matching:
+            raise RuntimeError("conditional latent flow is disabled for this model")
+        if self.stage_b_attention_mode != "strict_causal":
+            raise ValueError(
+                "conditional latent flow requires strict_causal Stage-B attention"
+            )
+        source_timestep = self._validate_inputs(z0, actions, source_timestep)
+        expected_latents = (
+            z0.shape[0], self.action_horizon, self.latent_dim
+        )
+        if tuple(noisy_latents.shape) != expected_latents:
+            raise ValueError(
+                f"noisy_latents must have shape {expected_latents}, "
+                f"got {tuple(noisy_latents.shape)}"
+            )
+        if not torch.is_tensor(latent_flow_timestep):
+            latent_flow_timestep = torch.as_tensor(
+                latent_flow_timestep, device=z0.device, dtype=z0.dtype
+            )
+        latent_flow_timestep = latent_flow_timestep.to(
+            device=z0.device, dtype=z0.dtype
+        )
+        if latent_flow_timestep.ndim == 0:
+            latent_flow_timestep = latent_flow_timestep.expand(z0.shape[0])
+        if tuple(latent_flow_timestep.shape) != (z0.shape[0],):
+            raise ValueError(
+                "latent_flow_timestep must have shape "
+                f"[{z0.shape[0]}], got {tuple(latent_flow_timestep.shape)}"
+            )
+
+        with self._mode(self.MODE_B), self._joint_mode(self.MODE_B):
+            condition = self._condition(z0, source_timestep, task_condition)
+            flow_condition = self.latent_flow_time_mlp(
+                self._time_embedding(latent_flow_timestep, z0)
+            )
+            condition = condition + flow_condition
+            batch = z0.shape[0]
+            tokens = z0.new_empty(
+                batch, 1 + 2 * self.action_horizon, self.model_dim
+            )
+            if self.token_encoding == "legacy":
+                tokens[:, 0] = self.latent_input(z0)
+                tokens[:, 1::2] = self.action_input(actions)
+                tokens[:, 2::2] = self.query_tokens + self.latent_flow_input(
+                    noisy_latents
+                )
+                tokens = tokens + self.joint_positions
+            else:
+                tokens[:, 0] = self._state_token(z0).squeeze(1)
+                tokens[:, 1::2] = self._action_tokens(actions)
+                tokens[:, 2::2] = (
+                    self.query_content
+                    + self.latent_flow_input(noisy_latents)
+                    + self.time_positions[:, 1 : self.action_horizon + 1]
+                    + self.type_embeddings.weight[self.QUERY_TYPE]
+                )
+            hidden = self.predictor(
+                tokens, condition, attention_mask=self.causal_mask
+            )
+        return self.latent_flow_velocity_head(hidden[:, 2::2])
+
+    def sample_future_latents(
+        self,
+        z0: torch.Tensor,
+        actions: torch.Tensor,
+        source_timestep: torch.Tensor,
+        *,
+        initial_noise: torch.Tensor | None = None,
+        num_steps: int | None = None,
+        generator: torch.Generator | None = None,
+        task_condition: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Integrate the conditional latent velocity from noise with Euler."""
+        if not self.latent_flow_matching:
+            raise RuntimeError("conditional latent flow is disabled for this model")
+        steps = self.latent_flow_steps if num_steps is None else int(num_steps)
+        if steps < 1:
+            raise ValueError("num_steps must be positive")
+        expected = (z0.shape[0], self.action_horizon, self.latent_dim)
+        if initial_noise is None:
+            initial_noise = torch.randn(
+                expected,
+                device=z0.device,
+                dtype=z0.dtype,
+                generator=generator,
+            )
+        elif tuple(initial_noise.shape) != expected:
+            raise ValueError(
+                f"initial_noise must have shape {expected}, "
+                f"got {tuple(initial_noise.shape)}"
+            )
+        latents = initial_noise.to(device=z0.device, dtype=z0.dtype)
+        dt = 1.0 / float(steps)
+        for step in range(steps):
+            flow_timestep = z0.new_full((z0.shape[0],), step * dt)
+            velocity = self.predict_future_latent_velocity(
+                z0,
+                actions,
+                source_timestep,
+                latents,
+                flow_timestep,
+                task_condition=task_condition,
+            )
+            latents = latents + dt * velocity
+        self.last_latent_flow_forward_count = steps
+        return latents
+
     @torch.no_grad()
     def sample_latent_paths(
         self,
@@ -280,6 +431,10 @@ class Round4FastLeWAM(FastLeWAM):
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """Generate ``[B,S,H+1,D]`` paths with exact fixed endpoints."""
+        if self.action_horizon < 2:
+            raise ValueError(
+                "Round4 D latent-path operations require action_horizon >= 2"
+            )
         if flow_steps is not None:
             if num_steps is not None and int(num_steps) != int(flow_steps):
                 raise ValueError("num_steps and flow_steps disagree")
@@ -361,9 +516,25 @@ class Round4FastLeWAM(FastLeWAM):
         detach_clean_action: bool = False,
         latent_goal: torch.Tensor | None = None,
         noisy_latents: torch.Tensor | None = None,
+        latent_flow_timestep: torch.Tensor | None = None,
         latent_path: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """Extend the legacy forward contract with explicit D and E modes."""
+        if mode == "stage_b_fm":
+            if noisy_latents is None or latent_flow_timestep is None:
+                raise ValueError(
+                    "stage_b_fm requires noisy_latents and latent_flow_timestep"
+                )
+            return {
+                "latent_velocity": self.predict_future_latent_velocity(
+                    z0,
+                    actions,
+                    timestep,
+                    noisy_latents,
+                    latent_flow_timestep,
+                    task_condition=task_condition,
+                )
+            }
         if mode == "stage_d":
             if latent_goal is None or noisy_latents is None:
                 raise ValueError("stage_d requires latent_goal and noisy_latents")

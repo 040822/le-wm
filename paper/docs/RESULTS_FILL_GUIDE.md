@@ -2,7 +2,30 @@
 
 更新：2026-10-01。用途：在固定论文结构中填后续结果，不作为实验启动清单。
 
-## 1. 六张主表
+## 本轮新稿填写入口（优先于下文旧版布局）
+
+当前正文的表 1–5 对应 `Couple_lewm.md` 的五组核心实验。表 3 包含 ranking/refinement 两个面板，表 5 包含 latency/budget 两个面板；物理 probe、资源统计和可选真机在补充材料。模板尚未执行的行标明未测，不能把 TBD 当作零或既定正结果。
+
+| 面板 | LaTeX 文件 | 本轮字段 |
+|---|---|---|
+| 主结果 | `tables/final_main.tex` | 旧 `main-*`，新增 `draft-main-po-*` |
+| 耦合 | `tables/final_training.tex` | `draft-train-*` |
+| 排序 | `tables/final_ranking.tex` | `draft-pool-*`、`draft-rank-*` |
+| 修正 | `tables/final_refinement.tex` | `draft-refine-*` |
+| 推理 | `tables/final_inference.tex` | `draft-infer-*` |
+| 时间成本 | `tables/final_efficiency.tex` | `draft-eff-*` |
+| 相同预算 | `tables/final_budget.tex` | `draft-budget-*` |
+| 资源 | `tables/final_resources.tex` | `draft-resource-*` |
+| 物理读出 | `tables/final_probe.tex` | `draft-probe-*` |
+| 真机（可选） | `tables/final_robot.tex` | `draft-robot-*` |
+
+通用诊断表目前代表一个明确声明的 task/cohort，不是跨任务平均。复制为多个任务面板时同步增加带任务后缀的结果字段，不让一个宏覆盖多任务结果。Own-A P3 与 fixed-actor P3 不能混填；Full/Detach/Recorded 的命名也不能掩盖不同 timestep 和 loss 权重。
+
+摘要、引言及预算概述分别填写 `draft-abstract-result`、`draft-intro-result`、`draft-budget-result`，仅陈述与表格一致的已测结论。旧稿的叙述效应宏仍由 `results.tex` 管理，填表后须同步核对。`draft-dewm-version` 与 `draft-baseline-configurations` 记录正式比较配置。
+
+历史推理面板保存在 `tables/reference_inference_snapshot.tex`；其数值及旧占位字段不映射到新协议。下文保留的旧字段指南用于追溯，不代表新旧结果可以自动合并。
+
+## 1. 六张主表（上一版字段记录）
 
 | 主表 | 问题 | 文件 | 字段前缀 |
 |---|---|---|---|

@@ -763,11 +763,23 @@ def index_phase15_results(
 ) -> dict[str, dict[str, Any]]:
     """Index current and historical artifacts with explicit reuse scope."""
     output_root = Path(output_root)
-    history_files = [path for root in history_roots for path in Path(root).rglob("result.json")]
     # Result paths already carry task/mode/protocol/step/guidance.  Bucket
-    # paths first and only parse artifacts that could match a planned spec;
-    # the history roots can contain gigabytes of trace JSONL.
+    # paths as they are discovered and only parse artifacts that could match a
+    # planned spec. Stream the walk because history roots can contain very
+    # large result trees, and retaining every Path object needlessly raises
+    # peak memory during indexing.
     history_by_hint: dict[tuple[Any, ...], list[Path]] = {}
+    planned_hints = {
+        (
+            spec.get("task"),
+            spec.get("mode"),
+            spec.get("cem_protocol"),
+            spec.get("flow_steps"),
+            spec.get("guidance", "none"),
+        )
+        for spec in specs
+    }
+
     def path_hint(path: Path) -> tuple[Any, ...] | None:
         parts = path.parts
         try:
@@ -784,15 +796,15 @@ def index_phase15_results(
             return task, mode, protocol, flow, guidance
         except (ValueError, IndexError, AttributeError):
             return None
-    for path in history_files:
-        hint = path_hint(path)
-        if hint is not None:
-            history_by_hint.setdefault(hint, []).append(path)
+    for root in history_roots:
+        for path in Path(root).rglob("result.json"):
+            hint = path_hint(path)
+            if hint is not None and hint in planned_hints:
+                history_by_hint.setdefault(hint, []).append(path)
     indexed: dict[str, dict[str, Any]] = {}
     for spec in specs:
         key = condition_id(identities[stable_sha256(dict(spec))])
         current = result_path(output_root, spec, identities[stable_sha256(dict(spec))])
-        candidates: list[tuple[Path, Mapping[str, Any] | None]] = [(current, None)]
         hint = (
             spec.get("task"),
             spec.get("mode"),
@@ -800,9 +812,12 @@ def index_phase15_results(
             spec.get("flow_steps"),
             spec.get("guidance", "none"),
         )
-        candidates.extend((path, None) for path in history_by_hint.get(hint, ()))
+        history_candidates = history_by_hint.get(hint, ())
+        candidates: list[tuple[Path, Mapping[str, Any] | None]] = [(current, None)]
+        candidates.extend((path, None) for path in history_candidates)
         selected: dict[str, Any] | None = None
         failures: list[str] = []
+        current_identity_rejected = False
         for path, preloaded in candidates:
             if not path.is_file():
                 continue
@@ -836,6 +851,14 @@ def index_phase15_results(
                     "status": "completed" if validation["complete"] else "reused_success_only",
                     "reuse_scope": "full" if validation["complete"] else "success_only",
                     "source": "current" if path == current else "history",
+                    "reuse_reason": (
+                        "current_artifact_already_available"
+                        if path == current
+                        else "compatible_historical_artifact_reused_full"
+                        if validation["complete"]
+                        else "compatible_historical_artifact_reused_success_only"
+                    ),
+                    "historical_path_candidate_count": len(history_candidates),
                     "path": str(path),
                     "payload": payload,
                     "validation": validation,
@@ -847,6 +870,8 @@ def index_phase15_results(
                 # conditions.  Identity mismatches are expected during the
                 # scan and mean "no reusable artifact", rather than failure.
                 if str(exc) == "artifact identity or execution semantics mismatch":
+                    if path == current:
+                        current_identity_rejected = True
                     continue
                 if path == current or "phase15_identity" in str(exc):
                     failures.append(f"{path}: {exc}")
@@ -857,6 +882,16 @@ def index_phase15_results(
                 "status": "failed" if failures else "pending",
                 "reuse_scope": None,
                 "source": None,
+                "reuse_reason": (
+                    "artifact_validation_failed"
+                    if failures
+                    else "current_artifact_identity_mismatch"
+                    if current_identity_rejected
+                    else "historical_candidates_did_not_match_identity_and_execution_semantics"
+                    if history_candidates
+                    else "no_historical_candidate_for_condition"
+                ),
+                "historical_path_candidate_count": len(history_candidates),
                 "path": str(current),
                 "errors": failures,
             }
@@ -1066,18 +1101,12 @@ def make_control_actions(
             transformed[: blocks * action_block] = block_view[permutation].reshape(
                 blocks * action_block, -1
             )
-            for shift, shifted in (
-                (0, transformed),
-                (1, np.roll(transformed, int(action_block), axis=0)),
-                (-1, np.roll(transformed, -int(action_block), axis=0)),
-            ):
-                add(
-                    shifted,
-                    "block_transform",
-                    anchor_index,
-                    permutation=permutation_index,
-                    shift=shift,
-                )
+            add(
+                transformed,
+                "block_transform",
+                anchor_index,
+                permutation=permutation_index,
+            )
     for index in range(64):
         add(
             _unit_direction(rng, values[0].shape),
@@ -1210,6 +1239,15 @@ def candidate_selection_metrics(
             else bool(evaluate_success(task, record["physical_state"], record["goal_state"]))
             for record in candidates
         ]
+        selected_success = bool(successes[selected_index])
+        random_success_rate = float(
+            np.mean(
+                [
+                    successes[rng.integers(0, len(successes))]
+                    for _ in range(int(random_draws))
+                ]
+            )
+        )
         state_rows.append(
             {
                 "state_id": state_id,
@@ -1218,8 +1256,10 @@ def candidate_selection_metrics(
                 "selected_distance": float(distances[selected_index]),
                 "selection_regret": float(distances[selected_index] - distances[oracle_index]),
                 "oracle_success": bool(any(successes)),
-                "selected_success": bool(successes[selected_index]),
-                "random_success_rate": float(np.mean([successes[rng.integers(0, len(successes))] for _ in range(int(random_draws))])),
+                "selected_success": selected_success,
+                "random_success_rate": random_success_rate,
+                "selected_minus_random_success_rate": float(selected_success)
+                - random_success_rate,
                 "random_distance": float(np.mean(random_values)),
                 "predicted_true_distance_correlation": safe_correlation(costs, distances),
                 "selected_index": selected_index,
@@ -1242,6 +1282,9 @@ def candidate_selection_metrics(
         "oracle_success_rate": float(np.mean([row["oracle_success"] for row in state_rows])),
         "selected_success_rate": float(np.mean([row["selected_success"] for row in state_rows])),
         "random_success_rate": mean("random_success_rate"),
+        "selected_minus_random_success_rate": mean(
+            "selected_minus_random_success_rate"
+        ),
         "oracle_best_physical_distance": mean("oracle_distance"),
         "selected_physical_distance": mean("selected_distance"),
         "selection_regret": mean("selection_regret"),
@@ -1348,6 +1391,8 @@ def candidate_pool_metrics(
         state_ids=state_ids,
     )
     by_flow: dict[str, dict[str, Any]] = {}
+    pooled_selection_gain_rows: list[dict[str, Any]] = []
+    pooled_selection_regret_rows: list[dict[str, Any]] = []
     for offset, flow in enumerate(tuple(int(value) for value in flow_steps)):
         subset = [record for record in normalized if int(record["flow_steps"]) == flow]
         metrics = candidate_selection_metrics(
@@ -1357,13 +1402,33 @@ def candidate_pool_metrics(
             seed=int(seed) + offset,
         )
         state_rows = metrics["state_rows"]
+        pooled_selection_gain_rows.extend(
+            {
+                "state_id": row["state_id"],
+                "selected_minus_random_success_rate": row[
+                    "selected_minus_random_success_rate"
+                ],
+            }
+            for row in state_rows
+        )
+        pooled_selection_regret_rows.extend(
+            {
+                "state_id": row["state_id"],
+                "selection_regret": row["selection_regret"],
+            }
+            for row in state_rows
+        )
         bootstrap_fields = [
             "oracle_success",
             "selected_success",
+            "random_success_rate",
+            "selected_minus_random_success_rate",
             "selection_regret",
             "oracle_distance",
             "selected_distance",
         ]
+        if all(row.get("predicted_true_distance_correlation") is not None for row in state_rows):
+            bootstrap_fields.append("predicted_true_distance_correlation")
         if all(row.get("oracle_latent_cost") is not None for row in state_rows):
             bootstrap_fields.extend(("oracle_latent_cost", "selected_latent_cost"))
         metrics["bootstrap"] = {
@@ -1376,6 +1441,18 @@ def candidate_pool_metrics(
             for index, field in enumerate(bootstrap_fields)
         }
         by_flow[str(flow)] = metrics
+    pooled_selection_gain_bootstrap = cluster_bootstrap(
+        pooled_selection_gain_rows,
+        "selected_minus_random_success_rate",
+        samples=bootstrap_samples,
+        seed=int(seed) + 10_000,
+    )
+    pooled_selection_regret_bootstrap = cluster_bootstrap(
+        pooled_selection_regret_rows,
+        "selection_regret",
+        samples=bootstrap_samples,
+        seed=int(seed) + 10_001,
+    )
     return {
         "schema_version": "round5_phase1_5_candidate_pool_metrics_v1",
         "task": str(task),
@@ -1384,6 +1461,14 @@ def candidate_pool_metrics(
         "flow_steps": [int(value) for value in flow_steps],
         "candidates_per_flow_step": int(candidates_per_flow_step),
         "complete": True,
+        "selection_regret": pooled_selection_regret_bootstrap["estimate"],
+        "selected_minus_random_success_rate": pooled_selection_gain_bootstrap[
+            "estimate"
+        ],
+        "bootstrap": {
+            "selection_regret": pooled_selection_regret_bootstrap,
+            "selected_minus_random_success_rate": pooled_selection_gain_bootstrap
+        },
         "by_flow_steps": by_flow,
     }
 
@@ -1392,6 +1477,23 @@ def guidance_effect_metrics(records: Sequence[Mapping[str, Any]]) -> dict[str, A
     """Summarize predicted and real effects, including model exploitation."""
     if not records:
         raise ValueError("guidance records cannot be empty")
+    input_records = len(records)
+    records = [record for record in records if record.get("paired_outcome_valid", True)]
+    if not records:
+        return {
+            "records": 0,
+            "input_records": input_records,
+            "excluded_noncomparable_records": input_records,
+            "predicted_improvement_mean": None,
+            "true_latent_improvement_mean": None,
+            "true_physical_improvement_mean": None,
+            "true_improvement_fraction": None,
+            "true_degradation_fraction": None,
+            "model_exploitation_fraction": None,
+            "predicted_true_effect_correlation": None,
+            "action_rms_displacement_mean": None,
+            "action_saturation_fraction": None,
+        }
     def value(record: Mapping[str, Any], name: str, guided_name: str) -> float:
         observed = record.get(name, record.get(guided_name))
         if observed is None:
@@ -1412,31 +1514,76 @@ def guidance_effect_metrics(records: Sequence[Mapping[str, Any]]) -> dict[str, A
             for record in records
         ]
     )
-    displacement = np.asarray(
+    latent = np.asarray(
         [
-            float(
-                row.get(
-                    "action_rms_displacement",
-                    row.get("guided_action_rms_displacement", math.nan),
-                )
-            )
-            for row in records
-        ]
+            true[index]
+            if record.get("true_latent_improvement") is None
+            else float(record["true_latent_improvement"])
+            for index, record in enumerate(records)
+        ],
+        dtype=np.float64,
     )
-    finite_displacement = displacement[np.isfinite(displacement)]
+    grouped: dict[str, list[int]] = {}
+    for index, record in enumerate(records):
+        state_id = record.get("state_id", f"record:{index}")
+        grouped.setdefault(canonical_json(state_id), []).append(index)
+    state_predicted: list[float] = []
+    state_true: list[float] = []
+    state_latent: list[float] = []
+    state_true_positive: list[float] = []
+    state_true_negative: list[float] = []
+    state_exploitation: list[float] = []
+    state_displacements: list[float] = []
+    state_saturation: list[float] = []
+    for indices in grouped.values():
+        state_predicted.append(float(np.mean(predicted[indices])))
+        state_true.append(float(np.mean(true[indices])))
+        state_latent.append(float(np.mean(latent[indices])))
+        state_true_positive.append(float(np.mean(true[indices] > 0.0)))
+        state_true_negative.append(float(np.mean(true[indices] < 0.0)))
+        state_exploitation.append(
+            float(np.mean((predicted[indices] > 0.0) & (true[indices] < 0.0)))
+        )
+        displacements = np.asarray(
+            [
+                float(
+                    records[index].get(
+                        "action_rms_displacement",
+                        records[index].get("guided_action_rms_displacement", math.nan),
+                    )
+                )
+                for index in indices
+            ],
+            dtype=np.float64,
+        )
+        finite = displacements[np.isfinite(displacements)]
+        if len(finite):
+            state_displacements.append(float(finite.mean()))
+        state_saturation.append(
+            float(np.mean([float(records[index].get("action_saturation_fraction", 0.0)) for index in indices]))
+        )
+    state_predicted_array = np.asarray(state_predicted, dtype=np.float64)
+    state_true_array = np.asarray(state_true, dtype=np.float64)
     return {
         "records": len(records),
-        "predicted_improvement_mean": float(np.mean(predicted)),
-        "true_latent_improvement_mean": float(np.mean([float(row.get("true_latent_improvement", value)) for row, value in zip(records, true)])),
-        "true_physical_improvement_mean": float(np.mean(true)),
-        "true_improvement_fraction": float(np.mean(true > 0.0)),
-        "true_degradation_fraction": float(np.mean(true < 0.0)),
-        "model_exploitation_fraction": float(np.mean((predicted > 0.0) & (true < 0.0))),
+        "input_records": input_records,
+        "excluded_noncomparable_records": input_records - len(records),
+        "states": len(grouped),
+        "predicted_improvement_mean": float(state_predicted_array.mean()),
+        "true_latent_improvement_mean": float(np.mean(state_latent)),
+        "true_physical_improvement_mean": float(state_true_array.mean()),
+        "true_improvement_fraction": float(np.mean(state_true_positive)),
+        "true_degradation_fraction": float(np.mean(state_true_negative)),
+        "model_exploitation_fraction": float(np.mean(state_exploitation)),
         "predicted_true_effect_correlation": (
-            None if len(predicted) < 2 else safe_correlation(predicted, true)
+            None
+            if len(state_predicted_array) < 2
+            else safe_correlation(state_predicted_array, state_true_array)
         ),
-        "action_rms_displacement_mean": None if len(finite_displacement) == 0 else float(np.mean(finite_displacement)),
-        "action_saturation_fraction": float(np.mean([float(row.get("action_saturation_fraction", 0.0)) for row in records])),
+        "action_rms_displacement_mean": None
+        if not state_displacements
+        else float(np.mean(state_displacements)),
+        "action_saturation_fraction": float(np.mean(state_saturation)),
     }
 
 
@@ -1450,6 +1597,18 @@ def paired_guidance_metrics(
     """Compare a guidance update with its same-displacement random control."""
     if not records:
         raise ValueError("paired guidance records cannot be empty")
+    input_records = len(records)
+    records = [record for record in records if record.get("paired_outcome_valid", True)]
+    if not records:
+        return {
+            "schema_version": "round5_phase1_5_paired_guidance_metrics_v1",
+            "records": 0,
+            "input_records": input_records,
+            "excluded_noncomparable_records": input_records,
+            "states": 0,
+            "bootstrap": {},
+            "state_rows": [],
+        }
     required = (
         "state_id",
         "guided_predicted_cost_before",
@@ -1498,20 +1657,47 @@ def paired_guidance_metrics(
                 "random_action_rms_displacement": values["random_action_rms_displacement"],
             }
         )
+    grouped_rows: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped_rows.setdefault(canonical_json(row["state_id"]), []).append(row)
+    state_rows: list[dict[str, Any]] = []
+    averaged_fields = (
+        "predicted_improvement",
+        "guided_true_improvement",
+        "random_true_improvement",
+        "paired_advantage",
+        "model_exploitation",
+        "guided_action_rms_displacement",
+        "random_action_rms_displacement",
+    )
+    for state_group in grouped_rows.values():
+        state_rows.append(
+            {
+                "state_id": state_group[0]["state_id"],
+                **{
+                    field: float(
+                        np.mean([float(row[field]) for row in state_group])
+                    )
+                    for field in averaged_fields
+                },
+            }
+        )
     result = {
         "schema_version": "round5_phase1_5_paired_guidance_metrics_v1",
         "records": len(rows),
-        "states": len({canonical_json(row["state_id"]) for row in rows}),
-        "predicted_improvement_mean": float(np.mean([row["predicted_improvement"] for row in rows])),
-        "guided_true_improvement_mean": float(np.mean([row["guided_true_improvement"] for row in rows])),
-        "random_true_improvement_mean": float(np.mean([row["random_true_improvement"] for row in rows])),
-        "paired_advantage_mean": float(np.mean([row["paired_advantage"] for row in rows])),
-        "guided_true_improvement_fraction": float(np.mean([row["guided_true_improvement"] > 0.0 for row in rows])),
-        "random_true_improvement_fraction": float(np.mean([row["random_true_improvement"] > 0.0 for row in rows])),
-        "model_exploitation_fraction": float(np.mean([row["model_exploitation"] for row in rows])),
+        "input_records": input_records,
+        "excluded_noncomparable_records": input_records - len(rows),
+        "states": len(state_rows),
+        "predicted_improvement_mean": float(np.mean([row["predicted_improvement"] for row in state_rows])),
+        "guided_true_improvement_mean": float(np.mean([row["guided_true_improvement"] for row in state_rows])),
+        "random_true_improvement_mean": float(np.mean([row["random_true_improvement"] for row in state_rows])),
+        "paired_advantage_mean": float(np.mean([row["paired_advantage"] for row in state_rows])),
+        "guided_true_improvement_fraction": float(np.mean([row["guided_true_improvement"] > 0.0 for row in state_rows])),
+        "random_true_improvement_fraction": float(np.mean([row["random_true_improvement"] > 0.0 for row in state_rows])),
+        "model_exploitation_fraction": float(np.mean([row["model_exploitation"] for row in state_rows])),
         "bootstrap": {
             field: cluster_bootstrap(
-                rows,
+                state_rows,
                 field,
                 samples=bootstrap_samples,
                 seed=int(seed) + index,
@@ -1520,13 +1706,13 @@ def paired_guidance_metrics(
                 ("guided_true_improvement", "random_true_improvement", "paired_advantage")
             )
         },
-        "state_rows": rows,
+        "state_rows": state_rows,
     }
     latent_records = [
         record
         for record in records
         if all(
-            field in record
+            field in record and record[field] is not None
             for field in (
                 "guided_true_latent_cost_before",
                 "guided_true_latent_cost_after",
@@ -1536,29 +1722,287 @@ def paired_guidance_metrics(
         )
     ]
     if latent_records:
-        guided = np.asarray(
-            [
-                float(record["guided_true_latent_cost_before"])
-                - float(record["guided_true_latent_cost_after"])
-                for record in latent_records
-            ],
-            dtype=np.float64,
-        )
-        random = np.asarray(
-            [
-                float(record["random_true_latent_cost_before"])
-                - float(record["random_true_latent_cost_after"])
-                for record in latent_records
-            ],
-            dtype=np.float64,
-        )
+        latent_by_state: dict[str, list[tuple[float, float]]] = {}
+        latent_state_ids: dict[str, Any] = {}
+        for record in latent_records:
+            key = canonical_json(record["state_id"])
+            latent_state_ids[key] = record["state_id"]
+            latent_by_state.setdefault(key, []).append(
+                (
+                    float(record["guided_true_latent_cost_before"])
+                    - float(record["guided_true_latent_cost_after"]),
+                    float(record["random_true_latent_cost_before"])
+                    - float(record["random_true_latent_cost_after"]),
+                )
+            )
+        latent_state_rows = [
+            {
+                "state_id": latent_state_ids[key],
+                "guided_latent_improvement": float(
+                    np.mean([item[0] for item in rows_for_state])
+                ),
+                "random_latent_improvement": float(
+                    np.mean([item[1] for item in rows_for_state])
+                ),
+                "paired_latent_advantage": float(
+                    np.mean([item[0] - item[1] for item in rows_for_state])
+                ),
+            }
+            for key, rows_for_state in latent_by_state.items()
+        ]
         result.update(
             {
                 "true_latent_records": len(latent_records),
-                "guided_true_latent_improvement_mean": float(np.mean(guided)),
-                "random_true_latent_improvement_mean": float(np.mean(random)),
-                "paired_true_latent_advantage_mean": float(np.mean(guided - random)),
+                "guided_true_latent_improvement_mean": float(
+                    np.mean([row["guided_latent_improvement"] for row in latent_state_rows])
+                ),
+                "random_true_latent_improvement_mean": float(
+                    np.mean([row["random_latent_improvement"] for row in latent_state_rows])
+                ),
+                "paired_true_latent_advantage_mean": float(
+                    np.mean([row["paired_latent_advantage"] for row in latent_state_rows])
+                ),
+                "paired_true_latent_advantage_bootstrap": cluster_bootstrap(
+                    latent_state_rows,
+                    "paired_latent_advantage",
+                    samples=bootstrap_samples,
+                    seed=int(seed) + 17,
+                ),
             }
+        )
+    return result
+
+
+def matched_guidance_mode_metrics(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    bootstrap_samples: int = PHASE15_BOOTSTRAP_SAMPLES,
+    seed: int = 2026,
+    start_cost_tolerance: float = 1e-8,
+) -> dict[str, Any]:
+    """Compare GF and PO physical improvement on identical states/configs.
+
+    Configuration cells are matched on flow steps, candidate index, inner
+    steps, step size, and maximum RMS offset.  For each shared cell, only
+    state IDs present in both modes with the same starting physical cost are
+    paired.  Configuration cells are averaged within each state before the
+    state-cluster bootstrap, so configurations and states are not treated as
+    independent observations.
+    """
+    input_records = len(records)
+    config_fields = (
+        "flow_steps",
+        "candidate_index",
+        "guidance_inner_steps",
+        "guidance_step_size",
+        "max_rms_offset",
+    )
+    by_mode: dict[str, dict[str, dict[str, list[dict[str, Any]]]]] = {
+        "post_opt": {},
+        "guided_flow": {},
+    }
+    configs: dict[str, dict[str, Any]] = {}
+    state_ids: dict[str, Any] = {}
+    valid_records = 0
+    excluded_invalid_records = 0
+    for record in records:
+        mode = record.get("guidance")
+        if mode not in by_mode:
+            excluded_invalid_records += 1
+            continue
+        if not record.get("paired_outcome_valid", True):
+            excluded_invalid_records += 1
+            continue
+        required = (
+            *config_fields,
+            "state_id",
+            "guided_true_cost_before",
+            "guided_true_cost_after",
+        )
+        missing = [field for field in required if field not in record]
+        if missing:
+            raise ValueError(f"matched guidance record is missing {missing}")
+        raw_config = {field: record[field] for field in config_fields}
+        try:
+            config = {
+                "flow_steps": int(raw_config["flow_steps"]),
+                "candidate_index": int(raw_config["candidate_index"]),
+                "guidance_inner_steps": int(raw_config["guidance_inner_steps"]),
+                "guidance_step_size": float(raw_config["guidance_step_size"]),
+                "max_rms_offset": float(raw_config["max_rms_offset"]),
+                "guidance": str(mode),
+            }
+            before = float(record["guided_true_cost_before"])
+            after = float(record["guided_true_cost_after"])
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "matched guidance configuration and physical costs must be numeric"
+            ) from error
+        numeric_values = (
+            before,
+            after,
+            config["guidance_step_size"],
+            config["max_rms_offset"],
+        )
+        if not all(np.isfinite(value) for value in numeric_values):
+            excluded_invalid_records += 1
+            continue
+        config_key = canonical_json({field: config[field] for field in config_fields})
+        state_key = canonical_json(record["state_id"])
+        configs[config_key] = {field: config[field] for field in config_fields}
+        state_ids[state_key] = record["state_id"]
+        by_mode[str(mode)].setdefault(config_key, {}).setdefault(state_key, []).append(
+            {"before": before, "improvement": before - after}
+        )
+        valid_records += 1
+
+    state_comparisons: dict[str, list[dict[str, Any]]] = {}
+    matched_configurations: list[dict[str, Any]] = []
+    mismatched_start_pairs = 0
+    matched_record_pairs = 0
+    shared_config_keys = sorted(
+        set(by_mode["post_opt"]) & set(by_mode["guided_flow"])
+    )
+    for config_index, config_key in enumerate(shared_config_keys):
+        po_states = by_mode["post_opt"][config_key]
+        gf_states = by_mode["guided_flow"][config_key]
+        matched_states = 0
+        config_state_rows: list[dict[str, Any]] = []
+        for state_key in sorted(set(po_states) & set(gf_states)):
+            po_rows = po_states[state_key]
+            gf_rows = gf_states[state_key]
+            po_before = float(np.mean([row["before"] for row in po_rows]))
+            gf_before = float(np.mean([row["before"] for row in gf_rows]))
+            if not np.isclose(
+                po_before,
+                gf_before,
+                rtol=0.0,
+                atol=float(start_cost_tolerance),
+            ):
+                mismatched_start_pairs += 1
+                continue
+            po_improvement = float(np.mean([row["improvement"] for row in po_rows]))
+            gf_improvement = float(np.mean([row["improvement"] for row in gf_rows]))
+            comparison_row = {
+                "state_id": state_ids[state_key],
+                "gf_minus_po_physical_improvement": gf_improvement - po_improvement,
+                "guided_flow_physical_improvement": gf_improvement,
+                "post_opt_physical_improvement": po_improvement,
+            }
+            state_comparisons.setdefault(state_key, []).append(comparison_row)
+            config_state_rows.append(comparison_row)
+            matched_states += 1
+            matched_record_pairs += min(len(po_rows), len(gf_rows))
+        if matched_states:
+            matched_configurations.append(
+                {
+                    **configs[config_key],
+                    "status": "ok" if matched_states >= 2 else "insufficient_matched_data",
+                    "matched_states": matched_states,
+                    "gf_minus_po_physical_improvement_mean": float(
+                        np.mean([
+                            row["gf_minus_po_physical_improvement"]
+                            for row in config_state_rows
+                        ])
+                    ),
+                    "bootstrap": (
+                        {
+                            "gf_minus_po_physical_improvement": cluster_bootstrap(
+                                config_state_rows,
+                                "gf_minus_po_physical_improvement",
+                                samples=bootstrap_samples,
+                                seed=int(seed) + config_index,
+                            )
+                        }
+                        if matched_states >= 2
+                        else {}
+                    ),
+                }
+            )
+
+    state_rows = [
+        {
+            "state_id": state_ids[state_key],
+            "matched_configuration_count": len(values),
+            **{
+                field: float(np.mean([row[field] for row in values]))
+                for field in (
+                    "gf_minus_po_physical_improvement",
+                    "guided_flow_physical_improvement",
+                    "post_opt_physical_improvement",
+                )
+            },
+        }
+        for state_key, values in sorted(state_comparisons.items())
+    ]
+    result: dict[str, Any] = {
+        "schema_version": "round5_phase1_5_matched_guidance_comparison_v1",
+        "status": "ok" if len(state_rows) >= 2 else "insufficient_matched_data",
+        "input_records": input_records,
+        "valid_records": valid_records,
+        "excluded_invalid_records": excluded_invalid_records,
+        "mismatched_start_pairs": mismatched_start_pairs,
+        "matched_configuration_count": len(matched_configurations),
+        "matched_state_configuration_pairs": sum(
+            len(rows) for rows in state_comparisons.values()
+        ),
+        "matched_record_pairs": matched_record_pairs,
+        "matched_states": len(state_rows),
+        "matched_configurations": matched_configurations,
+        "state_rows": state_rows,
+    }
+    if state_rows:
+        result.update(
+            {
+                "gf_minus_po_physical_improvement_mean": float(
+                    np.mean([row["gf_minus_po_physical_improvement"] for row in state_rows])
+                ),
+                "guided_flow_physical_improvement_mean": float(
+                    np.mean([row["guided_flow_physical_improvement"] for row in state_rows])
+                ),
+                "post_opt_physical_improvement_mean": float(
+                    np.mean([row["post_opt_physical_improvement"] for row in state_rows])
+                ),
+            }
+        )
+    result["bootstrap"] = (
+        {
+            "gf_minus_po_physical_improvement": cluster_bootstrap(
+                state_rows,
+                "gf_minus_po_physical_improvement",
+                samples=bootstrap_samples,
+                seed=int(seed),
+            )
+        }
+        if len(state_rows) >= 2
+        else {}
+    )
+    return result
+
+
+def matched_guidance_mode_metrics_by_milestone(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    milestone_steps: Sequence[int] = (5, 10, 15, 20, 25),
+    bootstrap_samples: int = PHASE15_BOOTSTRAP_SAMPLES,
+    seed: int = 2026,
+) -> dict[str, dict[str, Any]]:
+    """Compare matched PO/GF outcomes only at the same physical step."""
+    result: dict[str, dict[str, Any]] = {}
+    for index, milestone_step in enumerate(milestone_steps):
+        step = int(milestone_step)
+        step_records = [
+            record
+            for record in records
+            if record.get("physical_comparison_step") is not None
+            and int(record["physical_comparison_step"]) == step
+        ]
+        if not step_records:
+            continue
+        result[str(step)] = matched_guidance_mode_metrics(
+            step_records,
+            bootstrap_samples=bootstrap_samples,
+            seed=int(seed) + index,
         )
     return result
 
@@ -1578,18 +2022,24 @@ def cluster_bootstrap(
     for row in rows:
         grouped.setdefault(row.get(cluster_key), []).append(row)
     keys = list(grouped)
-    def reduce_values(selected: Sequence[Mapping[str, Any]]) -> float:
-        if callable(value):
-            return float(value(selected))
-        values = np.asarray([float(row[value]) for row in selected], dtype=np.float64)
-        return float(np.mean(values))
-    estimate = reduce_values(rows)
+    if int(samples) < 1:
+        raise ValueError("bootstrap samples must be positive")
+    if callable(value):
+        cluster_values = np.asarray(
+            [float(value(grouped[key])) for key in keys], dtype=np.float64
+        )
+    else:
+        cluster_values = np.asarray(
+            [
+                np.mean([float(row[value]) for row in grouped[key]])
+                for key in keys
+            ],
+            dtype=np.float64,
+        )
+    estimate = float(cluster_values.mean())
     rng = np.random.default_rng(int(seed))
-    draws = np.empty(int(samples), dtype=np.float64)
-    for index in range(int(samples)):
-        chosen = rng.integers(0, len(keys), size=len(keys))
-        resampled = [row for choice in chosen for row in grouped[keys[int(choice)]]]
-        draws[index] = reduce_values(resampled)
+    chosen = rng.integers(0, len(keys), size=(int(samples), len(keys)))
+    draws = cluster_values[chosen].mean(axis=1)
     return {
         "estimate": estimate,
         "cluster_count": len(keys),
@@ -1647,8 +2097,11 @@ def fit_ridge_probe(
     from sklearn.linear_model import Ridge
     from sklearn.preprocessing import StandardScaler
 
-    x = np.asarray(features, dtype=np.float64)
-    y = np.asarray(targets, dtype=np.float64)
+    # The encoder already returns float32 latents.  Keeping the probe design
+    # matrix in that dtype avoids doubling its memory footprint on large
+    # trajectory-disjoint samples.
+    x = np.asarray(features, dtype=np.float32)
+    y = np.asarray(targets, dtype=np.float32)
     ids = np.asarray(trajectory_ids, dtype=object)
     if x.ndim != 2 or y.ndim != 2 or len(x) != len(y) or len(ids) != len(x):
         raise ValueError("probe features, targets, and trajectory_ids are mis-shaped")
@@ -1662,19 +2115,20 @@ def fit_ridge_probe(
     x_scaler = StandardScaler().fit(x[train_mask])
     y_scaler = StandardScaler().fit(y[train_mask])
     x_train = x_scaler.transform(x[train_mask])
+    x_validation = x_scaler.transform(x[validation_mask])
     y_train = y_scaler.transform(y[train_mask])
     best = None
     for alpha in alphas:
         model = Ridge(alpha=float(alpha), random_state=int(seed))
         model.fit(x_train, y_train)
-        prediction = y_scaler.inverse_transform(model.predict(x_scaler.transform(x[validation_mask])))
+        prediction = y_scaler.inverse_transform(model.predict(x_validation))
         score = float(np.sqrt(np.mean(np.square(prediction - y[validation_mask]))))
         if best is None or score < best[0]:
             best = (score, float(alpha), model)
     assert best is not None
     model = best[2]
-    validation_prediction = y_scaler.inverse_transform(model.predict(x_scaler.transform(x[validation_mask])))
-    train_prediction = y_scaler.inverse_transform(model.predict(x_scaler.transform(x[train_mask])))
+    validation_prediction = y_scaler.inverse_transform(model.predict(x_validation))
+    train_prediction = y_scaler.inverse_transform(model.predict(x_train))
     shuffled_targets = y[train_mask].copy()
     np.random.default_rng(int(seed)).shuffle(shuffled_targets, axis=0)
     shuffled_model = Ridge(alpha=best[1], random_state=int(seed)).fit(x_train, y_scaler.transform(shuffled_targets))
@@ -1765,20 +2219,233 @@ def summarize_timing_samples(
     }
 
 
+def _environment_objects(env: Any) -> list[Any]:
+    """Return known environment/simulator objects without following arbitrary fields."""
+    queue = [env]
+    result: list[Any] = []
+    visited: set[int] = set()
+    while queue:
+        current = queue.pop(0)
+        if current is None or id(current) in visited:
+            continue
+        visited.add(id(current))
+        result.append(current)
+        for name in ("unwrapped", "env", "dmc_env", "_env", "physics", "sim"):
+            try:
+                nested = getattr(current, name, None)
+            except Exception:
+                continue
+            if nested is not None and nested is not current:
+                queue.append(nested)
+    return result
+
+
+def _mujoco_model_data(env: Any) -> tuple[Any, Any] | None:
+    """Find a MuJoCo model/data pair through Gymnasium or dm_control wrappers."""
+    for current in _environment_objects(env):
+        for model_name, data_name in (("_model", "_data"), ("model", "data")):
+            try:
+                model = getattr(current, model_name, None)
+                data = getattr(current, data_name, None)
+            except Exception:
+                continue
+            if model is None or data is None:
+                continue
+            model_ptr = getattr(model, "ptr", model)
+            data_ptr = getattr(data, "ptr", data)
+            if model_ptr is not None and data_ptr is not None:
+                return model_ptr, data_ptr
+    return None
+
+
+def _pymunk_space(env: Any) -> tuple[Any, Any, list[Any]] | None:
+    for current in _environment_objects(env):
+        try:
+            space = getattr(current, "space", None)
+            bodies = list(space.bodies) if space is not None else []
+        except Exception:
+            continue
+        if space is not None and bodies and callable(
+            getattr(space, "reindex_shapes_for_body", None)
+        ):
+            return current, space, bodies
+    return None
+
+
+def _variation_values(space: Any) -> Any:
+    children = getattr(space, "spaces", None)
+    if isinstance(children, Mapping):
+        return {key: _variation_values(child) for key, child in children.items()}
+    if not hasattr(space, "value"):
+        return None
+    value = getattr(space, "value")
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    return deepcopy(value)
+
+
+def _pymunk_reset_options(owner: Any, variations: Any) -> dict[str, Any] | None:
+    """Capture the PushT reset inputs needed to rebuild its Pymunk space."""
+    reset = getattr(owner, "reset", None)
+    if not callable(reset) or not isinstance(variations, Mapping):
+        return None
+    agent = variations.get("agent")
+    block = variations.get("block")
+    goal_state = getattr(owner, "goal_state", None)
+    if (
+        not isinstance(agent, Mapping)
+        or not isinstance(block, Mapping)
+        or goal_state is None
+    ):
+        return None
+    try:
+        # PushT.reset steps the new space while placing the goal and start state.
+        # Replaying its pre-step state preserves the same Pymunk contact setup.
+        initial_state = np.concatenate(
+            (
+                np.asarray(agent["start_position"], dtype=np.float64).reshape(-1),
+                np.asarray(block["start_position"], dtype=np.float64).reshape(-1),
+                np.asarray(block["angle"], dtype=np.float64).reshape(1),
+                np.asarray(agent["velocity"], dtype=np.float64).reshape(-1),
+            )
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {
+        "variation_values": deepcopy(variations),
+        "goal_state": deepcopy(goal_state),
+        "state": initial_state,
+    }
+
+
+def _navigation_position_state(env: Any) -> tuple[Any, Any, Any] | None:
+    for current in _environment_objects(env):
+        if not (
+            hasattr(current, "agent_position")
+            and hasattr(current, "target_position")
+            and callable(getattr(current, "_set_state", None))
+            and callable(getattr(current, "_set_goal_state", None))
+        ):
+            continue
+        def as_numpy(value: Any) -> np.ndarray:
+            if hasattr(value, "detach"):
+                value = value.detach().cpu().numpy()
+            return np.asarray(value).copy()
+
+        variation_space = getattr(current, "variation_space", None)
+        variations = None if variation_space is None else _variation_values(variation_space)
+        return (
+            current,
+            as_numpy(current.agent_position),
+            {
+                "target_position": as_numpy(current.target_position),
+                "variations": variations,
+            },
+        )
+    return None
+
+
+def _dm_control_task(env: Any) -> Any | None:
+    for current in _environment_objects(env):
+        try:
+            task = getattr(current, "task", None)
+        except Exception:
+            continue
+        if task is not None:
+            return task
+    return None
+
+
+def _dm_control_task_random(env: Any) -> Any | None:
+    task = _dm_control_task(env)
+    if task is None:
+        return None
+    try:
+        random_state = getattr(task, "random", None)
+        if random_state is None:
+            random_state = getattr(task, "_random", None)
+    except Exception:
+        return None
+    if random_state is not None:
+        if callable(getattr(random_state, "get_state", None)) and callable(
+            getattr(random_state, "set_state", None)
+        ):
+            return random_state
+    return None
+
+
 def capture_rng_state(obj: Any) -> Any:
-    rng = getattr(obj, "np_random", None)
-    bit_generator = getattr(rng, "bit_generator", None)
-    return None if bit_generator is None else deepcopy(bit_generator.state)
+    numpy_states: list[dict[str, Any]] = []
+    seen_generators: set[int] = set()
+    for current in _environment_objects(obj):
+        for name in ("np_random", "rng"):
+            try:
+                rng = getattr(current, name, None)
+                bit_generator = getattr(rng, "bit_generator", None)
+            except Exception:
+                continue
+            if bit_generator is not None and id(bit_generator) not in seen_generators:
+                seen_generators.add(id(bit_generator))
+                numpy_states.append(
+                    {"attribute": name, "state": deepcopy(bit_generator.state)}
+                )
+    task_random = _dm_control_task_random(obj)
+    task_state = (
+        None if task_random is None else deepcopy(task_random.get_state())
+    )
+    if not numpy_states and task_state is None:
+        return None
+    return {
+        "kind": "round5_environment_rng_v1",
+        "numpy_generators": numpy_states,
+        "dm_control_task_random": task_state,
+    }
 
 
 def restore_rng_state(obj: Any, state: Any) -> None:
     if state is None:
         return
-    rng = getattr(obj, "np_random", None)
-    bit_generator = getattr(rng, "bit_generator", None)
-    if bit_generator is None:
+    # Accept snapshots from the earlier bit-generator-only implementation.
+    if not isinstance(state, Mapping) or state.get("kind") != "round5_environment_rng_v1":
+        for current in _environment_objects(obj):
+            try:
+                rng = getattr(current, "np_random", None)
+                bit_generator = getattr(rng, "bit_generator", None)
+            except Exception:
+                continue
+            if bit_generator is not None:
+                bit_generator.state = deepcopy(state)
+                return
         raise ValueError("object does not expose np_random.bit_generator.state")
-    bit_generator.state = deepcopy(state)
+
+    numpy_states = state.get("numpy_generators")
+    if numpy_states is None and state.get("numpy_generator") is not None:
+        numpy_states = [{"attribute": "np_random", "state": state["numpy_generator"]}]
+    if numpy_states:
+        current_objects = _environment_objects(obj)
+        seen_generators: set[int] = set()
+        available: list[Any] = []
+        for current in current_objects:
+            for name in ("np_random", "rng"):
+                try:
+                    rng = getattr(current, name, None)
+                    bit_generator = getattr(rng, "bit_generator", None)
+                except Exception:
+                    continue
+                if bit_generator is not None and id(bit_generator) not in seen_generators:
+                    seen_generators.add(id(bit_generator))
+                    available.append(bit_generator)
+        if len(available) < len(numpy_states):
+            raise ValueError("environment lost one or more NumPy generators")
+        for bit_generator, saved in zip(available, numpy_states):
+            bit_generator.state = deepcopy(saved["state"])
+
+    task_state = state.get("dm_control_task_random")
+    if task_state is not None:
+        task_random = _dm_control_task_random(obj)
+        if task_random is None:
+            raise ValueError("environment lost its dm_control task RNG")
+        task_random.set_state(deepcopy(task_state))
 
 
 def capture_environment_state(env: Any) -> dict[str, Any]:
@@ -1793,6 +2460,102 @@ def capture_environment_state(env: Any) -> dict[str, Any]:
     sim_setter = getattr(sim, "set_state", None)
     if callable(sim_getter) and callable(sim_setter):
         return {"kind": "sim_state", "state": deepcopy(sim_getter())}
+
+    model_data = _mujoco_model_data(target)
+    if model_data is not None:
+        try:
+            import mujoco
+
+            model, data = model_data
+            signature = mujoco.mjtState.mjSTATE_INTEGRATION
+            size = int(mujoco.mj_stateSize(model, signature))
+            state = np.empty(size, dtype=np.float64)
+            mujoco.mj_getState(model, data, state, signature)
+            task = _dm_control_task(target)
+            task_state = (
+                {"target_qpos": deepcopy(task.target_qpos)}
+                if task is not None and hasattr(task, "target_qpos")
+                else None
+            )
+            return {
+                "kind": "mujoco_integration_state",
+                "state_signature": int(signature),
+                "state": state,
+                "dm_control_task": task_state,
+            }
+        except (ImportError, AttributeError, TypeError, ValueError):
+            pass
+
+    pymunk = _pymunk_space(target)
+    if pymunk is not None:
+        owner, space, bodies = pymunk
+        body_fields = (
+            "position",
+            "velocity",
+            "force",
+            "angle",
+            "angular_velocity",
+            "torque",
+            "center_of_gravity",
+            "is_sleeping",
+        )
+        body_states = []
+        for body in bodies:
+            body_state: dict[str, Any] = {}
+            for name in body_fields:
+                if not hasattr(body, name):
+                    continue
+                value = getattr(body, name)
+                if name in {"position", "velocity", "force", "center_of_gravity"}:
+                    value = np.asarray(tuple(value), dtype=np.float64)
+                elif name != "is_sleeping":
+                    value = float(value)
+                else:
+                    value = bool(value)
+                body_state[name] = value
+            body_states.append(body_state)
+        space_state = {}
+        for name in ("gravity", "damping", "iterations"):
+            if not hasattr(space, name):
+                continue
+            value = getattr(space, name)
+            space_state[name] = (
+                np.asarray(tuple(value), dtype=np.float64)
+                if name == "gravity"
+                else deepcopy(value)
+            )
+        environment_fields = {}
+        for name in ("goal_state", "goal_pose", "_goal"):
+            if hasattr(owner, name):
+                value = getattr(owner, name)
+                if hasattr(value, "detach"):
+                    value = value.detach().cpu().numpy()
+                environment_fields[name] = deepcopy(value)
+        variation_space = getattr(owner, "variation_space", None)
+        variations = (
+            None if variation_space is None else _variation_values(variation_space)
+        )
+        snapshot = {
+            "kind": "pymunk_body_state",
+            "bodies": body_states,
+            "space": space_state,
+            "environment_fields": environment_fields,
+            "variations": variations,
+        }
+        reset_options = _pymunk_reset_options(owner, variations)
+        if reset_options is not None:
+            snapshot["pymunk_reset_options"] = reset_options
+        return snapshot
+
+    navigation = _navigation_position_state(target)
+    if navigation is not None:
+        _, agent_position, remaining = navigation
+        return {
+            "kind": "navigation_position_state",
+            "agent_position": agent_position,
+            **remaining,
+        }
+
     data = getattr(target, "_data", getattr(target, "data", None))
     model = getattr(target, "_model", getattr(target, "model", None))
     if data is not None and hasattr(data, "qpos") and hasattr(data, "qvel"):
@@ -1829,6 +2592,108 @@ def restore_environment_state(env: Any, snapshot: Mapping[str, Any]) -> None:
         forward = getattr(sim, "forward", None)
         if callable(forward):
             forward()
+        return
+    if kind == "mujoco_integration_state":
+        model_data = _mujoco_model_data(target)
+        if model_data is None:
+            raise ValueError("environment lost its MuJoCo model/data objects")
+        try:
+            import mujoco
+
+            model, data = model_data
+            signature = mujoco.mjtState(int(snapshot["state_signature"]))
+            state = np.asarray(snapshot["state"], dtype=np.float64)
+            mujoco.mj_setState(model, data, state, signature)
+            mujoco.mj_forward(model, data)
+            task_state = snapshot.get("dm_control_task")
+            if task_state is not None:
+                task = _dm_control_task(target)
+                if task is None or not hasattr(task, "target_qpos"):
+                    raise ValueError("environment lost its dm_control task state")
+                task.target_qpos = deepcopy(task_state["target_qpos"])
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("could not restore the MuJoCo integration state") from exc
+        return
+    if kind == "pymunk_body_state":
+        pymunk = _pymunk_space(target)
+        if pymunk is None:
+            raise ValueError("environment lost its Pymunk space")
+        owner, space, bodies = pymunk
+        body_states = snapshot.get("bodies")
+        if not isinstance(body_states, list) or len(body_states) != len(bodies):
+            raise ValueError("environment Pymunk body count changed")
+        reset_options = snapshot.get("pymunk_reset_options")
+        reset = getattr(owner, "reset", None)
+        if isinstance(reset_options, Mapping) and callable(reset):
+            # Rebuild geometry and solver state through the environment's own
+            # reset path; assigning body coordinates alone loses both.
+            reset(options=deepcopy(reset_options))
+            pymunk = _pymunk_space(target)
+            if pymunk is None:
+                raise ValueError("environment lost its Pymunk space after reset")
+            owner, space, bodies = pymunk
+            if len(body_states) != len(bodies):
+                raise ValueError("environment Pymunk body count changed after reset")
+        variation_space = getattr(owner, "variation_space", None)
+        expected_variations = snapshot.get("variations")
+        if expected_variations is not None and variation_space is not None:
+            if canonical_json(_variation_values(variation_space)) != canonical_json(
+                expected_variations
+            ):
+                raise ValueError("environment Pymunk variations could not be restored")
+        for body, body_state in zip(bodies, body_states):
+            activate = getattr(body, "activate", None)
+            if callable(activate):
+                activate()
+            for name in (
+                "position",
+                "velocity",
+                "force",
+                "angle",
+                "angular_velocity",
+                "torque",
+                "center_of_gravity",
+            ):
+                if name in body_state and hasattr(body, name):
+                    value = body_state[name]
+                    if name in {"position", "velocity", "force", "center_of_gravity"}:
+                        value = tuple(np.asarray(value, dtype=np.float64).tolist())
+                    setattr(body, name, value)
+            if body_state.get("is_sleeping"):
+                sleep = getattr(body, "sleep", None)
+                if callable(sleep):
+                    sleep()
+            space.reindex_shapes_for_body(body)
+        for name, value in snapshot.get("space", {}).items():
+            if hasattr(space, name):
+                setattr(
+                    space,
+                    name,
+                    tuple(np.asarray(value, dtype=np.float64).tolist())
+                    if name == "gravity"
+                    else deepcopy(value),
+                )
+        for name, value in snapshot.get("environment_fields", {}).items():
+            if hasattr(owner, name):
+                setattr(owner, name, deepcopy(value))
+        return
+    if kind == "navigation_position_state":
+        navigation = _navigation_position_state(target)
+        if navigation is None:
+            raise ValueError("environment lost its navigation position state")
+        owner = navigation[0]
+        variation_space = getattr(owner, "variation_space", None)
+        variations = snapshot.get("variations")
+        if variations is not None and variation_space is not None:
+            setter = getattr(variation_space, "set_value", None)
+            if not callable(setter):
+                raise ValueError("environment lost its variation-space setter")
+            setter(deepcopy(variations))
+        cache_params = getattr(owner, "_cache_params", None)
+        if callable(cache_params):
+            cache_params()
+        owner._set_state(np.asarray(snapshot["agent_position"]).copy())
+        owner._set_goal_state(np.asarray(snapshot["target_position"]).copy())
         return
     if kind == "mujoco_data":
         data = getattr(target, "_data", getattr(target, "data", None))
@@ -1913,6 +2778,7 @@ __all__ = [
     "deduplicate_actions",
     "grid_counts",
     "guidance_effect_metrics",
+    "matched_guidance_mode_metrics",
     "fit_ridge_probe",
     "index_phase15_results",
     "make_control_actions",

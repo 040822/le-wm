@@ -281,6 +281,8 @@ class LatentPlannerRuntime(nn.Module):
         self.inverse_dynamics = inverse_dynamics
         self.action_block = int(action_block)
         self.rollout_count = 0
+        self.timing_mode = False
+        self.last_selected_indices = None
         self.lewm.requires_grad_(False)
 
     @property
@@ -289,7 +291,10 @@ class LatentPlannerRuntime(nn.Module):
 
     @classmethod
     def from_checkpoint(
-        cls, checkpoint: str | Path, device: str | torch.device = "cpu"
+        cls,
+        checkpoint: str | Path,
+        device: str | torch.device = "cpu",
+        lewm_model: nn.Module | None = None,
     ) -> "LatentPlannerRuntime":
         path = resolve_leflow_checkpoint(checkpoint)
         payload = _torch_load(path)
@@ -299,7 +304,11 @@ class LatentPlannerRuntime(nn.Module):
                 "inverse_dynamics_state_dict, and lewm_checkpoint"
             )
         arch = payload["arch"]
-        lewm = load_lewm(payload["lewm_checkpoint"])
+        lewm = (
+            load_lewm(payload["lewm_checkpoint"])
+            if lewm_model is None
+            else lewm_model.eval().requires_grad_(False)
+        )
         flow = LatentPathFlow(**arch["flow"])
         inverse_dynamics = InverseDynamics(**arch["inverse_dynamics"])
         flow.load_state_dict(payload["flow_state_dict"], strict=True)
@@ -446,6 +455,7 @@ class LatentPlannerRuntime(nn.Module):
         smoothness_weight: float = 0.0,
         history_size: int = 3,
         generator: torch.Generator | None = None,
+        capture_diagnostics: bool = True,
     ) -> dict[str, torch.Tensor]:
         z_start, z_goal = self.encode_current_and_goal(info_dict)
         paths = self.sample_paths(
@@ -492,13 +502,22 @@ class LatentPlannerRuntime(nn.Module):
             cost = cost + smoothness_weight * acceleration.square().mean(dim=(-1, -2))
 
         best = cost.argmin(dim=1)
+        self.last_selected_indices = best.detach()
         batch_indices = torch.arange(actions.size(0), device=actions.device)
-        return {
-            "actions": actions[batch_indices, best].detach().cpu(),
-            "costs": cost[batch_indices, best].detach().cpu(),
-            "all_costs": cost.detach().cpu(),
-            "goal_costs": goal_cost.detach().cpu(),
-        }
+        result = {"actions": actions[batch_indices, best].detach().cpu()}
+        if capture_diagnostics:
+            result.update(
+                {
+                    "costs": cost[batch_indices, best].detach().cpu(),
+                    "all_costs": cost.detach().cpu(),
+                    "goal_costs": goal_cost.detach().cpu(),
+                    "selected_indices": best.detach().cpu(),
+                    "selected_action_sequences": actions[
+                        batch_indices, best
+                    ].detach().cpu(),
+                }
+            )
+        return result
 
 
 class LearnedLatentPathSolver:
@@ -534,6 +553,10 @@ class LearnedLatentPathSolver:
             requested_device = torch.device("cpu")
         self.device = requested_device
         self.history_size = int(history_size)
+        self.timing_mode = False
+        self.capture_timing_selection = False
+        self.last_timing_selection = None
+        self.planning_events: list[dict[str, Any]] = []
         self.model = model or LatentPlannerRuntime.from_checkpoint(
             checkpoint, device=self.device
         )
@@ -598,16 +621,36 @@ class LearnedLatentPathSolver:
                 smoothness_weight=self.smoothness_weight,
                 history_size=self.history_size,
                 generator=self.torch_gen,
+                capture_diagnostics=not self.timing_mode,
             )
             actions.append(output["actions"])
-            costs.append(output["costs"])
-            goal_costs.append(output["goal_costs"])
-        return {
+            if self.timing_mode:
+                if self.capture_timing_selection:
+                    self.last_timing_selection = self.model.last_selected_indices.detach()
+            else:
+                costs.append(output["costs"])
+                goal_costs.append(output["goal_costs"])
+                self.planning_events.append(
+                    {
+                        "selected_indices": output["selected_indices"].tolist(),
+                        "candidate_costs": output["all_costs"].tolist(),
+                        "goal_costs": output["goal_costs"].tolist(),
+                        "selected_action_sequences": output[
+                            "selected_action_sequences"
+                        ].tolist(),
+                        "candidate_count": int(self.num_samples),
+                        "flow_steps": int(self.flow_steps),
+                        "rollout_count": int(self.model.rollout_count),
+                    }
+                )
+        result = {
             "actions": torch.cat(actions, dim=0),
-            "costs": torch.cat(costs, dim=0).tolist(),
-            "goal_costs": torch.cat(goal_costs, dim=0),
             "rollout_count": self.model.rollout_count,
         }
+        if not self.timing_mode:
+            result["costs"] = torch.cat(costs, dim=0).tolist()
+            result["goal_costs"] = torch.cat(goal_costs, dim=0)
+        return result
 
 
 def flow_matching_loss(

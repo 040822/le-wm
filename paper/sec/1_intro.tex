@@ -1,33 +1,19 @@
 \section{Introduction}
 \label{sec:introduction}
 
-Latent world models support visual goal-conditioned control by predicting candidate outcomes. DINO-WM and LeWM search for actions that move future representations toward an image goal~\cite{zhou2024dinowm,maes2026lewm}.
+Recent joint-embedding predictive architecture (JEPA)-based world models support visual decision-making by predicting future representations without pixel-level reconstruction~\cite{zhou2024dinowm,maes2026lewm}. By learning action-conditioned transitions in a compact latent space, these models provide a practical basis for evaluating whether an action sequence moves an agent toward a visual goal. This efficiency is particularly useful for closed-loop control, where new observations repeatedly trigger action decisions. However, an efficient prediction model is only one part of an efficient controller: the complete process of proposing, evaluating, and updating actions must also fit within the time available for each decision.
 
-Repeated prediction and search contribute to decision cost. A learned action generator can supply reusable proposals, while a world model selects or refines them using their predicted consequences.
+Despite efficient latent prediction, search-based planning can require many candidate evaluations over multiple optimization rounds. Learning an action generator can amortize part of this computation by proposing task-relevant candidates~\cite{huang2026leflow,hamel2026flowmpc}. Under a limited decision-time budget, however, only a finite number of candidates and refinement updates can be afforded. Effective control therefore depends on both the proposed actions and the model's ability to distinguish and improve their consequences. These capabilities are connected: the action generator determines which candidates the dynamics model must evaluate, while predicted consequences determine which candidates are selected or how they are adjusted. Moreover, actions proposed during planning can differ from the recorded actions used to fit the dynamics model. This motivates the question: \emph{can joint learning of action generation and action-conditioned dynamics improve candidate evaluation and refinement under a limited decision budget, thereby reducing reliance on extensive search?}
 
-Fast LeWorldModel predicts action-prefix futures in parallel~\cite{gao2026fastlewm}. LeFlow learns latent proposals for a frozen world model~\cite{huang2026leflow}; FlowMPC combines flow proposals with planning~\cite{hamel2026flowmpc}.
+To this end, we propose \textbf{CoWM}, a \textbf{coupled latent world model for fast action selection and refinement}. CoWM brings together two complementary tasks: goal-conditioned action generation proposes behaviors, and action-conditioned dynamics predicts their future latent states. Our design connects these tasks during training so that candidate generation and consequence prediction can be learned within a common representation and model. The central hypothesis is that these connections can improve the decision value of a limited set of proposals and refinement steps. A shared backbone provides a compact implementation, while the contribution of each training connection is examined separately from the inference procedure.
 
-These interfaces raise a training question: does learning proposals and dynamics together improve decisions under a limited computation budget?
+In practice, CoWM comprises a visual encoder and a shared diffusion transformer with distinct action-generation and dynamics-prediction modes. We introduce three forms of coupling. \emph{Parameter-sharing coupling} allows both tasks to update the same backbone. \emph{Action-input coupling} exposes the dynamics mode to action estimates from the generator in addition to recorded actions. \emph{Action-mediated gradient coupling} propagates the future-latent prediction loss through these estimates into the action-generation computation. Together, these connections specify what is shared, what actions the predictor encounters, and how its learning signal reaches the generator. The dynamics mode predicts future latents from their action prefixes in parallel, reducing the sequential calls required by recursive rollout. This parallel prediction mechanism addresses inference cost, while the training contrasts assess the decision effects of coupling.
 
-Answering it requires separating training effects from the value of querying an existing predictor.
+During deployment, CoWM generates a finite candidate pool and selects actions using their predicted distance to the goal. Its differentiable dynamics also supports bounded refinement after generation or guidance during the generation process. These inference choices allocate computation through the number of candidates, generation steps, and refinement updates. We evaluate both the success attainable within a decision-time budget and the time needed to attain a given level of success. Experiments on visual navigation and control tasks connect closed-loop performance with common-pool ranking, executed action refinement, and training ablations. The principal result of the matched-budget comparison is \PaperResult{draft-intro-result}.
 
-CoWM shares a visual encoder and diffusion transformer between goal-conditioned action flow and parallel latent prediction.
-
-It exposes three connections: shared parameters, predicted-action inputs, and prediction gradients through those inputs.
-
-Sharing may transfer useful features, but the objectives can also interfere. Estimated actions still receive recorded future targets; this training objective does not supply their actual counterfactual outcomes.
-
-At inference, CoWM directly executes an action proposal, selects among proposals, or refines them through a learned goal cost. These alternatives permit a measured trade-off between success and decision time.
-
-We assess training variants on common physical actions and restored simulator states. Candidate coverage, top-1 selection, physical regret, and executed refinement distinguish available good actions from the ability to choose them.
-
-The fixed-checkpoint reference finds a modest mean selection gain and faster inference than large-budget CEM, while missing its task-level non-inferiority gate. The matched-training comparison estimates \PaperResult{intro-main-effect}.
-
-The final interpretation is \PaperResult{intro-evidence-scope}. We report task and training-seed variation, including absent or reversed effects, rather than infer control gains from prediction loss or continuous ranking alone.
-
-Our contributions are:
+Our contributions are summarized as follows:
 \begin{itemize}
-\item A coupled action--dynamics formulation that distinguishes shared parameters, estimated-action inputs, and the action-mediated gradient path.
-\item A decision evaluation connecting candidate coverage, physical consequence ranking, local refinement, and closed-loop success.
-\item A comparison of success and measured inference cost against independent prediction and search, with training contrasts interpreted within their actual scope.
+\item We propose CoWM, a latent world model that jointly learns action generation and action-conditioned dynamics through parameter sharing, action inputs, and an action-mediated gradient path.
+\item We develop a decision interface combining learned proposals and parallel latent prediction for candidate selection and differentiable action refinement, with configurable inference budgets.
+\item We establish an evaluation connecting coupling ablations, physical action consequences, closed-loop success, and decision latency to assess when joint learning reduces the need for online search.
 \end{itemize}

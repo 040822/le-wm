@@ -1,0 +1,5 @@
+Static source check (not a PDF compilation)
+Active TeX files: 39
+Introduction body paragraphs: 5
+Issues: []
+No TeX engine found; layout and page count unverified.

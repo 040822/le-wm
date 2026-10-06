@@ -344,6 +344,9 @@ class DatasetEvaluationSession:
         self.process = fit_eval_processors(
             self.dataset,
             cfg.dataset.keys_to_cache,
+            normalizer_stats=OmegaConf.select(
+                cfg, "eval.action_normalizer_stats", default=None
+            ),
         )
         self.transform = {
             "pixels": img_transform(cfg),
@@ -369,7 +372,10 @@ class DatasetEvaluationSession:
                     _ROOT / "config" / "eval" / "solver" / "latent_flow.yaml"
                 )
             solver_cfg.device = str(device)
-            solver_cfg.seed = int(self.cfg.seed)
+            policy_seed = OmegaConf.select(self.cfg, "eval.policy_seed")
+            if policy_seed is None:
+                policy_seed = self.cfg.seed
+            solver_cfg.seed = int(policy_seed)
             # The runtime is already loaded, so an unresolved `${policy}` in
             # the standalone solver config must not be evaluated here.
             solver_cfg.checkpoint = None
@@ -418,7 +424,13 @@ class DatasetEvaluationSession:
                 device=device,
                 mode=mode,
                 inference_steps=inference_steps,
-                seed=int(self.cfg.seed),
+                seed=int(
+                    OmegaConf.select(
+                        self.cfg,
+                        "eval.policy_seed",
+                        default=self.cfg.seed,
+                    )
+                ),
                 goal_mode="cyclic_shift" if shuffled else "correct",
                 actor_warm_start=actor_warm_start,
                 guidance_mode=str(identity.guidance_mode),
@@ -522,6 +534,8 @@ class DatasetEvaluationSession:
                 "save_video": save_video,
             }
             model = getattr(policy_or_model, "model", policy_or_model)
+            if getattr(model, "policy_kind", None) == "subjepa_official":
+                parameters["model_provenance"] = dict(model.provenance)
             actor_warm_start = (
                 identity.stage == "stage_b_actor_warm_start"
             )
@@ -607,7 +621,7 @@ def get_dataset(cfg, dataset_name):
     )
 
 
-def fit_eval_processors(dataset, keys_to_cache):
+def fit_eval_processors(dataset, keys_to_cache, *, normalizer_stats=None):
     process = {}
     for col in keys_to_cache:
         if col in ["pixels"]:
@@ -620,6 +634,28 @@ def fit_eval_processors(dataset, keys_to_cache):
 
         if col != "action":
             process[f"goal_{col}"] = process[col]
+
+    if normalizer_stats:
+        for col, stats in normalizer_stats.items():
+            if col not in process:
+                raise ValueError(
+                    f"training normalizer was provided for uncached eval column {col!r}"
+                )
+            processor = process[col]
+            mean = np.asarray(stats["mean"], dtype=np.float64).reshape(-1)
+            scale = np.asarray(stats["std"], dtype=np.float64).reshape(-1)
+            if mean.shape != scale.shape or not np.all(np.isfinite(mean)):
+                raise ValueError(f"invalid training normalizer stats for {col!r}")
+            if not np.all(np.isfinite(scale)) or np.any(scale == 0):
+                raise ValueError(f"invalid training normalizer scale for {col!r}")
+            if processor.n_features_in_ != len(mean):
+                raise ValueError(
+                    f"training normalizer width for {col!r} does not match eval data"
+                )
+            processor.mean_ = mean
+            processor.scale_ = scale
+            processor.var_ = scale**2
+            processor.n_samples_seen_ = int(stats.get("sample_count", 1))
 
     return process
 

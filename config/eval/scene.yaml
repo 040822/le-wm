@@ -47,20 +47,18 @@ eval:
           value: button_states
     - method: set_phase3_scene_goal
       args:
-        target_task:
-          value: goal_privileged_target_task
         target_block_pos:
-          value: goal_privileged_target_block_pos
-        target_button:
-          value: goal_privileged_target_button
-        target_button_state:
-          value: goal_privileged_target_button_state
-        goal_button_states:
-          value: goal_button_states
+          value: goal_privileged_block_0_pos
+        target_block_quat:
+          value: goal_privileged_block_0_quat
+        target_button_0_state:
+          value: goal_privileged_button_0_state
+        target_button_1_state:
+          value: goal_privileged_button_1_state
         target_drawer_pos:
-          value: goal_privileged_target_drawer_pos
+          value: goal_privileged_drawer_pos
         target_window_pos:
-          value: goal_privileged_target_window_pos
+          value: goal_privileged_window_pos
 
 output:
   save_video: false

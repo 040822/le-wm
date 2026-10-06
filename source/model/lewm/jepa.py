@@ -150,7 +150,10 @@ class JEPA(nn.Module):
         goal = {k: v[:, 0] for k, v in info_dict.items() if torch.is_tensor(v)}
         goal["pixels"] = goal["goal"]
 
-        for k in info_dict:
+        # Only tensor goals are model inputs.  Evaluation may also carry
+        # non-tensor goal metadata (for example Scene's target-task label)
+        # for environment success checks; leave those fields out of encoding.
+        for k in list(goal):
             if k.startswith("goal_"):
                 goal[k[len("goal_") :]] = goal.pop(k)
 

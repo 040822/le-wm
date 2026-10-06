@@ -48,15 +48,36 @@ class ZScoreNormalizer:
         return ((x - self.mean) / self.std).float()
 
 
-def get_column_normalizer(dataset, source: str, target: str):
+def get_column_normalizer(
+    dataset,
+    source: str,
+    target: str,
+    *,
+    row_indices=None,
+    return_stats: bool = False,
+):
     """Get a z-score normalizer for a dataset column."""
     col_data = dataset.get_col_data(source)
+    if row_indices is not None:
+        row_indices = np.asarray(row_indices, dtype=np.int64)
+        if row_indices.ndim != 1 or len(row_indices) == 0:
+            raise ValueError("row_indices must be a non-empty one-dimensional array")
+        col_data = col_data[row_indices]
     data = torch.from_numpy(np.array(col_data))
     data = data[~torch.isnan(data).any(dim=1)]
     mean = data.mean(0, keepdim=True).clone()
     std = data.std(0, keepdim=True).clone()
-    return dt.transforms.WrapTorchTransform(
+    normalizer = dt.transforms.WrapTorchTransform(
         ZScoreNormalizer(mean, std),
         source=source,
         target=target,
     )
+    if not return_stats:
+        return normalizer
+    stats = {
+        "mean": mean.reshape(-1).tolist(),
+        "std": std.reshape(-1).tolist(),
+        "sample_count": int(data.shape[0]),
+        "std_correction": 1,
+    }
+    return normalizer, stats

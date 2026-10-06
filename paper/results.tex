@@ -6,9 +6,9 @@
 % See docs/RESULTS_FILL_GUIDE.md; no experiment launch is implied.
 
 % 0 Protocol and completed scope
-\SetPaperResult{appendix-timing-scope}{\PendingResult}
+\SetPaperResult{appendix-timing-scope}{an NVIDIA GeForce RTX 4090, FP32, batch size one, one CPU thread, and disabled autocast, TF32, and compilation. After 10 warm-up calls, 50 states from evaluation seed 42 are measured five times each. Each synchronized wall-clock sample includes the complete initial policy call through CPU action output, with native initial history and an empty goal cache; model loading and environment stepping are excluded}
 \SetPaperResult{appendix-training-history}{\PendingResult}
-\SetPaperResult{protocol-completed-scope}{\PendingResult}
+\SetPaperResult{protocol-completed-scope}{four tasks, one fixed checkpoint per method and task, and six evaluation seeds with 50 episodes each (300 episodes per method--task condition)}
 \SetPaperResult{protocol-test-family}{\PendingResult}
 
 % 1 Overall comparison
@@ -23,26 +23,26 @@
 \SetPaperResult{main-dewm-reacher}{\PendingResult}
 \SetPaperResult{main-dewm-tworoom}{\PendingResult}
 \SetPaperResult{main-interpretation}{\PendingResult}
-\SetPaperResult{main-leflow-cube}{\PendingResult}
-\SetPaperResult{main-leflow-macro}{\PendingResult}
-\SetPaperResult{main-leflow-pusht}{\PendingResult}
-\SetPaperResult{main-leflow-reacher}{\PendingResult}
-\SetPaperResult{main-leflow-tworoom}{\PendingResult}
-\SetPaperResult{main-lewm-cube}{\PendingResult}
-\SetPaperResult{main-lewm-macro}{\PendingResult}
-\SetPaperResult{main-lewm-pusht}{\PendingResult}
-\SetPaperResult{main-lewm-reacher}{\PendingResult}
-\SetPaperResult{main-lewm-tworoom}{\PendingResult}
+\SetPaperResult{main-leflow-cube}{$100.00 \pm 0.00$}
+\SetPaperResult{main-leflow-macro}{$96.17 \pm 1.75$}
+\SetPaperResult{main-leflow-pusht}{$97.33 \pm 2.73$}
+\SetPaperResult{main-leflow-reacher}{$87.67 \pm 4.97$}
+\SetPaperResult{main-leflow-tworoom}{$99.67 \pm 0.82$}
+\SetPaperResult{main-lewm-cube}{$69.00 \pm 6.78$}
+\SetPaperResult{main-lewm-macro}{$79.92 \pm 2.54$}
+\SetPaperResult{main-lewm-pusht}{$85.00 \pm 6.54$}
+\SetPaperResult{main-lewm-reacher}{$82.00 \pm 4.90$}
+\SetPaperResult{main-lewm-tworoom}{$83.67 \pm 4.63$}
 \SetPaperResult{main-p0-cube}{\PendingResult}
 \SetPaperResult{main-p0-macro}{\PendingResult}
 \SetPaperResult{main-p0-pusht}{\PendingResult}
 \SetPaperResult{main-p0-reacher}{\PendingResult}
 \SetPaperResult{main-p0-tworoom}{\PendingResult}
-\SetPaperResult{main-p3-cube}{\PendingResult}
-\SetPaperResult{main-p3-macro}{\PendingResult}
-\SetPaperResult{main-p3-pusht}{\PendingResult}
-\SetPaperResult{main-p3-reacher}{\PendingResult}
-\SetPaperResult{main-p3-tworoom}{\PendingResult}
+\SetPaperResult{main-p3-cube}{$99.67 \pm 0.82$}
+\SetPaperResult{main-p3-macro}{$96.25 \pm 1.41$}
+\SetPaperResult{main-p3-pusht}{$97.33 \pm 1.03$}
+\SetPaperResult{main-p3-reacher}{$88.33 \pm 4.97$}
+\SetPaperResult{main-p3-tworoom}{$99.67 \pm 0.82$}
 \SetPaperResult{main-scorer-ci}{\PendingResult}
 \SetPaperResult{main-scorer-effect}{\PendingResult}
 \SetPaperResult{main-search-ci}{\PendingResult}
@@ -219,11 +219,249 @@
 \SetPaperResult{abstract-scorer-effect}{\PaperResult{main-scorer-effect}}
 \SetPaperResult{abstract-search-effect}{\PaperResult{main-search-effect}}
 \SetPaperResult{abstract-training-effect}{\PaperResult{training-joint-bonly-effect}}
-\SetPaperResult{conclusion-supported-claim}{\PendingResult}
-\SetPaperResult{conclusion-unresolved-scope}{\PendingResult}
+\SetPaperResult{conclusion-supported-claim}{96.25\% average success for CoWM-Selection with 29.88\,ms mean initial replanning latency, compared with 96.17\% and 51.43\,ms for LeFlow under the declared 25/25-step operating points}
+\SetPaperResult{conclusion-unresolved-scope}{matched training-coupling contrasts, common-pool scorer controls, physical refinement diagnostics, and comparisons under a common decision-time limit; the completed main comparison uses one checkpoint per method and task}
 \SetPaperResult{discussion-configuration}{\PendingResult}
 \SetPaperResult{discussion-efficiency-scope}{\PendingResult}
 \SetPaperResult{discussion-generalization}{\PendingResult}
 \SetPaperResult{discussion-training-scope}{\PendingResult}
 \SetPaperResult{intro-evidence-scope}{\PendingResult}
 \SetPaperResult{intro-main-effect}{\PaperResult{main-scorer-effect}}
+
+% Fast CoWM first draft: new results require protocol-matched evidence.
+\SetPaperResult{draft-abstract-result}{\PendingResult}
+\SetPaperResult{draft-baseline-configurations}{\PendingResult}
+\SetPaperResult{draft-budget-high-cem}{\PendingResult}
+\SetPaperResult{draft-budget-high-ms}{\PendingResult}
+\SetPaperResult{draft-budget-high-overrun}{\PendingResult}
+\SetPaperResult{draft-budget-high-refinement}{\PendingResult}
+\SetPaperResult{draft-budget-high-same-a}{\PendingResult}
+\SetPaperResult{draft-budget-high-selection}{\PendingResult}
+\SetPaperResult{draft-budget-low-cem}{\PendingResult}
+\SetPaperResult{draft-budget-low-ms}{\PendingResult}
+\SetPaperResult{draft-budget-low-overrun}{\PendingResult}
+\SetPaperResult{draft-budget-low-refinement}{\PendingResult}
+\SetPaperResult{draft-budget-low-same-a}{\PendingResult}
+\SetPaperResult{draft-budget-low-selection}{\PendingResult}
+\SetPaperResult{draft-budget-medium-cem}{\PendingResult}
+\SetPaperResult{draft-budget-medium-ms}{\PendingResult}
+\SetPaperResult{draft-budget-medium-overrun}{\PendingResult}
+\SetPaperResult{draft-budget-medium-refinement}{\PendingResult}
+\SetPaperResult{draft-budget-medium-same-a}{\PendingResult}
+\SetPaperResult{draft-budget-medium-selection}{\PendingResult}
+\SetPaperResult{draft-budget-result}{\PendingResult}
+\SetPaperResult{draft-dewm-version}{\PendingResult}
+\SetPaperResult{draft-eff-cem-medium-calls}{\PendingResult}
+\SetPaperResult{draft-eff-cem-medium-config}{\PendingResult}
+\SetPaperResult{draft-eff-cem-medium-memory}{\PendingResult}
+\SetPaperResult{draft-eff-cem-medium-p50}{\PendingResult}
+\SetPaperResult{draft-eff-cem-medium-p95}{\PendingResult}
+\SetPaperResult{draft-eff-cem-medium-sr}{\PendingResult}
+\SetPaperResult{draft-eff-cem-reference-calls}{\PendingResult}
+\SetPaperResult{draft-eff-cem-reference-config}{\PendingResult}
+\SetPaperResult{draft-eff-cem-reference-memory}{\PendingResult}
+\SetPaperResult{draft-eff-cem-reference-p50}{\PendingResult}
+\SetPaperResult{draft-eff-cem-reference-p95}{\PendingResult}
+\SetPaperResult{draft-eff-cem-reference-sr}{\PendingResult}
+\SetPaperResult{draft-eff-cem-small-calls}{\PendingResult}
+\SetPaperResult{draft-eff-cem-small-config}{\PendingResult}
+\SetPaperResult{draft-eff-cem-small-memory}{\PendingResult}
+\SetPaperResult{draft-eff-cem-small-p50}{\PendingResult}
+\SetPaperResult{draft-eff-cem-small-p95}{\PendingResult}
+\SetPaperResult{draft-eff-cem-small-sr}{\PendingResult}
+\SetPaperResult{draft-eff-gf-calls}{\PendingResult}
+\SetPaperResult{draft-eff-gf-config}{\PendingResult}
+\SetPaperResult{draft-eff-gf-memory}{\PendingResult}
+\SetPaperResult{draft-eff-gf-p50}{\PendingResult}
+\SetPaperResult{draft-eff-gf-p95}{\PendingResult}
+\SetPaperResult{draft-eff-gf-sr}{\PendingResult}
+\SetPaperResult{draft-eff-p0-calls}{\PendingResult}
+\SetPaperResult{draft-eff-p0-config}{\PendingResult}
+\SetPaperResult{draft-eff-p0-memory}{\PendingResult}
+\SetPaperResult{draft-eff-p0-p50}{\PendingResult}
+\SetPaperResult{draft-eff-p0-p95}{\PendingResult}
+\SetPaperResult{draft-eff-p0-sr}{\PendingResult}
+\SetPaperResult{draft-eff-p3-large-calls}{\PendingResult}
+\SetPaperResult{draft-eff-p3-large-config}{\PendingResult}
+\SetPaperResult{draft-eff-p3-large-memory}{\PendingResult}
+\SetPaperResult{draft-eff-p3-large-p50}{\PendingResult}
+\SetPaperResult{draft-eff-p3-large-p95}{\PendingResult}
+\SetPaperResult{draft-eff-p3-large-sr}{\PendingResult}
+\SetPaperResult{draft-eff-p3-medium-calls}{\PendingResult}
+\SetPaperResult{draft-eff-p3-medium-config}{\PendingResult}
+\SetPaperResult{draft-eff-p3-medium-memory}{\PendingResult}
+\SetPaperResult{draft-eff-p3-medium-p50}{\PendingResult}
+\SetPaperResult{draft-eff-p3-medium-p95}{\PendingResult}
+\SetPaperResult{draft-eff-p3-medium-sr}{\PendingResult}
+\SetPaperResult{draft-eff-p3-small-calls}{\PendingResult}
+\SetPaperResult{draft-eff-p3-small-config}{\PendingResult}
+\SetPaperResult{draft-eff-p3-small-memory}{\PendingResult}
+\SetPaperResult{draft-eff-p3-small-p50}{\PendingResult}
+\SetPaperResult{draft-eff-p3-small-p95}{\PendingResult}
+\SetPaperResult{draft-eff-p3-small-sr}{\PendingResult}
+\SetPaperResult{draft-eff-po-calls}{\PendingResult}
+\SetPaperResult{draft-eff-po-config}{\PendingResult}
+\SetPaperResult{draft-eff-po-memory}{\PendingResult}
+\SetPaperResult{draft-eff-po-p50}{\PendingResult}
+\SetPaperResult{draft-eff-po-p95}{\PendingResult}
+\SetPaperResult{draft-eff-po-sr}{\PendingResult}
+\SetPaperResult{draft-eff-same-a-lewm-calls}{\PendingResult}
+\SetPaperResult{draft-eff-same-a-lewm-config}{\PendingResult}
+\SetPaperResult{draft-eff-same-a-lewm-memory}{\PendingResult}
+\SetPaperResult{draft-eff-same-a-lewm-p50}{\PendingResult}
+\SetPaperResult{draft-eff-same-a-lewm-p95}{\PendingResult}
+\SetPaperResult{draft-eff-same-a-lewm-sr}{\PendingResult}
+\SetPaperResult{draft-infer-gf-p50}{\PendingResult}
+\SetPaperResult{draft-infer-gf-sr}{\PendingResult}
+\SetPaperResult{draft-infer-p0-p50}{\PendingResult}
+\SetPaperResult{draft-infer-p0-sr}{\PendingResult}
+\SetPaperResult{draft-infer-p1-p50}{\PendingResult}
+\SetPaperResult{draft-infer-p1-sr}{\PendingResult}
+\SetPaperResult{draft-infer-p2-p50}{\PendingResult}
+\SetPaperResult{draft-infer-p2-sr}{\PendingResult}
+\SetPaperResult{draft-infer-p3-p50}{\PendingResult}
+\SetPaperResult{draft-infer-p3-sr}{\PendingResult}
+\SetPaperResult{draft-infer-po-p50}{\PendingResult}
+\SetPaperResult{draft-infer-po-sr}{\PendingResult}
+\SetPaperResult{draft-infer-random-p50}{\PendingResult}
+\SetPaperResult{draft-infer-random-sr}{\PendingResult}
+\SetPaperResult{draft-infer-select-po-p50}{\PendingResult}
+\SetPaperResult{draft-infer-select-po-sr}{\PendingResult}
+\SetPaperResult{draft-intro-result}{\PendingResult}
+\SetPaperResult{draft-main-po-cube}{$100.00 \pm 0.00$}
+\SetPaperResult{draft-main-po-macro}{$94.50 \pm 1.26$}
+\SetPaperResult{draft-main-po-pusht}{$97.00 \pm 2.76$}
+\SetPaperResult{draft-main-po-reacher}{$82.67 \pm 2.73$}
+\SetPaperResult{draft-main-po-tworoom}{$98.33 \pm 1.51$}
+\SetPaperResult{draft-pool-coverage}{\PendingResult}
+\SetPaperResult{draft-probe-observed-linear-cowm}{\PendingResult}
+\SetPaperResult{draft-probe-observed-linear-lewm}{\PendingResult}
+\SetPaperResult{draft-probe-observed-mlp-cowm}{\PendingResult}
+\SetPaperResult{draft-probe-observed-mlp-lewm}{\PendingResult}
+\SetPaperResult{draft-probe-predicted-linear-cowm}{\PendingResult}
+\SetPaperResult{draft-probe-predicted-linear-lewm}{\PendingResult}
+\SetPaperResult{draft-probe-predicted-mlp-cowm}{\PendingResult}
+\SetPaperResult{draft-probe-predicted-mlp-lewm}{\PendingResult}
+\SetPaperResult{draft-probe-unit}{\PendingResult}
+\SetPaperResult{draft-rank-cowm-regret}{\PendingResult}
+\SetPaperResult{draft-rank-cowm-selected}{\PendingResult}
+\SetPaperResult{draft-rank-cowm-spearman}{\PendingResult}
+\SetPaperResult{draft-rank-lewm-regret}{\PendingResult}
+\SetPaperResult{draft-rank-lewm-selected}{\PendingResult}
+\SetPaperResult{draft-rank-lewm-spearman}{\PendingResult}
+\SetPaperResult{draft-rank-oracle-selected}{\PendingResult}
+\SetPaperResult{draft-rank-random-regret}{\PendingResult}
+\SetPaperResult{draft-rank-random-selected}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-gf-delta}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-gf-exploitation}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-gf-improved}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-gf-rms}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-gf-sr}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-po-delta}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-po-exploitation}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-po-improved}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-po-rms}{\PendingResult}
+\SetPaperResult{draft-refine-cowm-po-sr}{\PendingResult}
+\SetPaperResult{draft-refine-lewm-po-delta}{\PendingResult}
+\SetPaperResult{draft-refine-lewm-po-exploitation}{\PendingResult}
+\SetPaperResult{draft-refine-lewm-po-improved}{\PendingResult}
+\SetPaperResult{draft-refine-lewm-po-rms}{\PendingResult}
+\SetPaperResult{draft-refine-lewm-po-sr}{\PendingResult}
+\SetPaperResult{draft-refine-none-sr}{\PendingResult}
+\SetPaperResult{draft-refine-random-delta}{\PendingResult}
+\SetPaperResult{draft-refine-random-improved}{\PendingResult}
+\SetPaperResult{draft-refine-random-rms}{\PendingResult}
+\SetPaperResult{draft-refine-random-sr}{\PendingResult}
+\SetPaperResult{draft-resource-full-active}{\PendingResult}
+\SetPaperResult{draft-resource-full-hours}{\PendingResult}
+\SetPaperResult{draft-resource-full-memory}{\PendingResult}
+\SetPaperResult{draft-resource-full-p50}{\PendingResult}
+\SetPaperResult{draft-resource-full-step-ms}{\PendingResult}
+\SetPaperResult{draft-resource-full-total}{\PendingResult}
+\SetPaperResult{draft-resource-full-updates}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-active}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-hours}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-memory}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-p50}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-step-ms}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-total}{\PendingResult}
+\SetPaperResult{draft-resource-recorded-updates}{\PendingResult}
+\SetPaperResult{draft-resource-separate-active}{\PendingResult}
+\SetPaperResult{draft-resource-separate-hours}{\PendingResult}
+\SetPaperResult{draft-resource-separate-memory}{\PendingResult}
+\SetPaperResult{draft-resource-separate-p50}{\PendingResult}
+\SetPaperResult{draft-resource-separate-step-ms}{\PendingResult}
+\SetPaperResult{draft-resource-separate-total}{\PendingResult}
+\SetPaperResult{draft-resource-separate-updates}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-completion}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-policy}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-sr}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-successes}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-system}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-task}{\PendingResult}
+\SetPaperResult{draft-robot-lewm-trials}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-completion}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-policy}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-sr}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-successes}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-system}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-task}{\PendingResult}
+\SetPaperResult{draft-robot-refinement-trials}{\PendingResult}
+\SetPaperResult{draft-robot-selection-completion}{\PendingResult}
+\SetPaperResult{draft-robot-selection-policy}{\PendingResult}
+\SetPaperResult{draft-robot-selection-sr}{\PendingResult}
+\SetPaperResult{draft-robot-selection-successes}{\PendingResult}
+\SetPaperResult{draft-robot-selection-system}{\PendingResult}
+\SetPaperResult{draft-robot-selection-task}{\PendingResult}
+\SetPaperResult{draft-robot-selection-trials}{\PendingResult}
+\SetPaperResult{draft-train-aonly-p0}{\PendingResult}
+\SetPaperResult{draft-train-bonly-refine}{\PendingResult}
+\SetPaperResult{draft-train-bonly-regret}{\PendingResult}
+\SetPaperResult{draft-train-detach-p0}{\PendingResult}
+\SetPaperResult{draft-train-detach-p3}{\PendingResult}
+\SetPaperResult{draft-train-detach-refine}{\PendingResult}
+\SetPaperResult{draft-train-detach-regret}{\PendingResult}
+\SetPaperResult{draft-train-full-p0}{\PendingResult}
+\SetPaperResult{draft-train-full-p3}{\PendingResult}
+\SetPaperResult{draft-train-full-refine}{\PendingResult}
+\SetPaperResult{draft-train-full-regret}{\PendingResult}
+\SetPaperResult{draft-train-recorded-p0}{\PendingResult}
+\SetPaperResult{draft-train-recorded-p3}{\PendingResult}
+\SetPaperResult{draft-train-recorded-refine}{\PendingResult}
+\SetPaperResult{draft-train-recorded-regret}{\PendingResult}
+\SetPaperResult{draft-train-separate-p0}{\PendingResult}
+\SetPaperResult{draft-train-separate-p3}{\PendingResult}
+\SetPaperResult{draft-train-separate-refine}{\PendingResult}
+\SetPaperResult{draft-train-separate-regret}{\PendingResult}
+
+\SetPaperResult{main-lewm-latency}{625.67}
+
+\SetPaperResult{main-leflow-latency}{51.43}
+
+\SetPaperResult{main-p3-latency}{29.88}
+
+\SetPaperResult{draft-main-po-latency}{45.23}
+
+\SetPaperResult{main-selection-dagger-tworoom}{$99.67 \pm 0.82$}
+
+\SetPaperResult{main-selection-dagger-pusht}{$97.33 \pm 1.03$}
+
+\SetPaperResult{main-selection-dagger-reacher}{$100.00 \pm 0.00$}
+
+\SetPaperResult{main-selection-dagger-cube}{$99.67 \pm 0.82$}
+
+\SetPaperResult{main-selection-dagger-macro}{$99.17 \pm 0.41$}
+
+\SetPaperResult{main-selection-dagger-latency}{29.53}
+
+\SetPaperResult{main-subjepa-tworoom}{$93.67 \pm 4.46$}
+
+\SetPaperResult{main-subjepa-pusht}{$88.00 \pm 6.20$}
+
+\SetPaperResult{main-subjepa-reacher}{$82.67 \pm 4.68$}
+
+\SetPaperResult{main-subjepa-cube}{$76.33 \pm 6.74$}
+
+\SetPaperResult{main-subjepa-macro}{$85.17 \pm 3.27$}
+
+\SetPaperResult{main-subjepa-latency}{664.00}

@@ -10,6 +10,33 @@ from source.policy.lewm import build_lewm_optim
 
 
 _STAGE_B_ATTENTION_MODES = {"strict_causal", "block_causal", "terminal_full"}
+_TRAINING_RNG_OFFSETS = {
+    "stage_a_timestep": 0x13579BDF,
+    "stage_a_noise": 0x2468ACE0,
+    "stage_b_action_mix": 0x51A7B00B,
+    "latent_flow_timestep": 0x31415926,
+    "latent_flow_noise": 0x27182818,
+}
+
+
+def _training_generator(module, reference, stream_name):
+    """Return a stable per-policy RNG stream independent of other branches."""
+    if stream_name not in _TRAINING_RNG_OFFSETS:
+        raise ValueError(f"unknown Fast-LeWAM RNG stream {stream_name!r}")
+    base_seed = int(getattr(module, "rng_seed", torch.initial_seed()))
+    streams = getattr(module, "_fast_lewam_rng_streams", None)
+    if streams is None:
+        streams = {}
+        module._fast_lewam_rng_streams = streams
+    device = reference.device
+    key = (str(device), stream_name)
+    if key not in streams:
+        generator = torch.Generator(device=device)
+        generator.manual_seed(
+            (base_seed + _TRAINING_RNG_OFFSETS[stream_name]) % (2**63 - 1)
+        )
+        streams[key] = generator
+    return streams[key]
 
 
 def _stage_b_attention_mode(model):
@@ -78,6 +105,7 @@ def round4_abde_forward(
     latent_loss_noise_threshold,
     latent_action_mix_epochs,
     stage_b_timestep_mode="legacy",
+    stage_a_goal_index=None,
 ):
     """Compute one shared-encoder A+B+D+E Round 4 training update."""
     if not 0 < latent_loss_noise_threshold <= 1:
@@ -93,9 +121,12 @@ def round4_abde_forward(
 
     pixels = batch["pixels"]
     actions = torch.nan_to_num(batch["action"], 0.0)
-    if pixels.ndim != 5 or pixels.shape[1] < action_horizon + 1:
+    goal_index = action_horizon if stage_a_goal_index is None else int(stage_a_goal_index)
+    if goal_index < action_horizon:
+        raise ValueError("stage_a_goal_index must be >= action_horizon")
+    if pixels.ndim != 5 or pixels.shape[1] <= goal_index:
         raise ValueError(
-            "pixels must have shape [B,T,C,H,W] with T >= action_horizon + 1; "
+            "pixels must include the configured Stage-A goal frame; "
             f"got {tuple(pixels.shape)}"
         )
     if actions.ndim != 3 or actions.shape[1] < action_horizon:
@@ -105,9 +136,12 @@ def round4_abde_forward(
         )
 
     # All four losses consume this one encoder/projector result.
-    embeddings = model.encode_pixels(pixels[:, : action_horizon + 1])
+    frame_indices = list(range(action_horizon + 1))
+    if goal_index > action_horizon:
+        frame_indices.append(goal_index)
+    embeddings = model.encode_pixels(pixels[:, frame_indices])
     z0 = embeddings[:, 0]
-    goal_latent = embeddings[:, action_horizon]
+    goal_latent = embeddings[:, frame_indices.index(goal_index)]
     interior_target = embeddings[:, 1:action_horizon]
     clean_actions = actions[:, :action_horizon]
     expected_action_shape = (pixels.shape[0], action_horizon, model.action_dim)
@@ -274,8 +308,10 @@ def fast_lewam_forward(
     latent_loss_noise_threshold,
     latent_action_mix_epochs,
     stage_b_timestep_mode="legacy",
+    stage_b_action_source="joint",
     lambda_d=1.0,
     lambda_e=1.0,
+    stage_a_goal_index=None,
 ):
     """执行 Fast-LeWAM 前向，并组合 flow、causal-prefix latent 与 SIGReg 损失。"""
     if train_mode == "stage_abde":
@@ -292,14 +328,28 @@ def fast_lewam_forward(
             latent_loss_noise_threshold=latent_loss_noise_threshold,
             latent_action_mix_epochs=latent_action_mix_epochs,
             stage_b_timestep_mode=stage_b_timestep_mode,
+            stage_a_goal_index=stage_a_goal_index,
         )
-    if train_mode not in {"stage_ab", "stage_b", "stage_c"}:
-        raise ValueError("train_mode must be 'stage_ab', 'stage_b', or 'stage_c'")
+    if train_mode not in {
+        "stage_a",
+        "stage_ab",
+        "stage_ab_fm",
+        "stage_b",
+        "stage_c",
+    }:
+        raise ValueError(
+            "train_mode must be 'stage_a', 'stage_ab', 'stage_ab_fm', "
+            "'stage_b', or 'stage_c'"
+        )
     if not 0 < latent_loss_noise_threshold <= 1:
         raise ValueError("latent_loss_noise_threshold must be in (0, 1]")
     if stage_b_timestep_mode not in {"legacy", "clean_action"}:
         raise ValueError(
             "stage_b_timestep_mode must be 'legacy' or 'clean_action'"
+        )
+    if stage_b_action_source not in {"joint", "recorded_control", "recorded_clean"}:
+        raise ValueError(
+            "stage_b_action_source must be 'joint', 'recorded_control', or 'recorded_clean'"
         )
     stage_b_attention_mode = _stage_b_attention_mode(self.model)
     stage_b_dynamics = getattr(self.model, "stage_b_dynamics", "parallel_prefix")
@@ -313,9 +363,12 @@ def fast_lewam_forward(
 
     pixels = batch["pixels"]
     actions = torch.nan_to_num(batch["action"], 0.0)
-    if pixels.ndim != 5 or pixels.shape[1] < action_horizon + 1:
+    goal_index = action_horizon if stage_a_goal_index is None else int(stage_a_goal_index)
+    if goal_index < action_horizon:
+        raise ValueError("stage_a_goal_index must be >= action_horizon")
+    if pixels.ndim != 5 or pixels.shape[1] <= goal_index:
         raise ValueError(
-            "pixels must have shape [B,T,C,H,W] with T >= action_horizon + 1; "
+            "pixels must include the configured Stage-A goal frame; "
             f"got {tuple(pixels.shape)}"
         )
     if actions.ndim != 3 or actions.shape[1] < action_horizon:
@@ -325,9 +378,12 @@ def fast_lewam_forward(
         )
 
     # 一次共享编码得到当前 z0 和未来监督目标 z1:H，避免重复调用 Encoder。
-    embeddings = self.model.encode_pixels(pixels[:, : action_horizon + 1])
+    frame_indices = list(range(action_horizon + 1))
+    if goal_index > action_horizon:
+        frame_indices.append(goal_index)
+    embeddings = self.model.encode_pixels(pixels[:, frame_indices])
     z0 = embeddings[:, 0]
-    goal_latent = embeddings[:, action_horizon]
+    goal_latent = embeddings[:, frame_indices.index(goal_index)]
     target_latents = _stage_b_target_latents(
         embeddings, action_horizon, stage_b_attention_mode
     )
@@ -363,16 +419,55 @@ def fast_lewam_forward(
         # 对于非stage_b模式，使用线性 flow matching 生成噪声动作和目标速度，为 Stage A/C 训练提供监督信号。
         # 线性 flow matching：x_t=(1-t)noise+t*action，目标速度为 action-noise。
         timestep = torch.rand(
-            pixels.shape[0], device=clean_actions.device, dtype=clean_actions.dtype
+            pixels.shape[0],
+            device=clean_actions.device,
+            dtype=clean_actions.dtype,
+            generator=_training_generator(self, clean_actions, "stage_a_timestep"),
         )
-        noise = torch.randn_like(clean_actions)
+        noise = torch.randn(
+            clean_actions.shape,
+            device=clean_actions.device,
+            dtype=clean_actions.dtype,
+            generator=_training_generator(self, clean_actions, "stage_a_noise"),
+        )
         noisy_actions = (
             (1.0 - timestep[:, None, None]) * noise
             + timestep[:, None, None] * clean_actions
         )
         target_velocity = clean_actions - noise
 
-    if train_mode == "stage_ab":
+    if train_mode == "stage_a":
+        stage_a = self.model(
+            z0,
+            noisy_actions,
+            timestep,
+            mode="stage_a",
+            task_condition=task_condition,
+            goal_latent=goal_latent,
+        )
+        predicted_velocity = stage_a["action_velocity"]
+        action_loss = F.mse_loss(predicted_velocity, target_velocity)
+        sigreg_loss = self.sigreg(embeddings.transpose(0, 1))
+        loss = action_loss + lambda_sigreg * sigreg_loss
+        output = {
+            "loss": loss,
+            "action_loss": action_loss,
+            "sigreg_loss": sigreg_loss,
+            "action_velocity": predicted_velocity,
+            "emb": embeddings,
+        }
+        self.log_dict(
+            {
+                f"{stage}/{name}": value.detach()
+                for name, value in output.items()
+                if name in {"loss", "action_loss", "sigreg_loss"}
+            },
+            on_step=True,
+            sync_dist=True,
+        )
+        return output
+
+    if train_mode in {"stage_ab", "stage_ab_fm"}:
         # Stage A 预测动作速度，然后获取 clean_estimate。
         stage_a = self.model(
             z0,
@@ -401,16 +496,22 @@ def fast_lewam_forward(
                 pixels.shape[0], dtype=torch.bool, device=pixels.device
             )
         else:
-            use_prediction = (
-                torch.rand(pixels.shape[0], device=pixels.device)
-                < predicted_probability
-            )
+            use_prediction = torch.rand(
+                pixels.shape[0],
+                device=pixels.device,
+                generator=_training_generator(
+                    self, clean_actions, "stage_b_action_mix"
+                ),
+            ) < predicted_probability
         predicted_for_stage_b = (
             clean_estimate.detach() if detach_clean_action else clean_estimate
         )
-        stage_b_actions = torch.where(
-            use_prediction[:, None, None], predicted_for_stage_b, clean_actions
-        )
+        if stage_b_action_source == "joint":
+            stage_b_actions = torch.where(
+                use_prediction[:, None, None], predicted_for_stage_b, clean_actions
+            )
+        else:
+            stage_b_actions = clean_actions
 
         # source_t 记录 clean estimate 的 flow 来源；专家动作按 clean t=1 处理。
         source_timestep = torch.where(
@@ -418,19 +519,67 @@ def fast_lewam_forward(
             timestep,
             torch.ones_like(timestep),
         )
-        stage_b_timestep = (
-            torch.ones_like(timestep)
-            if stage_b_timestep_mode == "clean_action"
-            else source_timestep
-        )
-        latent_supervision_timestep = source_timestep
-        predicted_latents = self.model(
-            z0,
-            stage_b_actions,
-            stage_b_timestep,
-            mode="stage_b",
-            task_condition=task_condition,
-        )["predicted_latents"]
+        if stage_b_action_source == "recorded_clean":
+            stage_b_timestep = torch.ones_like(timestep)
+            latent_supervision_timestep = torch.ones_like(timestep)
+        else:
+            stage_b_timestep = (
+                torch.ones_like(timestep)
+                if stage_b_timestep_mode == "clean_action"
+                else source_timestep
+            )
+            latent_supervision_timestep = source_timestep
+        if train_mode == "stage_ab_fm":
+            if not bool(getattr(self.model, "latent_flow_matching", False)):
+                raise TypeError(
+                    "train_mode='stage_ab_fm' requires a latent-flow model"
+                )
+            latent_flow_timestep = torch.rand(
+                pixels.shape[0],
+                device=clean_actions.device,
+                dtype=clean_actions.dtype,
+                generator=_training_generator(
+                    self, clean_actions, "latent_flow_timestep"
+                ),
+            )
+            latent_flow_noise = torch.randn(
+                target_latents.shape,
+                device=target_latents.device,
+                dtype=target_latents.dtype,
+                generator=_training_generator(
+                    self, clean_actions, "latent_flow_noise"
+                ),
+            )
+            noisy_future_latents = (
+                (1.0 - latent_flow_timestep[:, None, None]) * latent_flow_noise
+                + latent_flow_timestep[:, None, None] * target_latents
+            )
+            predicted_latent_velocity = self.model(
+                z0,
+                stage_b_actions,
+                stage_b_timestep,
+                mode="stage_b_fm",
+                noisy_latents=noisy_future_latents,
+                latent_flow_timestep=latent_flow_timestep,
+                task_condition=task_condition,
+            )["latent_velocity"]
+            target_latent_velocity = target_latents - latent_flow_noise
+            latent_per_sample = (
+                predicted_latent_velocity - target_latent_velocity
+            ).square().mean(dim=(1, 2))
+            noise_weight = (
+                latent_supervision_timestep / latent_loss_noise_threshold
+            ).clamp(max=1.0)
+            weighted_latent_loss = (noise_weight * latent_per_sample).mean()
+            latent_prefix_loss = latent_per_sample.mean()
+        else:
+            predicted_latents = self.model(
+                z0,
+                stage_b_actions,
+                stage_b_timestep,
+                mode="stage_b",
+                task_condition=task_condition,
+            )["predicted_latents"]
     elif train_mode == "stage_c":
         # Stage C 直接同时预测动作速度和未来 latent，使用真值动作进行监督。
         joint = self.model(
@@ -448,23 +597,25 @@ def fast_lewam_forward(
         latent_supervision_timestep = timestep
         predicted_probability = 1.0
 
-    _validate_stage_b_prediction_shape(
-        predicted_latents,
-        batch_size=pixels.shape[0],
-        target_latents=target_latents,
-        action_horizon=action_horizon,
-        attention_mode=stage_b_attention_mode,
-    )
+    is_fm = train_mode == "stage_ab_fm"
+    if not is_fm:
+        _validate_stage_b_prediction_shape(
+            predicted_latents,
+            batch_size=pixels.shape[0],
+            target_latents=target_latents,
+            action_horizon=action_horizon,
+            attention_mode=stage_b_attention_mode,
+        )
 
-    # 计算 latent supervision loss，使用线性权重降低高噪声样本的监督强度。
-    latent_per_sample = (predicted_latents - target_latents).square().mean(dim=(1, 2))
-    
-    # t 越小代表噪声越强；线性权重会降低高噪声样本的 latent 监督强度。
-    noise_weight = (
-        latent_supervision_timestep / latent_loss_noise_threshold
-    ).clamp(max=1.0)
-    weighted_latent_loss = (noise_weight * latent_per_sample).mean()
-    latent_prefix_loss = latent_per_sample.mean() # 用于日志记录的 unweighted loss
+        # Preserve the historical Regression-B reduction exactly.
+        latent_per_sample = (
+            predicted_latents - target_latents
+        ).square().mean(dim=(1, 2))
+        noise_weight = (
+            latent_supervision_timestep / latent_loss_noise_threshold
+        ).clamp(max=1.0)
+        weighted_latent_loss = (noise_weight * latent_per_sample).mean()
+        latent_prefix_loss = latent_per_sample.mean()
     sigreg_loss = self.sigreg(embeddings.transpose(0, 1))
     
     # WM loss = lambda_latent * weighted_latent_loss + lambda_sigreg * sigreg_loss
@@ -472,23 +623,43 @@ def fast_lewam_forward(
 
     output = {
         "loss": loss,
-        "latent_prefix_loss": latent_prefix_loss,
-        "weighted_latent_prefix_loss": weighted_latent_loss,
         "sigreg_loss": sigreg_loss,
         "noise_weight": noise_weight.mean(),
-        "predicted_latents": predicted_latents,
         "emb": embeddings,
     }
-    if stage_b_attention_mode == "terminal_full":
-        # Keep the long-standing prefix names as aliases for consumers that
-        # aggregate the common latent metrics, while exposing unambiguous
-        # terminal names for the new objective.
+    if is_fm:
         output.update(
-            latent_terminal_loss=latent_prefix_loss,
-            weighted_latent_terminal_loss=weighted_latent_loss,
+            latent_flow_velocity_loss=latent_prefix_loss,
+            weighted_latent_flow_velocity_loss=weighted_latent_loss,
+            predicted_latent_velocity=predicted_latent_velocity,
+            latent_flow_timestep=latent_flow_timestep.mean(),
         )
+        if str(stage).lower() in {"val", "validate", "validation"}:
+            with torch.no_grad():
+                endpoint_prediction = self.model.sample_future_latents(
+                    z0,
+                    stage_b_actions,
+                    stage_b_timestep,
+                    initial_noise=latent_flow_noise,
+                    num_steps=int(getattr(self.model, "latent_flow_steps", 2)),
+                    task_condition=task_condition,
+                )
+                endpoint_mse = (
+                    endpoint_prediction - target_latents
+                ).square().mean(dim=(1, 2))
+            output["latent_flow_endpoint_mse"] = endpoint_mse.mean()
+    else:
+        output.update(
+            latent_prefix_loss=latent_prefix_loss,
+            weighted_latent_prefix_loss=weighted_latent_loss,
+            predicted_latents=predicted_latents,
+        )
+        if stage_b_attention_mode == "terminal_full":
+            output.update(
+                latent_terminal_loss=latent_prefix_loss,
+                weighted_latent_terminal_loss=weighted_latent_loss,
+            )
     if train_mode != "stage_b":
-        # action loss
         action_loss = F.mse_loss(predicted_velocity, target_velocity)
         loss = loss + action_loss
         output.update(
@@ -505,16 +676,24 @@ def fast_lewam_forward(
         "weighted_latent_prefix_loss",
         "latent_terminal_loss",
         "weighted_latent_terminal_loss",
+        "latent_flow_velocity_loss",
+        "weighted_latent_flow_velocity_loss",
+        "latent_flow_timestep",
+        "latent_flow_endpoint_mse",
         "sigreg_loss",
         "noise_weight",
         "predicted_action_probability",
     }
-    metrics = {
-        f"{stage}/{name}": value.detach()
-        for name, value in output.items()
-        if name in metric_names
-    }
-    self.log_dict(metrics, on_step=True, sync_dist=True)
+    self.log_dict(
+        {
+            f"{stage}/{name}": value.detach()
+            for name, value in output.items()
+            if name in metric_names
+        },
+        on_step=True,
+        on_epoch=is_fm,
+        sync_dist=True,
+    )
     return output
 
 
@@ -534,19 +713,34 @@ class FastLeWAMPolicy(spt.Module):
         latent_loss_noise_threshold=0.2,
         latent_action_mix_epochs=20,
         stage_b_timestep_mode="legacy",
+        stage_b_action_source="joint",
+        stage_a_goal_index=None,
+        rng_seed=3072,
         lambda_d=1.0,
         lambda_e=1.0,
         scheduler=None,
         optim_interval="epoch",
     ):
         """绑定训练超参数，并复用 LeWM 的 optimizer/scheduler checkpoint 逻辑。"""
-        if train_mode not in {"stage_ab", "stage_b", "stage_c", "stage_abde"}:
+        if train_mode not in {
+            "stage_a",
+            "stage_ab",
+            "stage_ab_fm",
+            "stage_b",
+            "stage_c",
+            "stage_abde",
+        }:
             raise ValueError(
-                "train_mode must be 'stage_ab', 'stage_b', 'stage_c', or 'stage_abde'"
+                "train_mode must be 'stage_a', 'stage_ab', 'stage_ab_fm', "
+                "'stage_b', 'stage_c', or 'stage_abde'"
             )
         if stage_b_timestep_mode not in {"legacy", "clean_action"}:
             raise ValueError(
                 "stage_b_timestep_mode must be 'legacy' or 'clean_action'"
+            )
+        if stage_b_action_source not in {"joint", "recorded_control", "recorded_clean"}:
+            raise ValueError(
+                "stage_b_action_source must be 'joint', 'recorded_control', or 'recorded_clean'"
             )
         stage_b_attention_mode = _stage_b_attention_mode(model)
         stage_b_dynamics = getattr(model, "stage_b_dynamics", "parallel_prefix")
@@ -572,6 +766,15 @@ class FastLeWAMPolicy(spt.Module):
                 raise ValueError(
                     "train_mode='stage_abde' requires strict_causal Stage-B attention"
                 )
+        if train_mode == "stage_ab_fm":
+            if not bool(getattr(model, "latent_flow_matching", False)):
+                raise TypeError(
+                    "train_mode='stage_ab_fm' requires a latent-flow model"
+                )
+            if stage_b_attention_mode != "strict_causal":
+                raise ValueError(
+                    "train_mode='stage_ab_fm' requires strict_causal Stage-B attention"
+                )
         if train_mode == "stage_b":
             if model.action_positions is not None:
                 model.action_positions.requires_grad_(False)
@@ -588,6 +791,8 @@ class FastLeWAMPolicy(spt.Module):
             latent_loss_noise_threshold=latent_loss_noise_threshold,
             latent_action_mix_epochs=latent_action_mix_epochs,
             stage_b_timestep_mode=stage_b_timestep_mode,
+            stage_b_action_source=stage_b_action_source,
+            stage_a_goal_index=stage_a_goal_index,
             lambda_d=lambda_d,
             lambda_e=lambda_e,
         )
@@ -609,6 +814,10 @@ class FastLeWAMPolicy(spt.Module):
         self.latent_loss_noise_threshold = latent_loss_noise_threshold
         self.latent_action_mix_epochs = latent_action_mix_epochs
         self.stage_b_timestep_mode = stage_b_timestep_mode
+        self.stage_b_action_source = stage_b_action_source
+        self.stage_a_goal_index = stage_a_goal_index
+        self.rng_seed = int(rng_seed)
+        self._fast_lewam_rng_streams = {}
         self.lambda_d = lambda_d
         self.lambda_e = lambda_e
 

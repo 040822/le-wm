@@ -73,6 +73,246 @@ def build_phase3_legacy_manifest(
     positions = np.random.default_rng(int(seed)).choice(
         candidate_count, size=int(num_eval), replace=False
     )
+
+
+def _phase3_initial_success_flags(
+    dataset: Any,
+    *,
+    task: str,
+    start_rows: np.ndarray,
+    goal_rows: np.ndarray,
+) -> np.ndarray:
+    """Evaluate the Phase 3 runtime success predicate on reset states.
+
+    Targets are taken from the same future goal rows that the evaluator uses.
+    The returned values therefore answer the eligibility question before a
+    policy takes its first action.
+    """
+
+    task = str(task).lower()
+    start_rows = np.asarray(start_rows, dtype=np.int64)
+    goal_rows = np.asarray(goal_rows, dtype=np.int64)
+    if start_rows.ndim != 1 or goal_rows.shape != start_rows.shape:
+        raise ValueError("Phase 3 initial-state rows must be matching one-dimensional arrays")
+
+    if task == "scene":
+        block = np.asarray(dataset.get_col_data("privileged_block_0_pos"))
+        button_0 = np.asarray(dataset.get_col_data("privileged_button_0_state"))
+        button_1 = np.asarray(dataset.get_col_data("privileged_button_1_state"))
+        drawer = np.asarray(dataset.get_col_data("privileged_drawer_pos")).reshape(-1)
+        window = np.asarray(dataset.get_col_data("privileged_window_pos")).reshape(-1)
+        return (
+            (np.linalg.norm(block[start_rows] - block[goal_rows], axis=-1) <= 0.04)
+            & (button_0[start_rows] == button_0[goal_rows])
+            & (button_1[start_rows] == button_1[goal_rows])
+            & (np.abs(drawer[start_rows] - drawer[goal_rows]) <= 0.04)
+            & (np.abs(window[start_rows] - window[goal_rows]) <= 0.04)
+        )
+
+    if task == "finger":
+        tip = np.asarray(dataset.get_col_data("tip_position"))
+        target = np.asarray(dataset.get_col_data("target_position"))
+        # stable-worldmodel's turn_hard wrapper uses dm_control's hard target
+        # radius (0.03 m); get_reward() returns one exactly when the tip lies
+        # inside this target.  The target is intentionally read from the
+        # future goal row, matching set_target_position() during evaluation.
+        return np.linalg.norm(tip[start_rows] - target[goal_rows], axis=-1) <= 0.03
+
+    if task == "humanoid":
+        head_height = np.asarray(dataset.get_col_data("head_height")).reshape(-1)
+        torso_upright = np.asarray(dataset.get_col_data("torso_upright")).reshape(-1)
+        planar_speed = np.asarray(dataset.get_col_data("speed")).reshape(-1)
+        return (
+            (head_height[start_rows] >= 1.4)
+            & (torso_upright[start_rows] >= 0.9)
+            & (planar_speed[start_rows] >= 1.0)
+        )
+
+    raise ValueError(f"unsupported Phase 3 task: {task!r}")
+
+
+def build_phase3_initial_failure_manifest(
+    dataset: Any,
+    *,
+    task: str,
+    reference_manifest: CohortManifest,
+    seed: int = 42,
+    selection_seed: int = 43,
+    goal_offset_steps: int = 25,
+    num_eval: int = 50,
+) -> CohortManifest:
+    """Freeze a disjoint cohort whose start states all fail the runtime predicate.
+
+    Candidate start-goal pairs follow the Phase 3 legacy row-validity rule and
+    goal offset.  The 50 episodes already used by the legacy cohort are
+    excluded, eligible candidates are grouped by episode, and one start is
+    sampled uniformly within each of 50 selected episodes.
+    """
+
+    task = str(task).lower()
+    if task not in PHASE3_TASKS:
+        raise ValueError(f"unsupported Phase 3 task: {task!r}")
+    if reference_manifest.task != task:
+        raise ValueError("reference Phase 3 cohort task does not match requested task")
+    if reference_manifest.protocol_variant != "legacy":
+        raise ValueError("initial-failure cohort requires a legacy reference cohort")
+    if reference_manifest.goal_offset_steps != int(goal_offset_steps):
+        raise ValueError("reference cohort uses a different goal offset")
+
+    columns = set(str(item) for item in dataset.column_names)
+    episode_column = "episode_idx" if "episode_idx" in columns else "ep_idx"
+    episodes = np.asarray(dataset.get_col_data(episode_column))
+    steps = np.asarray(dataset.get_col_data("step_idx"), dtype=np.int64)
+    if episodes.ndim != 1 or steps.ndim != 1 or len(episodes) != len(steps):
+        raise ValueError("Phase 3 dataset episode_idx/step_idx columns are invalid")
+
+    unique_episodes, inverse = np.unique(episodes, return_inverse=True)
+    max_steps = np.full(len(unique_episodes), np.iinfo(np.int64).min, dtype=np.int64)
+    np.maximum.at(max_steps, inverse, steps)
+    per_row_limit = max_steps[inverse] - int(goal_offset_steps)
+    valid_indices = np.flatnonzero(steps <= per_row_limit).astype(np.int64)
+    candidate_rows = valid_indices[: max(len(valid_indices) - 1, 0)]
+
+    guessed_goal_rows = candidate_rows + int(goal_offset_steps)
+    goal_rows_match = (
+        (guessed_goal_rows < len(episodes))
+        & (episodes[guessed_goal_rows] == episodes[candidate_rows])
+        & (steps[guessed_goal_rows] == steps[candidate_rows] + int(goal_offset_steps))
+    ) if len(candidate_rows) else np.zeros(0, dtype=bool)
+    if not np.all(goal_rows_match):
+        lookup = {
+            (int(episode), int(step)): int(index)
+            for index, (episode, step) in enumerate(zip(episodes, steps))
+        }
+        mapped = np.asarray(
+            [
+                lookup.get((int(episodes[row]), int(steps[row]) + int(goal_offset_steps)), -1)
+                for row in candidate_rows
+            ],
+            dtype=np.int64,
+        )
+        has_goal = mapped >= 0
+        candidate_rows = candidate_rows[has_goal]
+        candidate_goal_rows = mapped[has_goal]
+    else:
+        candidate_goal_rows = guessed_goal_rows
+
+    if len(candidate_rows) == 0:
+        raise ValueError("no valid Phase 3 start-goal candidates are available")
+
+    reference_rows = np.asarray(
+        [entry.row_index for entry in reference_manifest.entries], dtype=np.int64
+    )
+    reference_goals = np.asarray(
+        [entry.goal_row_index for entry in reference_manifest.entries], dtype=np.int64
+    )
+    reference_initial_successes = _phase3_initial_success_flags(
+        dataset,
+        task=task,
+        start_rows=reference_rows,
+        goal_rows=reference_goals,
+    )
+    reference_episode_ids = np.asarray(
+        [_jsonable(entry.episode_id) for entry in reference_manifest.entries],
+        dtype=episodes.dtype,
+    )
+    fresh_mask = ~np.isin(episodes[candidate_rows], reference_episode_ids)
+    fresh_rows = candidate_rows[fresh_mask]
+    fresh_goal_rows = candidate_goal_rows[fresh_mask]
+    fresh_initial_successes = _phase3_initial_success_flags(
+        dataset,
+        task=task,
+        start_rows=fresh_rows,
+        goal_rows=fresh_goal_rows,
+    )
+    eligible_rows = fresh_rows[~fresh_initial_successes]
+    eligible_goal_rows = fresh_goal_rows[~fresh_initial_successes]
+    if len(eligible_rows) == 0:
+        raise ValueError("no initially unsuccessful Phase 3 candidates remain")
+
+    eligible_episodes = episodes[eligible_rows]
+    episode_order = np.argsort(eligible_episodes, kind="stable")
+    sorted_rows = eligible_rows[episode_order]
+    sorted_goal_rows = eligible_goal_rows[episode_order]
+    sorted_episodes = eligible_episodes[episode_order]
+    group_starts = np.r_[
+        0,
+        np.flatnonzero(sorted_episodes[1:] != sorted_episodes[:-1]) + 1,
+    ].astype(np.int64)
+    group_ends = np.r_[group_starts[1:], len(sorted_rows)].astype(np.int64)
+    if len(group_starts) < int(num_eval):
+        raise ValueError(
+            f"Phase 3 initial-failure cohort needs {num_eval} distinct episodes, "
+            f"only {len(group_starts)} are eligible"
+        )
+
+    rng = np.random.default_rng(int(selection_seed))
+    selected_groups = rng.choice(len(group_starts), size=int(num_eval), replace=False)
+    entries = []
+    selected_episode_ids = []
+    for group in selected_groups:
+        start = int(group_starts[int(group)])
+        end = int(group_ends[int(group)])
+        slot = int(rng.integers(start, end))
+        row = int(sorted_rows[slot])
+        goal_row = int(sorted_goal_rows[slot])
+        episode_id = _jsonable(episodes[row])
+        selected_episode_ids.append(episode_id)
+        entries.append(
+            CohortEntry(
+                row_index=row,
+                episode_id=episode_id,
+                start_step=int(steps[row]),
+                goal_row_index=goal_row,
+                goal_step=int(steps[row]) + int(goal_offset_steps),
+                start_distance=None,
+                initially_successful=False,
+                start_state=None,
+                goal_state=None,
+            )
+        )
+
+    diagnostics = {
+        "candidate_count_legacy_validity_rule": int(len(candidate_rows)),
+        "reference_cohort_id": reference_manifest.cohort_id,
+        "reference_cohort_sha256": reference_manifest.computed_sha256,
+        "reference_episode_count_excluded": int(len(reference_episode_ids)),
+        "reference_initial_success_count": int(reference_initial_successes.sum()),
+        "reference_initial_failure_count": int(len(reference_initial_successes) - reference_initial_successes.sum()),
+        "fresh_candidate_count": int(len(fresh_rows)),
+        "fresh_initial_success_count": int(fresh_initial_successes.sum()),
+        "fresh_initial_failure_candidate_count": int(len(eligible_rows)),
+        "fresh_initial_failure_episode_count": int(len(group_starts)),
+        "selected_count": int(len(entries)),
+        "selected_initial_success_count": int(sum(entry.initially_successful is True for entry in entries)),
+        "unique_episode_sampling": True,
+        "environment_success_source": "runtime_predicate_reconstructed_from_start_and_goal_rows",
+    }
+    return CohortManifest(
+        task=task,
+        cohort_id=f"{task}_initial_failure_{int(num_eval)}_phase3_v1",
+        cohort_kind="dev",
+        protocol_variant="sampling_revised",
+        seed=int(seed),
+        goal_offset_steps=int(goal_offset_steps),
+        entries=tuple(entries),
+        episode_split={"dev": tuple(selected_episode_ids)},
+        sampling_rule={
+            "implementation": "Phase 3 initial-state filter over legacy-valid dataset start-goal rows",
+            "global_last_row_excluded": True,
+            "episode_level_deduplication": True,
+            "initial_success_exclusion": True,
+            "initial_success_predicate": {
+                "scene": "cube position L2 <= 0.04 m AND both button states match AND drawer/window position error <= 0.04 m",
+                "finger": "||start tip_position - future goal target_position||_2 <= 0.03 m (turn_hard runtime reward >= 1)",
+                "humanoid": "head_height >= 1.4 AND torso_upright >= 0.9 AND planar speed >= 1.0",
+            }[task],
+            "reference_episodes_excluded": True,
+            "selection_seed": int(selection_seed),
+            "sampling_unit": "episode, with one uniformly selected eligible start per episode",
+        },
+        diagnostics=diagnostics,
+    )
     rows = np.sort(valid_indices[positions])
 
     lookup = {
@@ -145,6 +385,31 @@ def _scalar(value: Any) -> Any:
     return value
 
 
+def set_phase3_scene_goal(
+    self,
+    target_block_pos,
+    target_block_quat,
+    target_button_0_state,
+    target_button_1_state,
+    target_drawer_pos,
+    target_window_pos,
+) -> None:
+    """Restore Scene termination targets from the future physical goal row."""
+
+    block_pos = np.asarray(target_block_pos, dtype=np.float64).reshape(-1)
+    block_quat = np.asarray(target_block_quat, dtype=np.float64).reshape(-1)
+    if block_pos.shape != (3,):
+        raise ValueError("Scene goal block position must contain three values")
+    if block_quat.shape != (4,):
+        raise ValueError("Scene goal block quaternion must contain four values")
+
+    self.set_cube_target_pos(0, block_pos, block_quat)
+    self.set_target_button_state(0, int(_scalar(target_button_0_state)))
+    self.set_target_button_state(1, int(_scalar(target_button_1_state)))
+    self.set_target_drawer_pos(float(_scalar(target_drawer_pos)))
+    self.set_target_window_pos(float(_scalar(target_window_pos)))
+
+
 def patch_phase3_environments() -> None:
     """Install missing DeWM-compatible setters and termination predicates."""
 
@@ -204,34 +469,6 @@ def patch_phase3_environments() -> None:
                     button_state_0=int(states[0]), button_state_1=int(states[1])
                 )
             return original_set_state(self, qpos, qvel, **kwargs)
-
-        def set_phase3_scene_goal(
-            self,
-            target_task,
-            target_block_pos,
-            target_button,
-            target_button_state,
-            target_drawer_pos,
-            target_window_pos,
-            goal_button_states=None,
-        ):
-            task_name = str(_scalar(target_task))
-            self.set_cube_target_pos(0, np.asarray(target_block_pos).reshape(-1)[:3])
-            if goal_button_states is not None:
-                states = np.asarray(goal_button_states).reshape(-1).astype(np.int64)
-                if states.size != 2:
-                    raise ValueError("Scene goal button_states must contain two values")
-            else:
-                states = np.zeros(2, dtype=np.int64)
-            if goal_button_states is None and task_name == "button":
-                button_id = int(_scalar(target_button))
-                if button_id not in (0, 1):
-                    raise ValueError(f"Scene target button must be 0 or 1, got {button_id}")
-                states[button_id] = int(_scalar(target_button_state))
-            self.set_target_button_state(0, int(states[0]))
-            self.set_target_button_state(1, int(states[1]))
-            self.set_target_drawer_pos(float(np.asarray(target_drawer_pos).reshape(-1)[0]))
-            self.set_target_window_pos(float(np.asarray(target_window_pos).reshape(-1)[0]))
 
         SceneEnv.set_state = set_state
         SceneEnv.set_phase3_scene_goal = set_phase3_scene_goal

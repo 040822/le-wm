@@ -1,15 +1,10 @@
-\begin{tabular}{llrrrrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Task & Scorer & Oracle (\%) & Random (\%) & Top-1 (\%) & Regret & Pairwise & Spearman \\
+Scorer & Coverage $\uparrow$ & Selected SR $\uparrow$ & Regret $\downarrow$ & Spearman $\uparrow$ \\
 \midrule
-Push-T & Joint-B & \PaperResult{pool-pusht-oracle} & \PaperResult{pool-pusht-random} & \PaperResult{rank-joint-pusht-topone} & \PaperResult{rank-joint-pusht-regret} & \PaperResult{rank-joint-pusht-pairwise} & \PaperResult{rank-joint-pusht-spearman} \\
- & Recorded-control & \PaperResult{pool-pusht-oracle} & \PaperResult{pool-pusht-random} & \PaperResult{rank-control-pusht-topone} & \PaperResult{rank-control-pusht-regret} & \PaperResult{rank-control-pusht-pairwise} & \PaperResult{rank-control-pusht-spearman} \\
- & B-only & \PaperResult{pool-pusht-oracle} & \PaperResult{pool-pusht-random} & \PaperResult{rank-bonly-pusht-topone} & \PaperResult{rank-bonly-pusht-regret} & \PaperResult{rank-bonly-pusht-pairwise} & \PaperResult{rank-bonly-pusht-spearman} \\
- & LeWM & \PaperResult{pool-pusht-oracle} & \PaperResult{pool-pusht-random} & \PaperResult{rank-lewm-pusht-topone} & \PaperResult{rank-lewm-pusht-regret} & \PaperResult{rank-lewm-pusht-pairwise} & \PaperResult{rank-lewm-pusht-spearman} \\
-\midrule
-Reacher & Joint-B & \PaperResult{pool-reacher-oracle} & \PaperResult{pool-reacher-random} & \PaperResult{rank-joint-reacher-topone} & \PaperResult{rank-joint-reacher-regret} & \PaperResult{rank-joint-reacher-pairwise} & \PaperResult{rank-joint-reacher-spearman} \\
- & Recorded-control & \PaperResult{pool-reacher-oracle} & \PaperResult{pool-reacher-random} & \PaperResult{rank-control-reacher-topone} & \PaperResult{rank-control-reacher-regret} & \PaperResult{rank-control-reacher-pairwise} & \PaperResult{rank-control-reacher-spearman} \\
- & B-only & \PaperResult{pool-reacher-oracle} & \PaperResult{pool-reacher-random} & \PaperResult{rank-bonly-reacher-topone} & \PaperResult{rank-bonly-reacher-regret} & \PaperResult{rank-bonly-reacher-pairwise} & \PaperResult{rank-bonly-reacher-spearman} \\
- & LeWM & \PaperResult{pool-reacher-oracle} & \PaperResult{pool-reacher-random} & \PaperResult{rank-lewm-reacher-topone} & \PaperResult{rank-lewm-reacher-regret} & \PaperResult{rank-lewm-reacher-pairwise} & \PaperResult{rank-lewm-reacher-spearman} \\
+Random choice & \PaperResult{draft-pool-coverage} & \PaperResult{draft-rank-random-selected} & \PaperResult{draft-rank-random-regret} & --- \\
+LeWM & \PaperResult{draft-pool-coverage} & \PaperResult{draft-rank-lewm-selected} & \PaperResult{draft-rank-lewm-regret} & \PaperResult{draft-rank-lewm-spearman} \\
+CoWM-B & \PaperResult{draft-pool-coverage} & \PaperResult{draft-rank-cowm-selected} & \PaperResult{draft-rank-cowm-regret} & \PaperResult{draft-rank-cowm-spearman} \\
+Physical-cost oracle & \PaperResult{draft-pool-coverage} & \PaperResult{draft-rank-oracle-selected} & 0 & --- \\
 \bottomrule
 \end{tabular}

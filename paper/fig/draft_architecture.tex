@@ -2,17 +2,18 @@
 \centering
 \fbox{\begin{minipage}{0.94\textwidth}
 \centering\small
-\textbf{CoWM: shared visual encoder/projector $f_\phi$ and DiT $T_\theta$}\\[5pt]
-\begin{tabular}{p{0.45\textwidth}p{0.45\textwidth}}
-\textbf{Training: three connections} & \textbf{Inference: choose a decision budget} \\[3pt]
-1. A and B update shared parameters. & Current and goal images $\longrightarrow z_0,z_g$ \\[3pt]
-2. B receives recorded or A-estimated actions. & A: noise $\longrightarrow$ action proposal(s) \\[3pt]
-3. B loss backpropagates through estimated actions; detachment removes this path. & P0: execute directly; P3: score with B and select; PO: refine with $\nabla_{\mathbf a}J$ before execution. \\[3pt]
-A learns action velocity; B learns recorded future latents. & B: $(z_0,\mathbf a)\longrightarrow\hat z_{1:H}$ in parallel; $J=\operatorname{mse}(\hat z_H,z_g)$.
+\textbf{CoWM: shared visual representation and DiT backbone}\\[5pt]
+\begin{tabular}{p{0.44\textwidth}p{0.44\textwidth}}
+\textbf{Training: generation and dynamics} & \textbf{Deployment: a limited decision budget} \\[4pt]
+A: $(z_0,z_g,x_\tau,\tau)\rightarrow v_\theta\rightarrow\tilde{\mathbf a}$ & Generate $N$ candidates in $S$ flow steps. \\[4pt]
+B: $(z_0,\mathbf a^{\rm in};s)\rightarrow\hat{\mathbf z}_{1:H}$ & Predict candidate futures in parallel. \\[4pt]
+\textbf{Parameters:} both losses update the shared backbone. & \textbf{Selection:} rank candidates by $J(\mathbf a)$. \\[4pt]
+\textbf{Inputs:} $\mathbf a^{\rm in}$ mixes recorded actions and A estimates. & \textbf{Refinement:} use cost gradients after generation (PO) or during generation (GF). \\[4pt]
+\textbf{Gradients:} $\mathcal L_B$ also reaches A through $\tilde{\mathbf a}$. & Execute an action prefix and replan from the next observation.
 \end{tabular}\\[5pt]
-\textbf{Decision probes:} physical readout $\longrightarrow$ predicted consequences
-$\longrightarrow$ candidate ranking / real refinement outcomes
+$J(\mathbf a)=\operatorname{mse}(\hat z_H,z_g)$\qquad
+\textbf{Budget controls:} candidate count $N$, generation steps $S$, refinement updates $K$.
 \end{minipage}}
-\caption{Coupling and decision interfaces. A and B reuse transformer blocks with different token layouts and masks. The goal conditions A and the external cost, but is not an input to B. The recorded future remains B's training target even on estimated-action inputs; simulator branches are required to test actual consequences. The inference routes are alternatives, not compulsory sequential stages.}
+\caption{CoWM connects action generation and latent dynamics through three training mechanisms. The dynamics mode predicts future latents in parallel from action prefixes; it does not receive the goal. At deployment, its predicted goal cost supports candidate selection and refinement. These are configurable inference routes.}
 \label{fig:architecture}
 \end{figure*}

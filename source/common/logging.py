@@ -40,7 +40,13 @@ def get_run_dir(cfg, dataset_name):
     subdir = cfg.get("subdir")
     subdir = str(subdir).strip() if subdir is not None else ""
     if subdir and subdir.lower() not in {"none", "null"} and not subdir.startswith("${"):
-        run_dir = Path("outputs", safe_name(subdir))
+        if bool(cfg.get("subdir_preserve_path", False)):
+            relative = Path(subdir)
+            if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+                raise ValueError("subdir_preserve_path requires a safe relative output path")
+            run_dir = Path("outputs").joinpath(*(safe_name(part) for part in relative.parts))
+        else:
+            run_dir = Path("outputs", safe_name(subdir))
     elif hydra_dir is not None:
         run_dir = hydra_dir
     else:

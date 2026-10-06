@@ -1,10 +1,12 @@
-\begin{tabular}{lrrrr}
+\begin{tabular}{llllrrrr}
 \toprule
-Training arm & Push-T same-A P3 & Reacher same-A P3 & Push-T own-A P0 & Reacher own-A P0 \\
+Configuration & Shared DiT & B input & Action gradient & Own-A P0 $\uparrow$ & Own-A P3 $\uparrow$ & Pool regret $\downarrow$ & Refinement $\uparrow$ \\
 \midrule
-Joint (Full) & \PaperResult{train-joint-pusht-p3} & \PaperResult{train-joint-reacher-p3} & \PaperResult{train-joint-pusht-p0} & \PaperResult{train-joint-reacher-p0} \\
-Recorded-control & \PaperResult{train-control-pusht-p3} & \PaperResult{train-control-reacher-p3} & \PaperResult{train-control-pusht-p0} & \PaperResult{train-control-reacher-p0} \\
-Recorded-clean & \PaperResult{train-clean-pusht-p3} & \PaperResult{train-clean-reacher-p3} & \PaperResult{train-clean-pusht-p0} & \PaperResult{train-clean-reacher-p0} \\
-B-only & \PaperResult{train-bonly-pusht-p3} & \PaperResult{train-bonly-reacher-p3} & --- & --- \\
+A-only & --- & --- & --- & \PaperResult{draft-train-aonly-p0} & --- & --- & --- \\
+B-only & --- & Recorded & --- & --- & --- & \PaperResult{draft-train-bonly-regret} & \PaperResult{draft-train-bonly-refine} \\
+Separate-Recorded & No & Recorded & No & \PaperResult{draft-train-separate-p0} & \PaperResult{draft-train-separate-p3} & \PaperResult{draft-train-separate-regret} & \PaperResult{draft-train-separate-refine} \\
+Shared-Recorded & Yes & Recorded & No & \PaperResult{draft-train-recorded-p0} & \PaperResult{draft-train-recorded-p3} & \PaperResult{draft-train-recorded-regret} & \PaperResult{draft-train-recorded-refine} \\
+Shared-Pred-Detach & Yes & Mixed & Stopped & \PaperResult{draft-train-detach-p0} & \PaperResult{draft-train-detach-p3} & \PaperResult{draft-train-detach-regret} & \PaperResult{draft-train-detach-refine} \\
+Shared-Pred-Full & Yes & Mixed & Yes & \PaperResult{draft-train-full-p0} & \PaperResult{draft-train-full-p3} & \PaperResult{draft-train-full-regret} & \PaperResult{draft-train-full-refine} \\
 \bottomrule
 \end{tabular}

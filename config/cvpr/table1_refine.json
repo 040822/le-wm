@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "experiment": "cvpr_table1_refine_v1",
+  "tasks": ["tworoom", "pusht", "reacher", "cube"],
+  "seeds": [42, 100, 2026, 3407, 1234, 4444],
+  "seed_policy": {
+    "cohort_sampling_seed": "evaluation_seed",
+    "environment_seed_offset": 10000,
+    "policy_seed_offset": 20000
+  },
+  "protocol": {
+    "variant": "legacy",
+    "goal_offset_steps": 25,
+    "episodes_per_seed": 50,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "world_batch_size": 50,
+    "precision": "float32",
+    "autocast": false,
+    "tf32": false,
+    "compile": false,
+    "cem": {
+      "num_samples": 300,
+      "iterations": 30,
+      "topk": 30,
+      "var_scale": 1.0,
+      "warm_start": true,
+      "batch_size": 1
+    },
+    "cowm": {
+      "candidate_count": 64,
+      "action_flow_steps": 2,
+      "integrator": "euler",
+      "solver_batch_size": 1,
+      "candidate_batch_size": 64,
+      "proposal_chunk_size": 512,
+      "goal_cache": false,
+      "guidance_step_size": 0.01,
+      "guidance_max_rms_offset": 0.2
+    },
+    "subjepa": {
+      "history_size": "checkpoint_native",
+      "score_horizon_blocks": 5,
+      "execute_steps": 25
+    }
+  },
+  "timing": {
+    "gpu": 3,
+    "batch_size": 1,
+    "warmup_states": 10,
+    "unique_states": 50,
+    "repeats_per_state": 5,
+    "rng_seed_base": 910000,
+    "normal_timing_parity_atol": 1e-6,
+    "normal_timing_parity_rtol": 1e-5,
+    "require_idle_gpu": true,
+    "cpu_threads": 1
+  },
+  "resources": {
+    "permitted_gpus": [0, 1, 2, 3],
+    "evaluation_free_vram_margin_gib": 6,
+    "stop_dispatch_free_disk_gib": 20,
+    "max_workers_per_gpu": 1,
+    "input_datasets": {
+      "tworoom": "data/datasets/tworoom.h5",
+      "pusht": "data/datasets/pusht.h5",
+      "reacher": "data/datasets/dmcontrol/reacher.h5",
+      "cube": "data/datasets/ogbench/cube_single.h5"
+    }
+  },
+  "assets": {
+    "cowm_manifest": "config/round5/phase1_6.json",
+    "leflow_manifest": "config/round4/leflow_artifacts.json",
+    "subjepa_manifest": "config/baselines/subjepa_official.json"
+  },
+  "outputs": {
+    "root": "outputs/cvpr/table1/refine_v1",
+    "report_root": "docs/report/cvpr"
+  },
+  "refinement": {
+    "score_reductions": [
+      {"id": "endpoint", "mode": "endpoint", "terminal_weight": 1.0},
+      {"id": "minimum", "mode": "minimum", "terminal_weight": 0.0},
+      {"id": "mixed_025", "mode": "mixed", "terminal_weight": 0.25},
+      {"id": "mixed_050", "mode": "mixed", "terminal_weight": 0.5}
+    ],
+    "training": {
+      "task": "reacher",
+      "arms": ["b_specific", "shared_preserve"],
+      "seeds": [3072, 4096],
+      "updates": 2000,
+      "checkpoint_updates": [500, 1000, 2000],
+      "batch_size": 128,
+      "learning_rate": 0.00001,
+      "weight_decay": 0.001,
+      "gradient_clip": 1.0,
+      "cache_seed": 3072,
+      "trajectories": 512,
+      "windows_per_trajectory": 16,
+      "train_split_seed": 3072,
+      "train_split_fraction": 0.9,
+      "ranking_margin": 0.05,
+      "cost_loss_weight": 0.1,
+      "temporal_loss_weight": 0.1,
+      "actor_preserve_loss_weight": 1.0
+    },
+    "refinement": [
+      {"id": "refine_k2_eta001", "guidance": "post_opt_refine", "inner_steps": 2, "step_size": 0.001},
+      {"id": "refine_k2_eta003", "guidance": "post_opt_refine", "inner_steps": 2, "step_size": 0.003},
+      {"id": "refine_k2_eta01", "guidance": "post_opt_refine", "inner_steps": 2, "step_size": 0.01},
+      {"id": "refine_k5_eta001", "guidance": "post_opt_refine", "inner_steps": 5, "step_size": 0.001},
+      {"id": "refine_k5_eta003", "guidance": "post_opt_refine", "inner_steps": 5, "step_size": 0.003},
+      {"id": "refine_k5_eta01", "guidance": "post_opt_refine", "inner_steps": 5, "step_size": 0.01},
+      {"id": "po_k2_eta003", "guidance": "post_opt", "inner_steps": 2, "step_size": 0.003},
+      {"id": "po_k2_eta01", "guidance": "post_opt", "inner_steps": 2, "step_size": 0.01},
+      {"id": "po_k5_eta003", "guidance": "post_opt", "inner_steps": 5, "step_size": 0.003},
+      {"id": "po_k5_eta01", "guidance": "post_opt", "inner_steps": 5, "step_size": 0.01},
+      {"id": "gf_eta003", "guidance": "guided_flow", "inner_steps": 1, "last_steps": 2, "step_size": 0.003},
+      {"id": "gf_eta01", "guidance": "guided_flow", "inner_steps": 1, "last_steps": 2, "step_size": 0.01}
+    ],
+    "max_rms_offset": 0.2,
+    "max_closed_loop_episodes": 10500
+  }
+}

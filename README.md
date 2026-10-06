@@ -27,3 +27,13 @@ python eval.py --config-name=tworoom.yaml policy=/path/to/run/value_jepa
 LeWM 评测阶段不会直接从模型解码 action。JEPA 负责给候选动作序列输出 latent cost，planner 选择低 cost 动作，再由 `WorldModelPolicy` 与环境交互。
 
 根目录的 `jepa.py`、`module.py`、`utils.py` 只保留为旧 import/checkpoint 的兼容 re-export，新代码应从 `source.*` 导入。
+
+## 官方 Sub-JEPA 权重
+
+四任务官方权重接入说明见 [使用与验证记录](docs/guide/subjepa_official.md)。准备完成后的模型在 `data/checkpoints/subjepa_official/<task>/subjepa.pt`，复用本仓库的 LeWM CEM 和评测协议。
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_subjepa_official.py --task tworoom --seed 42
+```
+
+该入口为每次评测建立独立输出目录，结果中标记 `subjepa_official` 并保存官方权重来源。支持 `tworoom`、`pusht`、`reacher`、`cube`；不会重新训练模型。

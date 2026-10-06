@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 5 action-horizon exploration",
+  "requested_runner_model": "gpt-6-luna",
+  "requested_reasoning_effort": "max",
+  "protocol": "legacy",
+  "training": {
+    "model": "R4-AB",
+    "seed": 3072,
+    "epoch": 10,
+    "retrain_stage1": false,
+    "checkpoint": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+    "checkpoint_sha256": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553"
+  },
+  "cohort": {
+    "kind": "dev",
+    "protocol_variant": "legacy",
+    "path": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+    "sha256": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45",
+    "baseline_phase4_root": "outputs/round4/phase45_4_seed3072_legacy_dev",
+    "baseline_phase1_root": "outputs/round5/phase1_seed3072_legacy"
+  },
+  "evaluation": {
+    "seed": 42,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "action_horizon_blocks": 5,
+    "action_block_env_steps": 5,
+    "execute_steps": [25, 10, 5, 1],
+    "score_steps_env": [25, 10, 5],
+    "flow_steps": 2,
+    "integrator": "euler",
+    "best_of_n_candidates": 64,
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0
+  },
+  "guidance": {
+    "step_size": 0.01,
+    "last_steps": 5,
+    "inner_steps": 5,
+    "max_rms_offset": 0.2,
+    "p3_proposal_chunk_size": 512
+  },
+  "output_root": "outputs/round5/phase5_seed3072_legacy",
+  "report_output": "docs/report/round5/round5_phase5_report.md",
+  "gpu_policy": "One explicitly selected physical GPU per evaluator. GPU4-7 are authorized for this low-VRAM evaluation; every worker must set CUDA_VISIBLE_DEVICES."
+}

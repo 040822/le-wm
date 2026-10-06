@@ -1,30 +1,7 @@
-\section{Discussion and Limitations}
+\section{Discussion and Conclusion}
 \label{sec:limitations}
-Coupling is a design variable. Recorded-action multi-task training may suffice; estimated inputs may help without their gradients; or joint training may offer no reliable decision benefit.
+CoWM couples goal-conditioned action generation with action-conditioned latent dynamics to support selection and refinement under a limited decision budget. Parameter sharing, generated-action inputs, and the action-mediated gradient path connect the two tasks during learning. Parallel future prediction and configurable candidate and update counts provide complementary controls over decision computation. The completed comparisons support \PaperResult{conclusion-supported-claim}.
 
-The retained configuration is \PaperResult{discussion-configuration}.
+The approach also has specific limitations. Estimated-action training uses recorded future targets, so it does not provide counterfactual supervision for arbitrary generated actions. Predicted cost gradients may improve the model's score without improving physical execution, and a larger candidate pool may expose prediction errors. Our common-pool and executed-refinement evaluations examine these effects alongside closed-loop success. The remaining empirical scope is \PaperResult{conclusion-unresolved-scope}.
 
-The supported training effect is \PaperResult{discussion-training-scope}. Its scope follows complete matched contrasts. Without Pred-Detach or a sharing control, input, gradient, and parameter effects cannot all be independently attributed.
-
-Estimated-action training retains the recorded future target. It may encourage consistency near recorded actions, but it does not observe their counterfactual futures.
-
-Temporal attention constraints likewise do not establish physical causality.
-
-Physical state readability, continuous ranking, top-1 selection, and closed-loop success are different endpoints.
-
-In current checkpoints, continuous ranking gains do not consistently transfer to control and do not replicate across every setting.
-
-The final task and seed variation is \PaperResult{discussion-generalization}. Reused evaluation episodes, training-data exposure, and incomplete contrasts limit the claims even when a particular metric improves.
-
-Latency describes the stated hardware and isolated policy call. Total training cost, resident parameters, history handling, and search budgets affect the comparison.
-
-The validated efficiency scope is \PaperResult{discussion-efficiency-scope}.
-
-Online branch supervision changes the data setting. Its exploratory improvement is reported separately in the supplement and is not evidence for the original offline training objective.
-
-\section{Conclusion}
-CoWM combines action flow and parallel latent dynamics while distinguishing parameter, input, and gradient connections. Its evaluation connects physical consequences to action choice and measured decision cost.
-
-The completed comparisons support \PaperResult{conclusion-supported-claim}. The unresolved scope is \PaperResult{conclusion-unresolved-scope}.
-
-The fixed-checkpoint reference shows task-dependent selection value and lower latency without validated CEM replacement.
+Resource benefits depend on the implementation and operating point. Sharing weights reduces backbone duplication but does not eliminate the separate computations of A and B. Decision latency includes all generation, prediction, and refinement work, while training cost is reported separately. Success--latency comparisons with both small and large search budgets determine when the coupled model offers a useful alternative to extensive online search.

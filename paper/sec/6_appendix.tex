@@ -12,7 +12,9 @@ Actual training visits, updates, and checkpoint histories are \PaperResult{appen
 Unused C/D/E extensions remain allocated in the implementation. A/B-only objectives do not remove their storage. Resource reporting distinguishes active compute from total resident parameters.
 
 \paragraph{Coupling and controls.}
-At fitting time, estimated-action probability is $\min(e/10,0.5)$ for effective epoch $e$. The inherited validation loss instead uses probability one; validation and fitting losses do not have the same input mixture.
+The main draft uses Separate-Recorded and Shared-Recorded for the architecture controls. ``Recorded'' specifies B's action input, not a ground-truth dynamics oracle. Historical Recorded-clean corresponds to shared recorded-action training with time one and unit weights. Recorded-control retains Full's timestep/weight schedule. These are distinct variants of recorded-action supervision, and only matched conditioning and weighting isolate an input-source effect.
+
+At fitting time, estimated-action probability is $\min(e/10,0.5)$ for effective epoch $e$. The sample weight is $w(s)=\min(s/0.2,1)$, with $\lambda_B=1$ and $\lambda_R=0.09$. The inherited validation loss instead uses probability one; validation and fitting losses do not have the same input mixture.
 
 Recorded-control keeps the Joint arm's mask, B timestep, and sample weight while replacing B inputs with recorded actions. Recorded-clean uses recorded actions, time one, and unit weights; B-only also uses clean recorded-action supervision.
 
@@ -82,7 +84,7 @@ Readout train/validation splits exclude diagnostic trajectories. Ridge and small
 The current Cube target is block position. Additional physical quantities are reported only when measured with defined fields, units, and matched splits. Heterogeneous physical errors are not averaged as one common scale.
 
 \paragraph{Refinement.}
-PO/GF comparisons use a common initial action. After legal projection, the random control matches actual action displacement. Valid state counts, early termination, and predicted-improvement/physical-degradation rates accompany the result.
+PO comparisons use a common initial action. GF uses matched initial noise and the corresponding unguided trajectory. After legal projection, the random control matches actual action displacement. Valid state counts, early termination, and predicted-improvement/physical-degradation rates accompany the result.
 
 \section{Online Data Extension}
 \label{app:online}

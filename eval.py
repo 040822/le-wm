@@ -1,4 +1,4 @@
-"""Evaluate LeWM or a random policy with the canonical LeWM protocol."""
+"""Evaluate LeWM, official Sub-JEPA, LeFlow or random with the LeWM protocol."""
 
 import os
 
@@ -20,6 +20,7 @@ from source.common.eval import (
 )
 from source.model.fast_lewam.jepa import FastLeWAM
 from source.model.leflow.latent_planner import LatentPlannerRuntime
+from source.model.subjepa.official import OfficialSubJEPA
 
 
 def validate_generic_eval_policy(policy_or_model):
@@ -31,6 +32,15 @@ def validate_generic_eval_policy(policy_or_model):
             "and select one or more stages"
         )
     return policy_or_model
+
+
+def get_eval_policy_kind(policy_or_model):
+    model = getattr(policy_or_model, "model", policy_or_model)
+    if isinstance(model, LatentPlannerRuntime):
+        return "leflow"
+    if isinstance(model, OfficialSubJEPA):
+        return "subjepa_official"
+    return "lewm"
 
 
 @hydra.main(version_base=None, config_path="./config/eval", config_name="pusht")
@@ -49,11 +59,7 @@ def run(cfg: DictConfig):
             eval_path, _ = get_policy_eval_paths(
                 policy_name, ckpt_path=checkpoint
             )
-            policy_kind = (
-                "leflow"
-                if isinstance(getattr(policy_or_model, "model", policy_or_model), LatentPlannerRuntime)
-                else "lewm"
-            )
+            policy_kind = get_eval_policy_kind(policy_or_model)
 
         task = str(cfg.eval.task_name)
         session = DatasetEvaluationSession(cfg, task=task)

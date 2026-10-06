@@ -6,6 +6,7 @@ defaults:
 
 output_model_name: lewm
 subdir: null
+episode_split_manifest: null
 
 num_workers: 2
 train_split: 0.9

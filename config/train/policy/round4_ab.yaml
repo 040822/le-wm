@@ -1,6 +1,7 @@
 _target_: source.policy.fast_lewam.FastLeWAMPolicy
 
 action_horizon: ${action_horizon}
+stage_a_goal_index: null
 train_mode: ${train_mode}
 lambda_latent: ${loss.latent.weight}
 lambda_sigreg: ${loss.sigreg.weight}
@@ -10,6 +11,8 @@ detach_clean_action: ${detach_clean_action}
 latent_loss_noise_threshold: ${latent_loss_noise_threshold}
 latent_action_mix_epochs: ${latent_action_mix_epochs}
 stage_b_timestep_mode: ${stage_b_timestep_mode}
+stage_b_action_source: ${stage_b_action_source}
+rng_seed: ${seed}
 optimizer: ${optimizer}
 
 sigreg:
@@ -35,6 +38,8 @@ model:
   stage_b_attention_mode: ${stage_b_attention_mode}
   serial_activation_checkpointing: false
   d_flow_steps: ${d_flow_steps}
+  latent_flow_matching: ${oc.select:latent_flow_matching,false}
+  latent_flow_steps: ${oc.select:latent_flow_steps,2}
   activation_checkpointing: ${activation_checkpointing}
 
   encoder:

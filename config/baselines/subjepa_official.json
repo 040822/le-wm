@@ -1,0 +1,35 @@
+{
+  "repository": "intcomp/sub-jepa",
+  "revision": "03466983bacc465e56464f800148275841b27b95",
+  "output_root": "data/checkpoints/subjepa_official",
+  "lewm_revision": "8edfeb336732b5f3ce7b8b210d0ba370a09e2cac",
+  "legacy_transformers": "4.57.1",
+  "legacy_huggingface_hub": "0.36.0",
+  "source_files": {
+    "jepa.py": "41bad7fd21e0f14aea4c9c3d39a9c87037e787746d953ab62cdc0677e938ce96",
+    "module.py": "0b258a9e8dc24c29fcb1e8c50a09ec78b8ea85aeb79e21dd8adf712396646620",
+    "LICENSE": "4882021920cbd61e050e4dc2e02440e9bd36ea4cbc5803e738a2ee3d63502e07"
+  },
+  "tasks": {
+    "tworoom": {
+      "weights_sha256": "06d743c6fb46914dafed0aabab4e9e2eed8d53efbf9cb4a4a3350244afbb2652",
+      "config_git_blob": "ce15333d1c530d1bab2507d132e5197848241b31",
+      "num_subspaces": 32
+    },
+    "pusht": {
+      "weights_sha256": "f4b4b9bdf4cf6254a98f1ae73c182f884f449eb52436e5900157a5f463313b3a",
+      "config_git_blob": "0e1ba2d03b1696ebff1de3f973bf3ab3b2e45deb",
+      "num_subspaces": 16
+    },
+    "reacher": {
+      "weights_sha256": "da032d7905c7215af55fe61e517a64357479fca74960c0fc60405d5084411240",
+      "config_git_blob": "213f029f420ec6144cbc0d6b924a7c351052355c",
+      "num_subspaces": 32
+    },
+    "cube": {
+      "weights_sha256": "05a269ab6da3be48748db77f878442852d2af18dc7693ebb2fd3220d4760263c",
+      "config_git_blob": "8a92143114472bed17ef42289faf296e8122d12f",
+      "num_subspaces": 32
+    }
+  }
+}

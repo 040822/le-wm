@@ -2,14 +2,16 @@
 
 Start from [main.tex](main.tex). The English draft follows the action–dynamics coupling discussion in session `01a0ba23-c649-7b90-8acc-96716f894f9f` and the local CoWM notes. Read the [Chinese drafting guide](docs/DRAFT_GUIDE.md) for the argument, evidence boundaries, remaining experiments, and source provenance.
 
-The 2026-10-01 revision fixes six experiment questions and centralizes result slots. Fill [results.tex](results.tex) following the [result filling guide](docs/RESULTS_FILL_GUIDE.md). Conditional rows do not require extending the run queue. CoWM remains a provisional name; online adaptation and C/D/E extensions stay outside the offline core.
+The 2026-10-01 Fast CoWM revision follows the agreed five-paragraph introduction and budget-centered experiment design. It uses five main table groups, with resource, physical-readout, and optional robot panels in the supplement. Fill [results.tex](results.tex) following the [result filling guide](docs/RESULTS_FILL_GUIDE.md). Conditional rows do not require extending the run queue. CoWM remains a provisional name; online adaptation and C/D/E extensions stay outside the offline core.
+
+The 2026-10-05 Table 1 update fills the six formal comparison rows and initial replanning latency from `outputs/cvpr/table1/v1`, and updates the abstract, experimental protocol, and conclusion. See [protocol](docs/MAIN_TABLE_PROTOCOL.md) and the repository audit at `docs/report/cvpr/cvpr_table1_paper_audit_20261005.md`. Evaluation-seed standard deviations do not represent training-seed uncertainty; the dagger row changes only the Reacher horizon. Other experiment groups remain pending.
 
 ## Files
 
 - `sec/0_abstract.tex` through `sec/5_discussion.tex`: main paper.
-- `sec/6_appendix.tex`: working supplement, excluded from `main.tex` by default.
+- `sec/6_appendix.tex`, `sec/8_budget_extensions.tex`: working supplement, excluded from `main.tex` by default.
 - `fig/draft_architecture.tex`: native LaTeX architecture sketch.
-- `results.tex`, `tables/final_*.tex`: central result values and six fillable main tables.
+- `results.tex`, `tables/final_*.tex`: central result values and fillable main/supplementary tables.
 - `tables/phase1_7_snapshot.tex`: artifact-derived epoch-10 development checks.
 - `sec/7_reference_results.tex`, `tables/phase1_6/`: preserved measured reference results in the supplement.
 - `references.bib`: active bibliography.

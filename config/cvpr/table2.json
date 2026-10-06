@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "experiment": "cvpr_table2_v1",
+  "tasks": ["tworoom", "pusht", "reacher", "cube"],
+  "training_seeds": [3072, 4096, 5120],
+  "evaluation_seeds": [42, 100, 2026, 3407, 1234, 4444],
+  "arms": {
+    "a_only": {
+      "label": "A-only",
+      "train_mode": "stage_a",
+      "a_loss": true,
+      "b_loss": false,
+      "b_action_source": "none",
+      "b_timestep": "none",
+      "b_sample_weight": "none",
+      "detach_action_path": false
+    },
+    "b_only_clean": {
+      "label": "B-only-clean",
+      "train_mode": "stage_b",
+      "a_loss": false,
+      "b_loss": true,
+      "b_action_source": "recorded",
+      "b_timestep": "clean_t1",
+      "b_sample_weight": "unit",
+      "detach_action_path": false
+    },
+    "shared_recorded_control": {
+      "label": "Shared-Recorded-control",
+      "train_mode": "stage_ab",
+      "a_loss": true,
+      "b_loss": true,
+      "b_action_source": "recorded_with_full_course_mask",
+      "b_timestep": "full_legacy_course",
+      "b_sample_weight": "full_legacy_noise_weight",
+      "detach_action_path": false,
+      "predicted_action_path": false
+    },
+    "shared_pred_detach": {
+      "label": "Shared-Pred-Detach",
+      "train_mode": "stage_ab",
+      "a_loss": true,
+      "b_loss": true,
+      "b_action_source": "recorded_or_predicted_course",
+      "b_timestep": "full_legacy_course",
+      "b_sample_weight": "full_legacy_noise_weight",
+      "detach_action_path": true
+    },
+    "shared_pred_full": {
+      "label": "Shared-Pred-Full",
+      "train_mode": "stage_ab",
+      "a_loss": true,
+      "b_loss": true,
+      "b_action_source": "recorded_or_predicted_course",
+      "b_timestep": "full_legacy_course",
+      "b_sample_weight": "full_legacy_noise_weight",
+      "detach_action_path": false
+    }
+  },
+  "training": {
+    "initialization": "fresh_identical_model_initialization_per_task_and_seed",
+    "historical_r4_ab_reuse": "fixed_actor_for_diagnostics_only",
+    "epochs": 10,
+    "batch_size": 128,
+    "optimizer": "AdamW",
+    "learning_rate": 0.00005,
+    "weight_decay": 0.001,
+    "embed_dim": 192,
+    "shared_dit_layers": 6,
+    "shared_dit_heads": 6,
+    "shared_dit_mlp_dim": 768,
+    "stage_b_dynamics": "parallel_prefix",
+    "stage_b_attention_mode": "strict_causal",
+    "token_encoding": "legacy",
+    "stage_a_goal_injection": "token",
+    "latent_loss_weight": 1.0,
+    "sigreg_weight": 0.09,
+    "latent_loss_noise_threshold": 0.2,
+    "latent_action_mix_epochs": 10,
+    "precision": "bf16",
+    "gradient_clip_norm": 1.0,
+    "train_split": 0.9,
+    "history_size": 1,
+    "action_horizon": 5,
+    "data_loader_workers": 8,
+    "hdf5_chunk_size": 100,
+    "gpu_image_preprocessing": true,
+    "d_loss_weight": 0.0,
+    "e_loss_weight": 0.0,
+    "rng_streams": {
+      "stage_a_timestep_offset": 324508639,
+      "stage_a_noise_offset": 610839776,
+      "stage_b_action_mix_offset": 1369948171
+    },
+    "checkpoint_policy": "last_epoch_10_no_test_checkpoint_selection"
+  },
+  "evaluation": {
+    "episodes_per_seed": 50,
+    "total_execution_budget": 50,
+    "goal_offset_steps": 25,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "generation_scoring_execution_steps": [25, 25, 25],
+    "candidate_count": 64,
+    "action_flow_steps": 2,
+    "action_flow_integrator": "euler",
+    "precision": "float32",
+    "autocast": false,
+    "tf32": false,
+    "compile": false,
+    "action_bound_mode": "none",
+    "evaluation_seeds": [42, 100, 2026, 3407, 1234, 4444],
+    "condition_counts_per_training_seed": {
+      "own_a_p0": 4,
+      "own_shared_p3": 3,
+      "own_shared_p0_po2": 3,
+      "fixed_actor_with_trained_b_p3": 4,
+      "total": 14
+    },
+    "closed_loop_max_independent_units": 1008,
+    "closed_loop_max_episodes": 50400,
+    "cohort_source": "outputs/cvpr/table1/v1/cohorts",
+    "shared_sample_manifest": true
+  },
+  "fixed_actor": {
+    "source": "outputs/cvpr/table1/v1/assets/cowm/{task}",
+    "training_seed": 3072,
+    "epoch": 10,
+    "methods": ["P0", "P3"],
+    "role": "external_actor_for_candidate_pool_and_closed_loop_b_diagnostics"
+  },
+  "diagnostics": {
+    "candidate_count": 64,
+    "fixed_pool_protocol": {
+      "source": "Table 1 R4-AB actor and the 24 frozen Table 1 legacy cohorts",
+      "states_per_task": 300,
+      "candidate_pool_generated_once_per_task_and_evaluation_seed": true,
+      "flow_steps": 2,
+      "integrator": "euler",
+      "action_bound_mode": "none",
+      "native_environment_action_handling": true,
+      "branch_horizon_primitive_steps": 25,
+      "primary_physical_regret_requires_complete_64_candidate_truth": true,
+      "report_common_valid_subpool_separately": true,
+      "score_with_each_b_checkpoint": true,
+      "b_checkpoints": 48,
+      "po2_baseline_candidate_index": 0,
+      "po2_inner_steps": 2,
+      "po2_step_size": 0.01,
+      "po2_max_rms_offset": 0.2,
+      "po2_branch_count": 14400,
+      "candidate_branch_count": 76800,
+      "push_t_physical_cost": "max(position_l2/20px, circular_angle_abs/(pi/9 rad))",
+      "other_physical_cost": "task-native state difference L2 in task units",
+      "success_label": "frozen Table 1 native environment success event by primitive step 25"
+    },
+    "recorded_control_action_timestep_weight_parity": true,
+    "pred_detach_gradient_path_parity": true,
+    "ab_only_effective_gradient_checks": true
+  },
+  "resources": {
+    "permitted_gpus": [0, 1, 2, 3],
+    "training_vram_margin_gib": 6,
+    "max_workers_per_gpu": 1,
+    "stop_dispatch_free_disk_gib": 20
+  },
+  "outputs": {
+    "root": "outputs/cvpr/table2/v1",
+    "report": "docs/report/cvpr/cvpr_table2_report.md"
+  }
+}

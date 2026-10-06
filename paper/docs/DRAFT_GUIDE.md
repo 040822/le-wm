@@ -4,6 +4,22 @@
 
 范围以现有证据和 Phase1.7 已规划主矩阵为基础。上一轮的 24–48 run 全矩阵不作为论文默认执行前提；Pred-Detach、双 DiT、进一步匹配 A-only 及额外物理量是条件性扩展。缺失时收窄主张，不因占位符自动新增实验。
 
+## 当前初稿修订（2026-10-01，Fast CoWM）
+
+本节覆盖下文旧稿的章节布局和命名说明；历史证据、来源及实验边界仍保留。修改前稿件备份见 `docs/archive/pre_fast_cowm_*.zip`。
+
+- 标题统一为 **CoWM: Coupled Latent World Model for Fast Action Selection and Refinement**。
+- Introduction 按最新讨论组织为五个正文段落及三条贡献：背景与时间预算、搜索与生成的联系、耦合思想、三类训练机制与并行预测、部署及预算评价。
+- 本次使用 edit-article 的组织原则；采用用户确认的完整论文段落结构，覆盖技能中 240 字符短段落的通用建议，既定章节不再重复确认。
+- 三类耦合统一为 parameter-sharing / action-input / action-mediated gradient coupling。Separate-Recorded 与 Shared-Recorded 的 Recorded 指 B 的记录动作输入；不再用易混淆的 GT。
+- `sec/3_method.tex` 保留现有公式，增加决策预算定义与两条梯度路径。生成动作估计仍由记录未来 latent 监督，不宣称已有反事实监督或训练部署分布完全对齐。
+- 主文实验组织成五组表：系统、耦合、排序/修正、推理、预算。物理读出、资源统计及可选真机模板位于 `sec/8_budget_extensions.tex`，由 `supplement.tex` 接入。
+- 各诊断表是每任务实例的模板，不能把异质物理单位合并平均；最终按实际完成任务复制/排版，并给出 seed、counts、区间和配置。
+- `draft-*` 是本轮新占位字段，仍集中定义在 `results.tex`。旧字段及历史数值未删除；主文不再用固定 checkpoint 历史结果替代最终比较。
+- 当前没有声称 10M 总参数、训练更省、同预算普遍更优、所有任务替代 CEM 或完成真机。摘要和引言的结果句明确留有 TBD。
+- 现有参考文献沿用已有稿件；本轮没有新增文献审计。DeWM 版本与引用仍需补齐，不能将匿名稿编造为已发表条目。
+- 本环境未发现 TeX 引擎；源码一致性检查不等于 PDF 编译成功，页数及浮动体布局仍需在 Overleaf/TeX Live 检查。
+
 ## 1. 会话依据与本次取舍
 
 来源会话：`01a0ba23-c649-7b90-8acc-96716f894f9f`（2026-09-19 起）。读取了本地保存的用户与助手消息，而非启动交互式 `codex resume`。会话中的用户决定依次包括：
@@ -15,7 +31,7 @@
 
 本次还对照了 [本地 CoWM 笔记](Couple_lewm.md)、[Phase1.6 报告](../../docs/report/round5/round5_phase1_6_report.md)、[Phase1.7 报告](../../docs/report/round5/round5_phase1_7_report.md)、[Phase1.7 计划](../../docs/plan/round5_phase1_7_plan.md) 和实际结果 JSON。
 
-暂定标题：**CoWM: Coupled Latent World–Action Modeling for Action Selection and Refinement**。
+暂定标题：**CoWM: Coupled Latent World Model for Fast Action Selection and Refinement**。
 CoWM 来自用户现有笔记，仍是工作名。它不修改代码中的 Fast-LeWAM/R4-AB 名称，也不预先承诺“Fast”的比较结论。
 
 核心问题：

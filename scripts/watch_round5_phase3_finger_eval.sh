@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 OUTPUT_ROOT="$ROOT/outputs/round5/phase3"
 RAW_RUN="$ROOT/outputs/20260920_120937_078324_lewm_data_datasets_dmcontrol_finger_turn_hard_2853076"
-RESUME_RUN="$ROOT/outputs/round5_phase3_lewm_finger_resume_epoch9"
+RESUME_RUN="$ROOT/outputs/round5_phase3_lewm_finger_resume_epoch9_tmux"
 ARCHIVE="$OUTPUT_ROOT/training/lewm/finger"
 LEWM_CHECKPOINT="$ARCHIVE/checkpoints/lewm_weights_epoch_10.pt"
 LOG_ROOT="$OUTPUT_ROOT/logs"
@@ -45,6 +45,14 @@ while :; do
 done
 
 echo "[$(date -Iseconds)] epoch10 checkpoint found in $SOURCE_RUN"
+
+# Do not compete with the final validation/checkpoint writer for the training
+# card.  The checkpoint file can become visible before Lightning releases the
+# CUDA context.
+while pgrep -f -- "[p]hase3_finger_resume_epoch9.py" >/dev/null 2>&1; do
+  echo "[$(date -Iseconds)] epoch10 exists but resume process is still releasing resources"
+  sleep 60
+done
 
 # The raw run is written outside the stable Phase 3 layout.  Archive it only
 # after epoch10 exists, then evaluate the archived checkpoint for traceability.

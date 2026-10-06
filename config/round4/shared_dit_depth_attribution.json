@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 4 Shared DiT depth attribution",
+  "training": {
+    "seed": 3072,
+    "epoch": 10,
+    "depths": [6, 8, 12],
+    "checkpoints": {
+      "pusht": {
+        "6": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+        "8": "outputs/round4_shared_dit_depth_d8_pusht_seed3072/checkpoints/r4_ab_d8_seed3072_pusht_weights_epoch_10.pt",
+        "12": "outputs/round4_shared_dit_depth_d12_pusht_seed3072/checkpoints/r4_ab_d12_seed3072_pusht_weights_epoch_10.pt"
+      },
+      "reacher": {
+        "6": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+        "8": "outputs/round4_shared_dit_depth_d8_reacher_seed3072/checkpoints/r4_ab_d8_seed3072_reacher_weights_epoch_10.pt",
+        "12": "outputs/round4_shared_dit_depth_d12_reacher_seed3072/checkpoints/r4_ab_d12_seed3072_reacher_weights_epoch_10.pt"
+      }
+    }
+  },
+  "cohorts": {
+    "legacy": {
+      "kind": "dev",
+      "protocol_variant": "legacy",
+      "paths": {
+        "pusht": "outputs/round3/phase1/cohorts/pusht/legacy_50.json",
+        "reacher": "outputs/round3/phase1/cohorts/reacher/legacy_50.json"
+      },
+      "sha256": {
+        "pusht": "b110bee6afa2f7be372d57b3ef1247a44048c8b1e336491d74a53401ad479b0c",
+        "reacher": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45"
+      }
+    },
+    "reacher_final": {
+      "kind": "final",
+      "protocol_variant": "round3_revised",
+      "paths": {
+        "reacher": "outputs/round3/phase1/cohorts/reacher/final.json"
+      },
+      "sha256": {
+        "reacher": "f81e4830dd2bb80ad1a8109b67873496fa86651ccba63d49ab6d8b0c78b87490"
+      }
+    }
+  },
+  "candidate_pool": {
+    "source_root": "outputs/round5/phase1_5_seed3072_legacy/diagnostics/candidate_pool",
+    "flow_steps": 16,
+    "source_candidate_count": 256,
+    "candidate_count": 64,
+    "candidate_stride": 4,
+    "integrator": "euler",
+    "action_projection": "none",
+    "branch_eval_budget": 50
+  },
+  "closed_loop": {
+    "candidate_count": 64,
+    "flow_steps": 16,
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "cem_protocol": "legacy",
+    "action_bound_mode": "none"
+  },
+  "bootstrap_samples": 10000,
+  "output_root": "outputs/round4_shared_dit_depth_attribution",
+  "report": "docs/report/round4/round4_shared_dit_depth_attribution.md"
+}

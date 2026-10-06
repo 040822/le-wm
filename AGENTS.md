@@ -2,10 +2,9 @@
 
 ## GPU Usage
 
-- Prefer GPU0–3. Before starting a new task, check that the selected GPU has enough remaining VRAM and retain a reasonable safety margin for runtime fluctuations and other workloads.
-- GPU4–7 may be used only with the user's explicit consent, and only for low-VRAM evaluation tasks. This is especially appropriate for evaluations with a large total workload when using the extra GPUs improves concurrency. GPU4–7 must not be used for high-VRAM training tasks.
-- Between 10:00 and 23:00 Beijing time, avoid using GPU4–7 whenever reasonably possible.
-- Every GPU command must explicitly restrict visibility with `CUDA_VISIBLE_DEVICES` to the selected device or devices. Before launching GPU work, verify that the selected IDs comply with the rules above and, when using GPU4–7, that the task is a user-approved low-VRAM evaluation.
+- Prefer GPU0–3; GPU4–7 are also allowed.
+- Before launching each experiment, check that the selected GPU has enough remaining VRAM and retain a reasonable safety margin for runtime fluctuations and other workloads. If VRAM is sufficient, multiple experiments may run concurrently on the same GPU to fully utilize GPU resources.
+- Every GPU command must explicitly restrict visibility with `CUDA_VISIBLE_DEVICES` to the selected device or devices.
 - The sandbox may be unable to detect or access GPUs. If GPU inspection or a GPU task fails for that reason, request privilege escalation and rerun it with the same explicit `CUDA_VISIBLE_DEVICES` restriction.
 
 ## Goal-mode Progress Checks

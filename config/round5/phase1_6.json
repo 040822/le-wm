@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 1.6",
+  "protocol": "round3_revised",
+  "source_config": "config/round5/phase1_5.json",
+  "training": {
+    "model": "R4-AB",
+    "seed": 3072,
+    "epoch": 10,
+    "checkpoints": {
+      "cube": "outputs/round4/ab_seed3072_cube/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "pusht": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "reacher": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "tworoom": "outputs/round4/ab_seed3072_tworoom/checkpoints/r4_ab_seed3072_weights_epoch_10.pt"
+    },
+    "checkpoint_sha256": {
+      "cube": "2748151a2c43c7841246a5fb8ee1fd7915ebbc00bfc27aa1a32b0f9080d92956",
+      "pusht": "62d00096a34e9f0b6da4ceb6a3c61eb350701a7aade5f5e4d2c1ee528b06015e",
+      "reacher": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553",
+      "tworoom": "48d1ed2520ec7142327969eacf1c37b144faec51cfd6c9ce72701a8421bf57c2"
+    }
+  },
+  "cohorts": {
+    "legacy_config": "config/round5/phase1_5.json",
+    "new_seed": 16026,
+    "new_count_per_task": 100,
+    "goal_offset_steps": 25,
+    "max_one_start_per_episode": true,
+    "exclude_initial_success": true,
+    "exclude_registered_historical_episodes": true
+  },
+  "evaluation": {
+    "tasks": ["cube", "pusht", "reacher", "tworoom"],
+    "mechanism_tasks": ["pusht", "reacher"],
+    "seeds": [42, 43],
+    "seed": 42,
+    "goal_offset_steps": 25,
+    "num_eval": 100,
+    "eval_budget": 50,
+    "horizon": 5,
+    "receding_horizon": 5,
+    "action_block": 5,
+    "solver_batch_size": 1,
+    "candidate_batch_size": 64,
+    "proposal_chunk_size": 512,
+    "action_flow_integrator": "euler",
+    "action_bound_mode": "clip",
+    "methods": [
+      {"id": "p0_s2", "mode": "P0", "flow_steps": 2, "candidate_count": 1, "guidance": "none"},
+      {"id": "random64_s2", "mode": "P3", "flow_steps": 2, "candidate_count": 64, "selection_rule": "random", "guidance": "none"},
+      {"id": "p3_s2", "mode": "P3", "flow_steps": 2, "candidate_count": 64, "guidance": "none"},
+      {"id": "p0_po2_s2", "mode": "P0", "flow_steps": 2, "candidate_count": 1, "guidance": "post_opt", "inner_steps": 2, "step_size": 0.01, "max_rms_offset": 0.2},
+      {"id": "p0_gf2_s2", "mode": "P0", "flow_steps": 2, "candidate_count": 1, "guidance": "guided_flow", "inner_steps": 1, "step_size": 0.01, "max_rms_offset": 0.2},
+      {"id": "p3_po5_s2", "mode": "P3", "flow_steps": 2, "candidate_count": 64, "guidance": "post_opt", "inner_steps": 5, "step_size": 0.01, "max_rms_offset": 0.2},
+      {"id": "p1_cem_300x30", "mode": "P1", "cem_samples": 300, "cem_iterations": 30, "cem_topk": 30, "cem_protocol": "cem-clip", "guidance": "none"},
+      {"id": "p2_cem_300x30", "mode": "P2", "flow_steps": 1, "cem_samples": 300, "cem_iterations": 30, "cem_topk": 30, "cem_protocol": "cem-clip", "guidance": "none"},
+      {"id": "p2_small_64x5", "mode": "P2", "flow_steps": 1, "cem_samples": 64, "cem_iterations": 5, "cem_topk": 7, "cem_protocol": "cem-clip", "guidance": "none"}
+    ]
+  },
+  "mechanism": {
+    "flow_steps": 2,
+    "candidates_per_state": 64,
+    "max_candidate_pairs": 128,
+    "bootstrap_samples": 10000,
+    "permutation_samples": 1000,
+    "physical_steps": [5, 25],
+    "controls": ["physical_zero", "normalized_zero", "block_reverse"],
+    "guidance_states_per_task": 50,
+    "guidance_candidates_per_state": 2,
+    "guidance_max_branches": 800,
+    "random_direction_attempts": 32
+  },
+  "short_train": {
+    "tasks": ["pusht", "reacher"],
+    "arms": ["continue", "detach", "recorded"],
+    "seed": 3072,
+    "max_windows": 8192,
+    "max_trajectories": 512,
+    "max_windows_per_trajectory": 16,
+    "updates": 1000,
+    "log_steps": [0, 500, 1000],
+    "batch_size": 128,
+    "learning_rate": 0.00001,
+    "weight_decay": 0.001,
+    "gradient_clip": 1.0,
+    "predicted_action_probability": 0.5,
+    "freeze_encoder_projector": true,
+    "cache_frozen_latents": true,
+    "latent_loss_weight": 1.0,
+    "sigreg_weight": 0.0
+  },
+  "timing": {
+    "methods": "evaluation.methods",
+    "warmup": 10,
+    "runs": 50,
+    "observation_batches": 5,
+    "isolation_gpu_preferred": 3,
+    "retry_interfered_windows": 2
+  },
+  "budget": {
+    "wall_clock_hours": 24,
+    "stop_dispatch_hour": 22,
+    "max_closed_loop_episodes": 9600,
+    "max_candidate_control_branches": 6700,
+    "max_guidance_branches": 800,
+    "max_training_runs": 6,
+    "min_host_available_gib": 64,
+    "max_load_per_cpu": 0.75,
+    "evaluation_envs_per_worker": 8,
+    "max_concurrent_evaluation_workers": 8,
+    "gpu4_7_max_task_memory_gib": 8,
+    "evaluation_memory_margin_gib": 2,
+    "training_memory_margin_gib": 6
+  },
+  "paths": {
+    "output_root": "outputs/round5/phase1_6_seed3072",
+    "report_output": "docs/report/round5/round5_phase1_6_report.md",
+    "paper_tables_dir": "paper/tables/phase1_6",
+    "paper_evidence_snapshot": "paper/docs/phase1_6_evidence_snapshot.json"
+  }
+}

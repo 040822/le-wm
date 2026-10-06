@@ -1,21 +1,14 @@
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Method & Cube & Push-T & Reacher & TwoRoom & Macro \\
+Interface & $N$ & $S$ & $I$ & $K$ & Success (\%) $\uparrow$ & p50 ms $\downarrow$ \\
 \midrule
-\multicolumn{6}{l}{Measured fixed-checkpoint reference (one training seed)} \\
-P0 & 100.0 & 95.5 & 80.0 & 99.0 & 93.6 \\
-Random-64 & 100.0 & 97.5 & 82.0 & 98.0 & 94.4 \\
-P3 & 100.0 & 96.5 & 89.5 & 99.5 & 96.4 \\
-P0+PO & 100.0 & 95.5 & 85.0 & 99.5 & 95.0 \\
-P0+GF & 100.0 & 95.5 & 83.0 & 100.0 & 94.6 \\
-P2 CEM (300$\times$30) & 83.5 & 94.5 & 91.0 & 100.0 & 92.2 \\
-P2-small (64$\times$5) & 88.0 & 95.0 & 83.5 & 100.0 & 91.6 \\
-\midrule
-\multicolumn{6}{l}{Matched-training endpoints (counts reported separately)} \\
-P0 & --- & \PaperResult{infer-p0-pusht} & \PaperResult{infer-p0-reacher} & --- & \PaperResult{infer-p0-macro} \\
-Random-64 & --- & \PaperResult{infer-random-pusht} & \PaperResult{infer-random-reacher} & --- & \PaperResult{infer-random-macro} \\
-P3 & --- & \PaperResult{infer-p3-pusht} & \PaperResult{infer-p3-reacher} & --- & \PaperResult{infer-p3-macro} \\
-P0+PO & --- & \PaperResult{infer-po-pusht} & \PaperResult{infer-po-reacher} & --- & \PaperResult{infer-po-macro} \\
-P0+GF (conditional) & --- & \PaperResult{infer-gf-pusht} & \PaperResult{infer-gf-reacher} & --- & \PaperResult{infer-gf-macro} \\
+P0 & 1 & S & 0 & 0 & \PaperResult{draft-infer-p0-sr} & \PaperResult{draft-infer-p0-p50} \\
+Random-N & N & S & 0 & 0 & \PaperResult{draft-infer-random-sr} & \PaperResult{draft-infer-random-p50} \\
+P1: random CEM & N & 0 & I & 0 & \PaperResult{draft-infer-p1-sr} & \PaperResult{draft-infer-p1-p50} \\
+P2: A-initialized CEM & N & S & I & 0 & \PaperResult{draft-infer-p2-sr} & \PaperResult{draft-infer-p2-p50} \\
+P3: selection & N & S & 0 & 0 & \PaperResult{draft-infer-p3-sr} & \PaperResult{draft-infer-p3-p50} \\
+P0-PO & 1 & S & 0 & K & \PaperResult{draft-infer-po-sr} & \PaperResult{draft-infer-po-p50} \\
+P0-GF & 1 & S & 0 & K & \PaperResult{draft-infer-gf-sr} & \PaperResult{draft-infer-gf-p50} \\
+P3 then PO (optional) & N & S & 0 & K & \PaperResult{draft-infer-select-po-sr} & \PaperResult{draft-infer-select-po-p50} \\
 \bottomrule
 \end{tabular}

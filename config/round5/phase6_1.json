@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "experiment": "Round 5 Phase 6.1 conditional flow matching for Stage B",
+  "protocol": "legacy",
+  "tasks": {
+    "pusht": {
+      "dataset": "data/datasets/pusht.h5",
+      "baseline_checkpoint": "outputs/round4/ab_seed3072_pusht/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "baseline_checkpoint_sha256": "62d00096a34e9f0b6da4ceb6a3c61eb350701a7aade5f5e4d2c1ee528b06015e",
+      "cohort": "outputs/round3/phase1/cohorts/pusht/legacy_50.json",
+      "cohort_sha256": "b110bee6afa2f7be372d57b3ef1247a44048c8b1e336491d74a53401ad479b0c",
+      "dataset_sha256": "b6ebd9ac94bbe9e383f6e7a9cd92d74e9aa665ea57b758ed3717b0ee7df8d4fb",
+      "action_dim": 10
+    },
+    "reacher": {
+      "dataset": "data/datasets/dmcontrol/reacher.h5",
+      "baseline_checkpoint": "outputs/round4/ab_seed3072_reacher/checkpoints/r4_ab_seed3072_weights_epoch_10.pt",
+      "baseline_checkpoint_sha256": "087991339c9499d10c1a58a28e72d07c7dfd819d5f072c67bfd0169acaa83553",
+      "cohort": "outputs/round3/phase1/cohorts/reacher/legacy_50.json",
+      "cohort_sha256": "ff4f26ad3fd809e59e1b748c7c93c33a8e51b48e13d2505e89e5909d6121bf45",
+      "dataset_sha256": "85a7dddfa1801302abcb175a80a23bb69c78291dd977ce40d69aedcb9123da06",
+      "action_dim": 10
+    }
+  },
+  "training": {
+    "config": "config/train/round5_phase6_1_fm.yaml",
+    "seed": 3072,
+    "epochs": 10,
+    "effective_batch_size": 128,
+    "micro_batch_size": 128,
+    "gradient_accumulation": 1,
+    "latent_flow_steps": 2,
+    "output_root": "outputs/round5/phase6_1/training"
+  },
+  "evaluation": {
+    "seed": 42,
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "action_horizon_blocks": 5,
+    "action_block_env_steps": 5,
+    "execution_and_score_env_steps": [25, 10],
+    "action_flow_steps": 2,
+    "action_flow_integrator": "euler",
+    "best_of_n_candidates": 64,
+    "candidate_batch_size": 64,
+    "proposal_chunk_size": 512,
+    "solver_batch_size": 1,
+    "cem_num_samples": 300,
+    "cem_topk": 30,
+    "cem_iterations": 30,
+    "cem_var_scale": 1.0,
+    "action_bound_mode": "none",
+    "latent_flow_steps": 2,
+    "latent_flow_samples": 1
+  },
+  "protocols": [
+    {"mode": "P0", "guidance": "none"},
+    {"mode": "P0", "guidance": "guided_flow"},
+    {"mode": "P0", "guidance": "post_opt"},
+    {"mode": "P1", "guidance": "none"},
+    {"mode": "P2", "guidance": "none"},
+    {"mode": "P2", "guidance": "guided_flow"},
+    {"mode": "P2", "guidance": "post_opt"},
+    {"mode": "P3", "guidance": "none"},
+    {"mode": "P3", "guidance": "guided_flow"},
+    {"mode": "P3", "guidance": "post_opt"},
+    {"mode": "P3", "guidance": "post_opt_refine"}
+  ],
+  "guidance": {
+    "step_size": 0.01,
+    "gf_last_steps": 2,
+    "gf_inner_steps": 1,
+    "po_inner_steps": 2,
+    "max_rms_offset": 0.2
+  },
+  "timing": {
+    "batch_sizes": [1, 50],
+    "warmup": 10,
+    "runs": 50,
+    "environment_stepping_included": false
+  },
+  "output_root": "outputs/round5/phase6_1",
+  "report_output": "docs/report/round5/round5_phase6_1_report.md",
+  "gpu_policy": "Explicitly restrict each GPU process with CUDA_VISIBLE_DEVICES; prefer GPUs 0-3, allow 4-7. Preflight remaining VRAM with at least 8 GiB free before each experiment."
+}

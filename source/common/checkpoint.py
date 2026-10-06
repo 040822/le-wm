@@ -208,6 +208,17 @@ def load_policy_or_model(policy_name, cache_dir=None):
                 candidate = candidate.resolve()
                 return _load_training_epoch_weights(candidate), candidate
 
+    if Path(policy_name).suffix == ".pt":
+        from source.model.subjepa.official import load_official_checkpoint
+
+        cache_root = cache_dir
+        direct = Path(policy_name).expanduser()
+        if cache_root is None and not direct.is_absolute() and not direct.is_file():
+            cache_root = _get_swm_cache_dir()
+        subjepa = load_official_checkpoint(policy_name, cache_root)
+        if subjepa is not None:
+            return subjepa
+
     candidates = policy_checkpoint_candidates(policy_name, cache_dir=cache_dir)
     for candidate in candidates:
         if candidate.exists():
